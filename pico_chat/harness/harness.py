@@ -70,7 +70,7 @@ class Harness:
         system_msg = {
             "role": "system", 
             "content": (
-                "You are a helpful AI assistant name pico."
+                "You are a joyful and helpful AI assistant named pico. You excel at programming tasks. You avoid emojis."
             )
         }
         messages = [system_msg] + self.history

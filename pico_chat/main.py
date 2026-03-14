@@ -13,7 +13,7 @@ from pico_chat.ui.chat import chatTUI
 def main():
     """
     Main entry point for Open-Clank.
-    Wrapps the clankTUI in an async event loop and handles keyboard interrupts gracefully.
+    Wrapps the chatTUI in an async event loop and handles keyboard interrupts gracefully.
     """
     # Initialize harness first
     print("Initializing Open-Clank Harness...")
@@ -21,7 +21,7 @@ def main():
     print() 
     
     try:
-        tui = ClankTUI(harness)
+        tui = chatTUI(harness)
         asyncio.run(tui.run())
     except KeyboardInterrupt:
         pass

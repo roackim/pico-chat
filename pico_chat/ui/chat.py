@@ -104,11 +104,11 @@ class chatTUI:
         self.portrait_panel.set_portrait("clank_term_text")
         self.input_panel.set_on_submit(self.on_user_submit)
         
-        # Left Column
-        left_col = Hsplit([
-            self.portrait_panel.get_component(),
-            self.stats_panel.get_component()
-        ], ["9c", "100%"])
+        # # Left Column
+        # left_col = Hsplit([
+        #     self.portrait_panel.get_component(),
+        #     self.stats_panel.get_component()
+        # ], ["9c", "100%"])
 
         # Right Column
         right_col = Hsplit([
@@ -117,7 +117,8 @@ class chatTUI:
         ], ["100%", "3c"])
 
         # Main Layout
-        root = Vsplit([left_col, right_col], ["20c", "100%"])
+        # root = Vsplit([left_col, right_col], ["20c", "100%"])
+        root = right_col # For Phase 1, we focus on the chat and input panels only.
         self.compositor = Compositor(root, fps=TARGET_FPS)
         
         # Set compositor for all panels
