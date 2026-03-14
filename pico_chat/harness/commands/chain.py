@@ -26,13 +26,16 @@ async def execute_chain(cmd_string: str, initial_stdin: Optional[str] = None) ->
     Core executor that parses the string and chains commands.
     Implements Layer 1: Lossless data flow.
     """
-    # Simple shlex split can't handle complex ops directly,
-    # but we can manually split on the main shell operators.
+    # Handle output redirection (>) before pipeline parsing
+    output_file = None
+    if '>' in cmd_string:
+        # Simple redirection parsing: split on last >
+        parts = cmd_string.rsplit('>', 1)
+        if len(parts) == 2:
+            cmd_string = parts[0].strip()
+            output_file = parts[1].strip()
     
-    # Placeholder implementation:
-    # 1. Split on ; or && or || (not yet)
-    # 2. Split on |
-    
+    # Split on pipe operator
     stages = [s.strip() for s in cmd_string.split('|')]
     
     current_stdin = initial_stdin
@@ -68,5 +71,22 @@ async def execute_chain(cmd_string: str, initial_stdin: Optional[str] = None) ->
             
         except Exception as e:
             return "", f"parser error in stage '{stage}': {str(e)}", 1, total_duration
+    
+    # Handle output redirection if specified
+    if output_file:
+        try:
+            # Use the write command to save output
+            import os
+            dir_path = os.path.dirname(os.path.abspath(output_file))
+            if dir_path:
+                os.makedirs(dir_path, exist_ok=True)
+            
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(final_stdout)
+            
+            # Return success message instead of the content
+            final_stdout = f"Output written to {output_file}"
+        except Exception as e:
+            return "", f"redirection error: {str(e)}", 1, total_duration
             
     return final_stdout, final_stderr, last_exit_code, total_duration

@@ -40,17 +40,25 @@ def cat_command(args: List[str], stdin: Optional[str] = None) -> Tuple[str, str,
     except Exception as e:
         return "", f"cat: error: {str(e)}", 1
 
-@router.command("write", description="Write stdin to file. Usage: write <path>")
+@router.command("write", description="Write content to file. Usage: write <path> [content] OR echo text | write <path>")
 def write_command(args: List[str], stdin: Optional[str] = None) -> Tuple[str, str, int]:
     if not args:
-        return "", "usage: write <path> (requires stdin content)", 1
+        return "", "usage: write <path> [content]", 1
     
     path = args[0]
-    content = stdin if stdin is not None else ""
+    # Accept content from either stdin OR as second argument
+    if len(args) > 1:
+        content = " ".join(args[1:])
+    elif stdin is not None:
+        content = stdin
+    else:
+        content = ""
     
     try:
         # Create directory if it doesn't exist
-        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        dir_path = os.path.dirname(os.path.abspath(path))
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
         
         with open(path, 'w', encoding='utf-8') as f:
             f.write(content)
@@ -84,6 +92,15 @@ def grep_command(args: List[str], stdin: Optional[str] = None) -> Tuple[str, str
         return "\n".join(matches), "", 0
     except Exception as e:
         return "", f"grep: invalid pattern: {str(e)}", 1
+
+@router.command("echo", description="Print text to stdout. Usage: echo <text>")
+def echo_command(args: List[str], stdin: Optional[str] = None) -> Tuple[str, str, int]:
+    if args:
+        return " ".join(args), "", 0
+    elif stdin is not None:
+        return stdin, "", 0
+    else:
+        return "", "", 0
 
 @router.command("help", description="Show available commands.")
 def help_command(args: List[str], stdin: Optional[str] = None) -> str:

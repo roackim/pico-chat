@@ -25,8 +25,6 @@ def main():
         asyncio.run(tui.run())
     except KeyboardInterrupt:
         pass
-    finally:
-        harness.stop()
     return 0
 
 

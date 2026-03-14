@@ -98,7 +98,7 @@ class chatTUI:
         """Run the TUI application."""
         # Start the harness services if available
         if hasattr(self.agent, 'start'):
-            await self.agent.start()
+            self.agent.start()
             
         # Set up panels
         self.portrait_panel.set_portrait("clank_term_text")
@@ -127,15 +127,20 @@ class chatTUI:
         self.chat_history_panel.set_compositor(self.compositor)
 
         # Run all tasks
-        done, pending = await asyncio.wait(
-            [
-                asyncio.create_task(self.compositor.run()),
-                asyncio.create_task(self.agent_worker()),
-                asyncio.create_task(self.stats_panel.update_loop()),
-                asyncio.create_task(self.portrait_panel.update_loop()),
-            ],
-            return_when=asyncio.FIRST_COMPLETED
-        )
-        
-        for task in pending:
-            task.cancel()
+        try:
+            done, pending = await asyncio.wait(
+                [
+                    asyncio.create_task(self.compositor.run()),
+                    asyncio.create_task(self.agent_worker()),
+                    asyncio.create_task(self.stats_panel.update_loop()),
+                    asyncio.create_task(self.portrait_panel.update_loop()),
+                ],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+            
+            for task in pending:
+                task.cancel()
+        finally:
+            # Clean shutdown
+            if hasattr(self.agent, 'stop'):
+                self.agent.stop()

@@ -47,11 +47,11 @@ class Harness:
         # and then calling set_user_response.
         return await self._user_response_queue.get()
 
-    async def start(self):
+    def start(self):
         """No-op: No background tasks needed."""
         pass
 
-    async def stop(self):
+    def stop(self):
         """No-op: No background tasks to cancel."""
         pass
 
@@ -70,7 +70,7 @@ class Harness:
         system_msg = {
             "role": "system", 
             "content": (
-                "You are a joyful and helpful AI assistant named pico. You excel at programming tasks. You avoid emojis."
+                "You are a helpful AI assistant named Pico. Avoid using emojis. Make concise answers when possible."
             )
         }
         messages = [system_msg] + self.history
@@ -155,6 +155,10 @@ class Harness:
                         })
                     assistant_msg["tool_calls"] = tool_calls_list
                 
+                # Log tool calls from LLM
+                if tool_calls_list:
+                    self.debug_stream.log("TOOL_CALLS", tool_calls_list)
+                
                 self.history.append(assistant_msg)
                 messages.append(assistant_msg) # Keep in sync for next loop iteration
                 
@@ -208,6 +212,9 @@ class Harness:
                             result = f"Error executing {func_name}: {str(e)}"
                     else:
                         result = f"Error: Tool '{func_name}' not found"
+                    
+                    # Log tool result
+                    self.debug_stream.log("TOOL_RESULT", {"call_id": call_id, "result": result})
                         
                     # Append tool result to history
                     tool_msg = {
