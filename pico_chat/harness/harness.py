@@ -1,11 +1,16 @@
+import asyncio
 import json
 import logging
-from typing import AsyncGenerator, Any, Dict, List
+from typing import AsyncGenerator, Any, Dict, List, Optional
 
 from openai import AsyncOpenAI
 from pico_chat.config import get_config
 from pico_chat.harness.llm_status import AgentState
 from pico_chat.harness.debug import get_debug_stream
+
+# Import the new unified tool and core commands
+from pico_chat.harness.tools.run_tool import RunTool
+import pico_chat.harness.commands.core # Side-effect: registers decorators
 
 # Re-implementation based on minichat.py for maximum performance and simplicity
 # Discarding complex Gateway logic in favor of direct AsyncOpenAI usage.
@@ -17,9 +22,10 @@ class Harness:
         self.state = AgentState.IDLE
         self.history = []
         
-        # Tools initialization (simulating minichat.py)
-        self.tools_map = { } # TODO: currently empty
-        self.tool_schemas = [tool.get_schema() for tool in self.tools_map.values()]
+        # Tools initialization (Single unified run() tool)
+        self.tools_map = {
+            "run": RunTool(self)
+        }
         
         # Direct Client Initialization (No Polling, No Gateway)
         self.client = AsyncOpenAI(
@@ -27,6 +33,19 @@ class Harness:
             api_key=self.config.api_key,
         )
         self.debug_stream.log("INIT", f"Connected to {self.config.base_url}")
+        
+        # User input queue for tool-provoked blocking (e.g. ask command)
+        self._user_response_queue = asyncio.Queue()
+
+    def set_user_response(self, text: str):
+        """Called by the UI when a response to a tool's prompt is ready."""
+        self._user_response_queue.put_nowait(text)
+
+    async def _wait_for_user_input(self, prompt: str) -> str:
+        """Wait for the user to provide text via the UI."""
+        # Note: The UI is responsible for seeing the prompt (yielded below) 
+        # and then calling set_user_response.
+        return await self._user_response_queue.get()
 
     async def start(self):
         """No-op: No background tasks needed."""
@@ -47,14 +66,13 @@ class Harness:
         # Add user message to history
         self.history.append({"role": "user", "content": user_input})
         
-        # Construct full message list with system prompt
-        # Note: minichat.py keeps a running list of messages. We do the same via self.history.
-        # Ensure system prompt is at the start (or just rely on clean history logic from outside if reset?)
-        # For now, prepending system prompt if history doesn't have it (or just always prepending for context window mgmt later)
-        # minichat.py initializes messages list once. We'll prepend system prompt for the API call if it's not in history.
-        # But wait, self.history includes user/assistant turns.
-        
-        system_msg = {"role": "system", "content": "You are a helpful AI assistant with access to tools. Use them when necessary."}
+        # System prompt - Minimal (Progressive Discovery principle)
+        system_msg = {
+            "role": "system", 
+            "content": (
+                "You are a helpful AI assistant name pico."
+            )
+        }
         messages = [system_msg] + self.history
 
         # Agent Loop (Handle Multi-step Tool Calls)
@@ -62,11 +80,14 @@ class Harness:
             self.state = AgentState.THINKING
             self.debug_stream.log("REQUEST", messages)
             
+            # Tools are dynamic, so we recalculate schemas for the CLI architecture
+            tool_schemas = [tool.get_schema() for tool in self.tools_map.values()] if self.tools_map else None
+
             try:
                 stream = await self.client.chat.completions.create(
                     model=self.config.model,
                     messages=messages,
-                    tools=self.tool_schemas,
+                    tools=tool_schemas,
                     stream=True
                 )
                 
@@ -157,10 +178,30 @@ class Harness:
                         try:
                             # Parse args
                             args = json.loads(args_str)
-                            # Execute
-                            result = self.tools_map[func_name].execute(**args)
+                            
+                            # Check for user input required (e.g. 'ask' command in CLI)
+                            # Or if the tool itself is marked as 'suspending' 
+                            # If func is async, we await it
+                            func = self.tools_map[func_name]
+                            
+                            if hasattr(func, "is_blocking") and func.is_blocking:
+                                # We signal the UI that we are waiting for user input
+                                prompt = args.get("prompt", "Please provide input:")
+                                yield f"\n\033[94m[System: Waiting for user input: {prompt}]\033[0m\n"
+                                
+                                # Blocking actually happens here
+                                user_resp = await self._wait_for_user_input(prompt)
+                                result = f"User responded with: {user_resp}"
+                            else:
+                                # Execute normally (sync or async if we support both)
+                                if asyncio.iscoroutinefunction(func.execute):
+                                    result = await func.execute(**args)
+                                else:
+                                    result = func.execute(**args)
+                            
                             if not isinstance(result, str):
                                 result = str(result)
+
                         except json.JSONDecodeError:
                              result = f"Error: Invalid JSON arguments: {args_str}"
                         except Exception as e:

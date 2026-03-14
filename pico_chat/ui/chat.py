@@ -14,7 +14,7 @@ from pico_chat.ui.chat_history_panel import ChatHistoryPanel
 TARGET_FPS = 30
 
 
-class ClankTUI:
+class chatTUI:
     """Terminal UI for the agent."""
 
     def __init__(self, agent):
