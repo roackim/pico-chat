@@ -36,11 +36,12 @@ class Component(ABC):
         pass
 
 class TextComponent(Component):
-    def __init__(self, text: str, id: Optional[str] = None, fg=None, bg=None):
+    def __init__(self, text: str, id: Optional[str] = None, fg=None, bg=None, auto_scroll_bottom: bool = False):
         super().__init__(id)
         self.text = text
         self.fg = fg
         self.bg = bg
+        self.auto_scroll_bottom = auto_scroll_bottom
 
     def render(self, buffer: Buffer):
         """
@@ -49,9 +50,16 @@ class TextComponent(Component):
         ANSI sequences don't corrupt the grid layout.
         """
         lines = self.text.splitlines()
-        for i, line in enumerate(lines):
-            if i < self.height:
-                buffer.write_str(self.x, self.y + i, line, fg=self.fg, bg=self.bg, max_width=self.width)
+        
+        # If auto_scroll_bottom is enabled and there are more lines than height,
+        # show the last lines that fit
+        start_line = 0
+        if self.auto_scroll_bottom and len(lines) > self.height:
+            start_line = len(lines) - self.height
+        
+        for i in range(start_line, min(len(lines), start_line + self.height)):
+            line_index = i - start_line
+            buffer.write_str(self.x, self.y + line_index, lines[i], fg=self.fg, bg=self.bg, max_width=self.width)
 
     def update(self, text: str):
         self.text = text

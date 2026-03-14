@@ -42,7 +42,7 @@ class ChatHistoryPanel:
         """Initialize the chat history panel."""
         self.conversation = []
         self.chat_history = WELCOME_MESSAGE
-        self.component = TextComponent(self.chat_history, id="history")
+        self.component = TextComponent(self.chat_history, id="history", auto_scroll_bottom=True)
         self.box = Box(self.component, title="Chat History")
         self.compositor: Optional[object] = None
 

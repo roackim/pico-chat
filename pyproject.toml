@@ -1,0 +1,50 @@
+[project]
+name = "pico_chat"
+version = "0.1.0"
+description = "Local AI assistant in the command line"
+requires-python = ">= 3.10"
+authors = [{name = "Joackim Orciere", email = "joackim.orciere@proton.me"}]
+dependencies = []
+
+[project.optional-dependencies]
+git = [
+    # insert github dependencies
+]
+
+[build-system]
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = {find = {}}
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.pixi.pypi-dependencies]
+pico_chat = { path = ".", editable = true, extras = ["git"] }
+
+[tool.pixi.tasks]
+tests = "pytest tests/"
+minichat = "python minichat.py"
+app = "python pico_chat/main.py"
+
+[tool.pixi.dependencies]
+ipykernel = "*"
+pytest = "*"
+pytest-html = "*"
+matplotlib-base = "*"
+pytest-xdist = "*"
+pillow = "*"
+openai = "*"
+toml = "*"
+
+[tool.pixi.environments]
+default = { features = ['sys', 'sub', 'dev'], solve-group = "default" }
+
+[tool.pixi.feature.sys.dependencies]
+
+[tool.pixi.feature.dev.dependencies]
+
+[tool.pixi.feature.sub.dependencies]

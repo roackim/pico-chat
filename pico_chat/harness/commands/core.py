@@ -105,3 +105,108 @@ def echo_command(args: List[str], stdin: Optional[str] = None) -> Tuple[str, str
 @router.command("help", description="Show available commands.")
 def help_command(args: List[str], stdin: Optional[str] = None) -> str:
     return router.get_help()
+
+@router.command("wc", description="Count lines, words, and bytes. Usage: wc [-l|-w|-c] [path]")
+def wc_command(args: List[str], stdin: Optional[str] = None) -> Tuple[str, str, int]:
+    flag = None
+    content = ""
+    
+    # Parse flags
+    if args and args[0].startswith('-'):
+        flag = args[0]
+        args = args[1:]
+    
+    # Get content
+    if args:
+        path = args[0]
+        try:
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+        except Exception as e:
+            return "", f"wc: {path}: {str(e)}", 1
+    elif stdin is not None:
+        content = stdin
+    else:
+        return "", "usage: wc [-l|-w|-c] [path]", 1
+    
+    lines = len(content.splitlines())
+    words = len(content.split())
+    chars = len(content)
+    
+    if flag == '-l':
+        return str(lines), "", 0
+    elif flag == '-w':
+        return str(words), "", 0
+    elif flag == '-c':
+        return str(chars), "", 0
+    else:
+        return f"{lines} {words} {chars}", "", 0
+
+@router.command("head", description="Output first N lines. Usage: head [-n N] [path]")
+def head_command(args: List[str], stdin: Optional[str] = None) -> Tuple[str, str, int]:
+    n = 10  # Default
+    content = ""
+    
+    # Parse -n flag
+    if args and args[0] == '-n' and len(args) > 1:
+        try:
+            n = int(args[1])
+            args = args[2:]
+        except ValueError:
+            return "", "head: invalid number", 1
+    elif args and args[0].startswith('-') and args[0][1:].isdigit():
+        n = int(args[0][1:])
+        args = args[1:]
+    
+    # Get content
+    if args:
+        path = args[0]
+        try:
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+        except Exception as e:
+            return "", f"head: {path}: {str(e)}", 1
+    elif stdin is not None:
+        content = stdin
+    else:
+        return "", "usage: head [-n N] [path]", 1
+    
+    lines = content.splitlines()
+    return "\n".join(lines[:n]), "", 0
+
+@router.command("tail", description="Output last N lines. Usage: tail [-n N] [path]")
+def tail_command(args: List[str], stdin: Optional[str] = None) -> Tuple[str, str, int]:
+    n = 10  # Default
+    content = ""
+    
+    # Parse -n flag
+    if args and args[0] == '-n' and len(args) > 1:
+        try:
+            n = int(args[1])
+            args = args[2:]
+        except ValueError:
+            return "", "tail: invalid number", 1
+    elif args and args[0].startswith('-') and args[0][1:].isdigit():
+        n = int(args[0][1:])
+        args = args[1:]
+    
+    # Get content
+    if args:
+        path = args[0]
+        try:
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                content = f.read()
+        except Exception as e:
+            return "", f"tail: {path}: {str(e)}", 1
+    elif stdin is not None:
+        content = stdin
+    else:
+        return "", "usage: tail [-n N] [path]", 1
+    
+    lines = content.splitlines()
+    return "\n".join(lines[-n:]), "", 0
+
+# Note: The 'ask' command is intentionally not implemented as a CLI command
+# because it requires deep integration with the UI loop. Instead, it should be
+# implemented as a separate tool at the harness level if needed.
+# For now, agents can ask questions through their regular text responses.
