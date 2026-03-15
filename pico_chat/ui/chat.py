@@ -67,6 +67,9 @@ class chatTUI:
                 except Exception as e:
                      self.chat_history_panel.add_message(f"\n\033[31m[Error]: {str(e)}\033[0m", append=True)
                 
+                # Finalize the message to render markdown now that streaming is complete
+                self.chat_history_panel.finalize_last_message()
+                
                 # Ensure we end with a newline after the agent finishes
                 if not self.chat_history_panel.get_history().endswith("\n"):
                     self.chat_history_panel.add_message("\n", append=True)

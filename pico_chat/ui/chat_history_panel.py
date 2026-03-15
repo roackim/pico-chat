@@ -6,6 +6,8 @@ from wcwidth import wcswidth
 
 from pico_chat.ui.tui.component import TextComponent, Box
 
+# Simple markdown formatting with ANSI codes
+
 
 WELCOME_MESSAGE = "Welcome to Pico-Chat!\n"
 
@@ -52,6 +54,32 @@ class Message:
         self.left_padding = left_padding
         self.formatted_text = self._format_line_wrap()
     
+    def _contains_markdown(self, text: str) -> bool:
+        """Detect if text contains markdown syntax.
+        
+        Looks for common markdown patterns:
+        - Code blocks (```)
+        - Bold (**text**)
+        - Italic (*text*)
+        - Inline code (`code`)
+        - Headers (# ## ###)
+        - Lists (- or 1.)
+        """
+        markdown_patterns = [
+            r'```',           # Code blocks
+            r'\*\*\w',        # Bold
+            r'\*\w',          # Italic (but not just *)
+            r'`\w',           # Inline code
+            r'^\s*#{1,6}\s',  # Headers
+            r'^\s*[-*+]\s',   # Bullet lists
+            r'^\s*\d+\.\s',   # Numbered lists
+        ]
+        
+        for pattern in markdown_patterns:
+            if re.search(pattern, text, re.MULTILINE):
+                return True
+        return False
+    
     def _format_line_wrap(self) -> str:
         """Format the message text with smart word wrapping.
         
@@ -63,6 +91,7 @@ class Message:
         if self.max_width is None or self.max_width <= 0:
             return self.base_text
         
+        # Otherwise, do normal word wrapping
         # Detect if there's a prefix like "user: " or "pico: " at the start
         # and calculate appropriate padding for continuation lines
         padding_width = self.left_padding
@@ -180,7 +209,7 @@ class Message:
         return "\n".join(lines)
     
     def _split_word_at_width(self, word: str, max_width: int) -> tuple[str, str]:
-        """Split a word at a specific width.
+        """Split a word at a specific width, preserving ANSI escape codes.
         
         Args:
             word: The word to split
@@ -193,21 +222,40 @@ class Message:
             return ("", word)
         
         first_part = ""
-        for i, char in enumerate(word):
-            char_width = display_width(char)
-            current_width = display_width(first_part)
+        i = 0
+        visible_width = 0
+        
+        while i < len(word):
+            # Check if we're at an ANSI escape sequence
+            if word[i:i+1] == '\x1b':
+                # Find the end of the ANSI sequence
+                match = ANSI_ESCAPE.match(word[i:])
+                if match:
+                    # Add the entire ANSI sequence to first_part (it has zero width)
+                    ansi_code = match.group()
+                    first_part += ansi_code
+                    i += len(ansi_code)
+                    continue
             
-            if current_width + char_width > max_width:
+            # Regular character - check if it fits
+            char = word[i]
+            char_width = display_width(char)
+            
+            if visible_width + char_width > max_width:
                 # Stop here, return what we have
                 return (first_part, word[i:])
             
             first_part += char
+            visible_width += char_width
+            i += 1
         
         # Entire word fits
         return (word, "")
     
     def _break_long_word(self, word: str, max_width: int, padding_width: int) -> list[str]:
         """Break a word that's too long into chunks that fit within max_width.
+        
+        Preserves ANSI escape codes and treats them as zero-width.
         
         Args:
             word: The word to break
@@ -219,20 +267,37 @@ class Message:
         """
         chunks = []
         current_chunk = ""
+        visible_width = 0
+        i = 0
         
-        # Process word character by character
-        for char in word:
+        while i < len(word):
+            # Check if we're at an ANSI escape sequence
+            if word[i:i+1] == '\x1b':
+                # Find the end of the ANSI sequence
+                match = ANSI_ESCAPE.match(word[i:])
+                if match:
+                    # Add the entire ANSI sequence to current chunk (zero width)
+                    ansi_code = match.group()
+                    current_chunk += ansi_code
+                    i += len(ansi_code)
+                    continue
+            
+            # Regular character
+            char = word[i]
             char_width = display_width(char)
-            current_width = display_width(current_chunk)
             
             # Check if adding this character would exceed max_width
-            if current_width + char_width > max_width:
+            if visible_width + char_width > max_width:
                 # Save current chunk and start a new one
                 if current_chunk:
                     chunks.append(current_chunk)
                 current_chunk = char
+                visible_width = char_width
             else:
                 current_chunk += char
+                visible_width += char_width
+            
+            i += 1
         
         # Add remaining chunk
         if current_chunk:
@@ -279,16 +344,18 @@ class ChatHistoryTextComponent(TextComponent):
 class ChatHistoryPanel:
     """Manages the chat history display panel with dynamic width support."""
 
-    def __init__(self, max_width: int = 80, left_padding: int = 0):
+    def __init__(self, max_width: int = 80, left_padding: int = 0, enable_markdown: bool = True):
         """Initialize the chat history panel.
         
         Args:
             max_width: Initial maximum width for message line wrapping (will be updated dynamically)
             left_padding: Number of spaces to pad continuation lines (0 = auto-detect)
+            enable_markdown: Enable automatic markdown detection and rendering (default True)
         """
         self.messages = []
         self.max_width = max_width
         self.left_padding = left_padding
+        self.enable_markdown = enable_markdown
         self.max_messages = 150  # Maximum number of messages to keep
         
         # Add welcome message
@@ -356,8 +423,12 @@ class ChatHistoryPanel:
             last_msg.base_text += message
             last_msg.formatted_text = last_msg._format_line_wrap()
         else:
-            # Create a new message with padding
-            new_message = Message(message, max_width=self.max_width, left_padding=self.left_padding)
+            # Create a new message
+            new_message = Message(
+                message, 
+                max_width=self.max_width, 
+                left_padding=self.left_padding
+            )
             self.messages.append(new_message)
             
             # Keep only last max_messages
@@ -367,6 +438,115 @@ class ChatHistoryPanel:
         # Update the rendered history
         self.chat_history = self._render_messages()
             
+        if self.compositor:
+            self.compositor.update_component("history", self.chat_history)
+    
+    def _contains_markdown(self, text: str) -> bool:
+        """Detect if text contains markdown syntax.
+        
+        Looks for common markdown patterns:
+        - Code blocks (```)
+        - Bold (**text**)
+        - Italic (*text*)
+        - Inline code (`code`)
+        - Headers (# ## ###)
+        - Lists (- or 1.)
+        """
+        markdown_patterns = [
+            r'```',           # Code blocks
+            r'\*\*\w',        # Bold
+            r'\*\w',          # Italic (but not just *)
+            r'`\w',           # Inline code
+            r'^\s*#{1,6}\s',  # Headers
+            r'^\s*[-*+]\s',   # Bullet lists
+            r'^\s*\d+\.\s',   # Numbered lists
+        ]
+        
+        for pattern in markdown_patterns:
+            if re.search(pattern, text, re.MULTILINE):
+                return True
+        return False
+    
+    def _apply_simple_markdown(self, text: str) -> str:
+        """Apply simple markdown formatting using ANSI codes.
+        
+        Formats:
+        - **bold** → ANSI bold
+        - *italic* → ANSI italic
+        - `code` → yellow color
+        - ```code blocks``` → plain indented text (stub)
+        - # Headers → yellow/gold color + bold
+        - - Lists → bullet points (•)
+        
+        Args:
+            text: Raw text with markdown
+            
+        Returns:
+            Text with ANSI codes applied
+        """
+        # Strip any ANSI prefix (like "pico: ") and process separately
+        prefix_pattern = r'^(\x1B\[[0-9;]*m)*([^:]+:)(\x1B\[[0-9;]*m)*\s'
+        prefix_match = re.match(prefix_pattern, text)
+        
+        if prefix_match:
+            # Get clean prefix without ANSI
+            full_prefix = text[:prefix_match.end()]
+            clean_prefix = strip_ansi(full_prefix)
+            content = text[prefix_match.end():]
+        else:
+            clean_prefix = ""
+            content = text
+        
+        # Process code blocks first (multiline) - just remove markers for now (stub)
+        def format_code_block(match):
+            lang = match.group(1) or 'text'
+            code = match.group(2)
+            # Stub: Just return code as-is, indented
+            lines = code.split('\n')
+            formatted_lines = [f' {line}' for line in lines]
+            return '\n'.join(formatted_lines)
+        
+        content = re.sub(r'```(\w*)\n(.+?)\n```', format_code_block, content, flags=re.DOTALL)
+        
+        # Inline code: `code` → yellow
+        content = re.sub(r'`([^`]+)`', r'\033[38;5;227m\1\033[0m', content)
+        
+        # Bold: **text** → bold
+        content = re.sub(r'\*\*(.+?)\*\*', r'\033[1m\1\033[22m', content)
+        
+        # Italic: *text* → italic
+        content = re.sub(r'(?<!\*)\*([^\*]+?)\*(?!\*)', r'\033[3m\1\033[23m', content)
+        
+        # Headers: # → yellow/gold color + bold
+        content = re.sub(r'^(#{1,6})\s+(.+)$', r'\033[1;38;5;220m\2\033[0m', content, flags=re.MULTILINE)
+        
+        # Bullet lists: - → •
+        content = re.sub(r'^(\s*)[-*+]\s', r'\1• ', content, flags=re.MULTILINE)
+        
+        # Numbered lists: keep as-is but add space
+        # (already formatted correctly)
+        
+        return clean_prefix + content
+    
+    def finalize_last_message(self):
+        """Finalize the last message after streaming is complete.
+        
+        Applies simple markdown formatting with ANSI codes if enabled.
+        """
+        if not self.messages:
+            return
+        
+        last_msg = self.messages[-1]
+        
+        # Only apply formatting if markdown is enabled and we detect markdown patterns
+        if self.enable_markdown and self._contains_markdown(last_msg.base_text):
+            # Apply simple inline markdown formatting
+            last_msg.base_text = self._apply_simple_markdown(last_msg.base_text)
+            # Reformat with line wrapping
+            last_msg.formatted_text = last_msg._format_line_wrap()
+        
+        # Update display
+        self.chat_history = self._render_messages()
         if self.compositor:
             self.compositor.update_component("history", self.chat_history)
 
