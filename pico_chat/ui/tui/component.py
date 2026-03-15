@@ -168,6 +168,67 @@ class InputComponent(Component):
         self.scroll_y = 0
         self._last_cursor_pos = -1
 
+    def _get_cursor_coords(self, pos: int) -> tuple[int, int]:
+        """Convert a string index to (row, col) coordinates."""
+        prompt_width = display_width(self.prompt)
+        r, c = 0, prompt_width
+        for i in range(min(pos, len(self.text))):
+            char = self.text[i]
+            if char == '\n':
+                r += 1
+                c = prompt_width
+                continue
+            w = display_width(char)
+            if c + w > self.width:
+                r += 1
+                c = prompt_width + w
+            else:
+                c += w
+        return r, c
+
+    def _get_pos_from_coords(self, target_r: int, target_c: int) -> int:
+        """Find the closest string index for given (row, col) coordinates."""
+        prompt_width = display_width(self.prompt)
+        r, c = 0, prompt_width
+        
+        # If targeting a row before the start, return 0
+        if target_r < 0: return 0
+        
+        best_pos_in_row = 0
+        
+        for i, char in enumerate(self.text):
+            if r == target_r:
+                # We are on the target row
+                if c >= target_c:
+                    return i
+                best_pos_in_row = i + 1
+            elif r > target_r:
+                # We just moved past the target row (either by wrapping or newline)
+                # The position we want is definitely in the row we just finished.
+                return best_pos_in_row
+            
+            # Advancement logic
+            if char == '\n':
+                # Register the position just before the newline as the end of the current row
+                if r == target_r:
+                    return i
+                r += 1
+                c = prompt_width
+                continue
+            
+            w = display_width(char)
+            if c + w > self.width:
+                # Register the position just before wrapping as the end of the current row
+                if r == target_r:
+                    return i
+                r += 1
+                c = prompt_width + w
+            else:
+                c += w
+        
+        # If we reach the end of the text while on the target row, return the end position
+        return len(self.text)
+
     def _get_lines(self) -> list[str]:
         """Wrap text into lines based on current width, preserving newlines and applying left padding for multiline."""
         prompt_width = display_width(self.prompt)
@@ -367,43 +428,18 @@ class InputComponent(Component):
                 return True
             
             if event == '\x1b[A': # Up
-                curr_r, curr_c = 0, display_width(self.prompt)
-                for i in range(self.cursor_pos):
-                    char = self.text[i]
-                    if char == '\n': curr_r += 1; curr_c = 0; continue
-                    w = display_width(char); curr_c += w
-                    if curr_c > self.width: curr_r += 1; curr_c = w
-                
+                curr_r, curr_c = self._get_cursor_coords(self.cursor_pos)
                 if curr_r > 0:
-                    target_row, target_col = curr_r - 1, curr_c
-                    new_pos, r, c = 0, 0, display_width(self.prompt)
-                    for i, char in enumerate(self.text):
-                        if r == target_row and c >= target_col: break
-                        new_pos = i + 1
-                        if char == '\n': r += 1; c = 0; continue
-                        w = display_width(char); c += w
-                        if c > self.width: r += 1; c = w
-                    self.cursor_pos = new_pos
+                    # Try to maintain the same column index if possible
+                    self.cursor_pos = self._get_pos_from_coords(curr_r - 1, curr_c)
                 return True
                 
             if event == '\x1b[B': # Down
-                curr_r, curr_c = 0, display_width(self.prompt)
-                for i in range(self.cursor_pos):
-                    char = self.text[i]
-                    if char == '\n': curr_r += 1; curr_c = 0; continue
-                    w = display_width(char); curr_c += w
-                    if curr_c > self.width: curr_r += 1; curr_c = w
-                
-                target_row, target_col = curr_r + 1, curr_c
-                new_pos, r, c = 0, 0, display_width(self.prompt)
-                for i, char in enumerate(self.text):
-                    if r == target_row and c >= target_col: break
-                    new_pos = i + 1
-                    if char == '\n': r += 1; c = 0; continue
-                    w = display_width(char); c += w
-                    if c > self.width: r += 1; c = w
-                self.cursor_pos = new_pos
+                curr_r, curr_c = self._get_cursor_coords(self.cursor_pos)
+                self.cursor_pos = self._get_pos_from_coords(curr_r + 1, curr_c)
                 return True
+            
+            # Default: insert character
             
             # Default: insert character
             if len(event) == 1 and ord(event) >= 32:
