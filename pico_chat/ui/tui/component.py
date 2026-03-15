@@ -253,8 +253,8 @@ class InputComponent(Component):
                     self.cursor_pos = i
                 return True
 
-            # Shift+Enter or Ctrl+Enter -> Newline
-            if event in ('\x1b[13;2u', '\x1b[13;5u', '\x0a'):
+            # Alt+Enter (\x1b\r) or Ctrl+Enter/Ctrl+J (\x0a) -> Newline
+            if event in ('\x1b\r', '\x0a'):
                 self.text = self.text[:self.cursor_pos] + "\n" + self.text[self.cursor_pos:]
                 self.cursor_pos += 1
                 return True
