@@ -7,7 +7,7 @@ Permission = Literal["allow", "ask", "deny"]
 
 
 class Config:
-    """Configuration for Open-Clank."""
+    """Configuration for Pico-Chat."""
 
     def __init__(self, config_path: str | None = None):
         """Initialize configuration, optionally loading from TOML."""
@@ -40,7 +40,7 @@ class Config:
 
         # Other settings
         self.render_thinking: bool = False
-        self.log_file: str = "clank.log"
+        self.log_file: str = "pico_chat.log"
         self.max_file_size: int = 1_000_000
         self.max_search_results: int = 50
         self.command_timeout: int = 30
@@ -54,9 +54,9 @@ class Config:
         self.ui_assistant_color: tuple[int, int, int] = (242, 207, 101)  # Orange
 
         # Load from file if exists
-        path = Path(config_path) if config_path else Path("open-clank.toml")
+        path = Path(config_path) if config_path else Path("pico_chat.toml")
         if not path.exists():
-            path = Path.home() / ".open-clank.toml"
+            path = Path.home() / ".pico_chat.toml"
         
         if path.exists():
             try:

@@ -1,4 +1,4 @@
-"""Portrait panel for the Open-Clank TUI."""
+"""Portrait panel for the Pico-Chat TUI."""
 
 import asyncio
 from typing import Optional
@@ -13,7 +13,7 @@ class PortraitPanel:
     def __init__(self):
         """Initialize the portrait panel."""
         self.component = TextComponent("", id="portrait", fg=(255, 255, 0))
-        self.box = Box(self.component, title="Clank")
+        self.box = Box(self.component, title="Pico")
         self.compositor: Optional[object] = None
         self._portrait = None
 

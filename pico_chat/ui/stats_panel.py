@@ -1,4 +1,4 @@
-"""Stats panel for the Open-Clank TUI."""
+"""Stats panel for the Pico-Chat TUI."""
 
 import asyncio
 import datetime

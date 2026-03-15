@@ -1,4 +1,4 @@
-"""UI module for Open-Clank.
+"""UI module for Pico-Chat.
 
 Handles rendering, console output formatting, and TUI components.
 """

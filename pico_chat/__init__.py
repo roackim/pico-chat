@@ -1,4 +1,4 @@
-"""Open-Clank: Self-Hosted AI Code Agent.
+"""Pico-chat: Self-Hosted AI Code Agent.
 
 A CLI chat app for self-hosted LLM agents with native tool calling support.
 """

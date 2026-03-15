@@ -1,4 +1,4 @@
-"""Input panel for the Open-Clank TUI."""
+"""Input panel for the Pico-Chat TUI."""
 
 import asyncio
 from typing import Optional, Callable

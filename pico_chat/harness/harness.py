@@ -11,6 +11,13 @@ from pico_chat.harness.debug import get_debug_stream
 # Import the minimal toolset
 from pico_chat.harness.tool_wrappers import create_minimal_tools
 
+# Import tool feedback formatting
+from pico_chat.harness.tool_feedback import (
+    format_tool_call_start,
+    format_tool_call_complete,
+    format_batch_start
+)
+
 # Re-implementation based on minichat.py for maximum performance and simplicity
 # Discarding complex Gateway logic in favor of direct AsyncOpenAI usage.
 
@@ -187,7 +194,7 @@ class Harness:
                     
                 # Execute Tools (Inner Loop)
                 self.state = AgentState.THINKING
-                yield f"\n\033[90m[Executing {len(tool_calls_list)} tool calls...]\033[0m\n"
+                yield format_batch_start(len(tool_calls_list))
                 
                 for tc in tool_calls_list:
                     func_name = tc["function"]["name"]
@@ -195,6 +202,9 @@ class Harness:
                     call_id = tc["id"]
                     
                     self.debug_stream.log("TOOL_EXEC", {"name": func_name, "args": args_str})
+                    
+                    # Show which tool is being called
+                    yield format_tool_call_start(func_name, args_str)
                     
                     result = ""
                     if func_name in self.tools_map:
@@ -244,8 +254,8 @@ class Harness:
                     self.history.append(tool_msg)
                     messages.append(tool_msg)
                     
-                    # Yield minimal feedback
-                    yield f"\033[90m> {func_name} executed.\033[0m\n"
+                    # Show completion feedback
+                    yield format_tool_call_complete(func_name, result)
 
             except Exception as e:
                 yield f"\nError: {str(e)}"

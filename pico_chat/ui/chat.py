@@ -1,4 +1,4 @@
-"""Clank TUI Application."""
+"""Pico-Chat TUI Application."""
 
 import asyncio
 from typing import Optional
@@ -52,7 +52,7 @@ class chatTUI:
                 
                 # Show thinking indicator
                 self.chat_history_panel.add_message(
-                    f"{self.assistant_color_code}clank:{self.reset_code} ",
+                    f"{self.assistant_color_code}pico:{self.reset_code} ",
                     append=False
                 )
                 

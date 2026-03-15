@@ -1,4 +1,4 @@
-"""Main entry point for Open-Clank.
+"""Main entry point for Pico-Chat
 
 A TUI chat app for self-hosted LLM agents.
 """
@@ -12,11 +12,11 @@ from pico_chat.ui.chat import chatTUI
 
 def main():
     """
-    Main entry point for Open-Clank.
+    Main entry point for Pico-Chat.
     Wrapps the chatTUI in an async event loop and handles keyboard interrupts gracefully.
     """
     # Initialize harness first
-    print("Initializing Open-Clank Harness...")
+    print("Initializing Pico-Chat Harness...")
     harness = get_harness()
     print() 
     

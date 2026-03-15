@@ -1,11 +1,11 @@
-"""Chat history panel for the Open-Clank TUI."""
+"""Chat history panel for the Pico-Chat TUI."""
 
 from typing import Optional
 
 from pico_chat.ui.tui.component import TextComponent, Box
 
 
-WELCOME_MESSAGE = "[System]: Welcome to Open-Clank!\n"
+WELCOME_MESSAGE = "Welcome to Pico-Chat!\n"
 
 # NOTE: TODO: Continue chat history format refactor
 class Message:    
