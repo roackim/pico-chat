@@ -171,7 +171,7 @@ class InputComponent(Component):
     def _get_cursor_coords(self, pos: int) -> tuple[int, int]:
         """Convert a string index to (row, col) coordinates."""
         prompt_width = display_width(self.prompt)
-        available_width = self.width
+        available_width = self.width - 2
         
         # If text is empty, cursor is after prompt
         if not self.text[:pos]:
@@ -212,7 +212,7 @@ class InputComponent(Component):
     def _get_pos_from_coords(self, target_r: int, target_c: int) -> int:
         """Find the closest string index for given (row, col) coordinates."""
         prompt_width = display_width(self.prompt)
-        available_width = self.width
+        available_width = self.width - 2
         r, c = 0, prompt_width
         
         # If targeting a row before the start, return 0
@@ -249,7 +249,7 @@ class InputComponent(Component):
     def _get_lines(self) -> list[str]:
         """Wrap text into lines based on current width, preserving newlines and applying left padding for multiline."""
         prompt_width = display_width(self.prompt)
-        available_width = self.width
+        available_width = self.width - 2
         
         if available_width <= prompt_width:
             return [""]
@@ -278,7 +278,9 @@ class InputComponent(Component):
     def get_preferred_height(self, width: int) -> int:
         """Calculate height needed for wrapped text, considering prompt indentation."""
         prompt_width = display_width(self.prompt)
-        if width <= prompt_width:
+        # Use the same safety margin during height calculation
+        calc_width = width - 2
+        if calc_width <= prompt_width:
             return 1
             
         paragraphs = self.text.split('\n')
@@ -287,9 +289,9 @@ class InputComponent(Component):
         for i, para in enumerate(paragraphs):
             is_first_para = (i == 0)
             if is_first_para:
-                wrapped = wrap_text(para, width, padding_width=prompt_width, first_line_padding=False)
+                wrapped = wrap_text(para, calc_width, padding_width=prompt_width, first_line_padding=False)
             else:
-                wrapped = wrap_text(para, width, padding_width=prompt_width, first_line_padding=True)
+                wrapped = wrap_text(para, calc_width, padding_width=prompt_width, first_line_padding=True)
             
             total_lines += len(wrapped.split('\n')) if wrapped else 1
             
