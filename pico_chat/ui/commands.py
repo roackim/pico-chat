@@ -20,7 +20,9 @@ class HelpCommand(Command):
         super().__init__("help", "Show available commands")
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        help_text = "\033[1mAvailable commands:\033[0m\n"
+        # help_text = "\033[1mAvailable commands:\033[0m\n"
+        help_text = "\033[0m"
+        
         for cmd in sorted(COMMANDS.values(), key=lambda x: x.name):
             help_text += f"/{cmd.name.ljust(8)} - {cmd.description}\n"
         
@@ -35,7 +37,7 @@ class ClearCommand(Command):
         ui.chat_history_panel.clear()
         if hasattr(ui.agent, 'clear_history'):
             ui.agent.clear_history()
-        ui.chat_history_panel.add_system_message("Conversation history cleared.")
+        ui.chat_history_panel.add_system_message("Conversation cleared.")
         ui.chat_history_panel.finalize_last_message()
 
 class ExitCommand(Command):
@@ -85,7 +87,7 @@ async def handle_command(ui: ChatUIProtocol, text: str):
     if cmd_name in COMMANDS:
         await COMMANDS[cmd_name].execute(ui, args)
     else:
-        ui.chat_history_panel.add_system_message(f"Unknown command: /{cmd_name}", color=(255, 0, 0))
+        ui.chat_history_panel.add_system_message(f"Unknown command: /{cmd_name}", color=(255, 96, 96))
         ui.chat_history_panel.finalize_last_message()
 
 def get_command_list() -> List[str]:
