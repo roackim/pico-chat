@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Minimal chat agent CLI for Open-Clank.
+Minimal chat agent CLI for pico-chat.
 Logs all API interactions to 'minichat_debug.txt'.
 """
 
@@ -10,9 +10,6 @@ import os
 import sys
 from datetime import datetime
 from typing import Any, List, Dict
-
-# Ensure we can import from open_clank
-sys.path.append(os.getcwd())
 
 from openai import AsyncOpenAI
 from pico_chat.config import get_config

@@ -8,6 +8,7 @@ class Cell:
     fg: Optional[tuple[int, int, int]] = None
     bg: Optional[tuple[int, int, int]] = None
     bold: bool = False
+    is_wide_char_continuation: bool = False  # Marks cells that are part of a wide character
 
 class Buffer:
     def __init__(self, width: int, height: int):
@@ -63,7 +64,20 @@ class Buffer:
                 # Write the character plus any accumulated ANSI sequences to a single cell
                 self.set(curr_x, y, pending_ansi + char, fg, bg, bold)
                 pending_ansi = ""
-                curr_x += 1
+                
+                # If this is a wide character (emoji), mark the next cell as continuation
+                if char_width == 2 and curr_x + 1 < self.width:
+                    self.cells[y][curr_x + 1] = Cell(
+                        char="", 
+                        fg=fg, 
+                        bg=bg, 
+                        bold=bold, 
+                        is_wide_char_continuation=True
+                    )
+                    curr_x += 2  # Skip over both the character cell and continuation cell
+                else:
+                    curr_x += 1  # Single-width character
+                
                 i += 1
                 count += char_width
         
@@ -86,6 +100,7 @@ class Buffer:
         """
         Renders the entire buffer to a single ANSI string.
         Always performs a full redraw from the top-left corner.
+        Properly handles wide characters (emojis) that span multiple columns.
         """
         from pico_chat.ui.tui.terminal import ANSI
         
@@ -96,8 +111,21 @@ class Buffer:
         for y in range(self.height):
             # Move to start of line
             res.append(ANSI.move_to(y + 1, 1))
+            terminal_col = 0  # Track actual terminal column position
+            
             for x in range(self.width):
                 cell = self.cells[y][x]
+                
+                # Skip continuation cells (they're covered by the wide char before them)
+                if cell.is_wide_char_continuation:
+                    terminal_col += 1  # Still counts as a cell position
+                    continue
+                
+                # If there's a gap between our current terminal column and where we should be,
+                # use ANSI positioning to jump to the correct position
+                if terminal_col != x:
+                    res.append(ANSI.move_to(y + 1, x + 1))
+                    terminal_col = x
                 
                 # Update colors if changed
                 if cell.fg != curr_fg:
@@ -114,6 +142,12 @@ class Buffer:
                     curr_bg = cell.bg
                     
                 res.append(cell.char)
+                
+                # Check if next cell is marked as continuation (meaning this char is wide)
+                if x + 1 < self.width and self.cells[y][x + 1].is_wide_char_continuation:
+                    terminal_col += 2  # Wide character occupies 2 columns
+                else:
+                    terminal_col += 1  # Normal character occupies 1 column
                 
         res.append(ANSI.RESET)
         return "".join(res)
