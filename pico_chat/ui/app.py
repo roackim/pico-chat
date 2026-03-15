@@ -67,12 +67,6 @@ class chatTUI:
                 # Finalize the message to render markdown now that streaming is complete
                 self.chat_history_panel.finalize_last_message()
                 
-                # Ensure we end with a newline after the agent finishes
-                # check message objects directly instead of hitting deprecated get_history
-                messages = self.chat_history_panel.get_messages()
-                if messages and not messages[-1].base_text.endswith("\n"):
-                    self.chat_history_panel.add_message("\n", append=True)
-                
                 # Notify completion if needed (e.g. state update, captured via poller anyway)
                 
             except asyncio.TimeoutError:

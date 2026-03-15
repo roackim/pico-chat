@@ -79,11 +79,11 @@ class Message:
         # Wrap text into lines based on content_width
         # We wrap each line of base_text separately to preserve existing newlines
         lines = []
-        for line in self.base_text.split('\n'):
+        base_text = self.base_text.rstrip('\n')
+        for line in base_text.split('\n'):
             if not line:
-                # Still add padding to empty lines to maintain vertical alignment if needed
-                # (though usually just a newline is fine)
-                lines.append(" " * self.padding_left)
+                # Add an empty line if there's a newline in the middle of text
+                lines.append("")
                 continue
                 
             # Wrap the line
