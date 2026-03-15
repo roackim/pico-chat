@@ -8,24 +8,30 @@ from pico_chat.config import get_config
 from pico_chat.harness.llm_status import AgentState
 from pico_chat.harness.debug import get_debug_stream
 
-# Import the new unified tool and core commands
-from pico_chat.harness.tools.run_tool import RunTool
-import pico_chat.harness.commands.core # Side-effect: registers decorators
+# Import the minimal toolset
+from pico_chat.harness.tool_wrappers import create_minimal_tools
 
 # Re-implementation based on minichat.py for maximum performance and simplicity
 # Discarding complex Gateway logic in favor of direct AsyncOpenAI usage.
 
 class Harness:
-    def __init__(self, config_path: str | None = None):
+    def __init__(self, config_path: str | None = None, workspace_path: str | None = None):
         self.config = get_config(config_path)
         self.debug_stream = get_debug_stream(config_path)
         self.state = AgentState.IDLE
         self.history = []
         
-        # Tools initialization (Single unified run() tool)
-        self.tools_map = {
-            "run": RunTool(self)
-        }
+        # User input queue for tool confirmations and prompts
+        self._user_response_queue = asyncio.Queue()
+        
+        # Tools initialization with minimal toolset
+        # Use current working directory as workspace if not specified
+        import os
+        workspace = workspace_path or os.getcwd()
+        self.tools_map = create_minimal_tools(
+            workspace_path=workspace,
+            confirmation_callback=self._request_user_confirmation
+        )
         
         # Direct Client Initialization (No Polling, No Gateway)
         self.client = AsyncOpenAI(
@@ -33,9 +39,6 @@ class Harness:
             api_key=self.config.api_key,
         )
         self.debug_stream.log("INIT", f"Connected to {self.config.base_url}")
-        
-        # User input queue for tool-provoked blocking (e.g. ask command)
-        self._user_response_queue = asyncio.Queue()
 
     def set_user_response(self, text: str):
         """Called by the UI when a response to a tool's prompt is ready."""
@@ -46,6 +49,22 @@ class Harness:
         # Note: The UI is responsible for seeing the prompt (yielded below) 
         # and then calling set_user_response.
         return await self._user_response_queue.get()
+    
+    def _request_user_confirmation(self, command: str) -> bool:
+        """
+        Request user confirmation for a command.
+        
+        NOTE: This is a synchronous callback used by the security checker,
+        but actual confirmation happens in the async chat loop.
+        For now, we return False (deny) as the async mechanism handles it.
+        
+        TODO: Consider refactoring security checker to be async.
+        """
+        # This is called during security checking which is synchronous
+        # The actual user confirmation should happen in the async chat loop
+        # For now, we return False to indicate "needs confirmation"
+        # The chat loop will detect this and handle it appropriately
+        return False
 
     def start(self):
         """No-op: No background tasks needed."""
