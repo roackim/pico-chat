@@ -126,6 +126,7 @@ def wrap_text(text: str, max_width: int, padding_width: int = 0, first_line_padd
             # Plus space if not starting a line
             space_needed = 1 if current_line and current_line != current_prefix else 0
             
+            # The character/word fits if its width + any required space is within the limit
             if current_display_width + space_needed + word_display_width <= line_max_width:
                 if current_line and current_line != current_prefix:
                     current_line += " " + word

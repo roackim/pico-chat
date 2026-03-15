@@ -172,24 +172,42 @@ class InputComponent(Component):
         """Convert a string index to (row, col) coordinates."""
         prompt_width = display_width(self.prompt)
         available_width = self.width
-        r, c = 0, prompt_width
         
-        for i in range(min(pos, len(self.text))):
-            char = self.text[i]
-            if char == '\n':
-                r += 1
-                c = prompt_width
-                continue
+        # If text is empty, cursor is after prompt
+        if not self.text[:pos]:
+            return 0, prompt_width
+
+        paragraphs = self.text[:pos].split('\n')
+        curr_r = 0
+        
+        for i, para in enumerate(paragraphs):
+            is_first_para = (i == 0)
             
-            # Simple wrapping logic mirroring what's likely happening in wrap_text
-            # But the real fix is in how we handle the "end of line" cursor position.
-            w = display_width(char)
-            if c + w > available_width:
-                r += 1
-                c = prompt_width + w
+            # Use wrap_text to see how this paragraph is laid out
+            wrapped = wrap_text(para, available_width, padding_width=prompt_width, first_line_padding=(not is_first_para))
+            para_lines = wrapped.split('\n') if wrapped else [""]
+            
+            if i < len(paragraphs) - 1:
+                # This paragraph is finished (we encountered a \n)
+                curr_r += len(para_lines)
             else:
-                c += w
-        return r, c
+                # This is the last paragraph (where the cursor is)
+                last_line = para_lines[-1]
+                curr_r += len(para_lines) - 1
+                curr_c = display_width(last_line)
+                
+                # Adjust for prompt if we are in the first paragraph's first line
+                if i == 0 and len(para_lines) == 1:
+                    curr_c += prompt_width
+                
+                # Handle the case where the very last character was a newline
+                if pos > 0 and self.text[pos-1] == '\n':
+                    curr_r += 1
+                    curr_c = prompt_width
+                
+                return curr_r, curr_c
+        
+        return 0, prompt_width
 
     def _get_pos_from_coords(self, target_r: int, target_c: int) -> int:
         """Find the closest string index for given (row, col) coordinates."""
@@ -287,33 +305,14 @@ class InputComponent(Component):
         buffer.fill(self.x, self.y, self.width, self.height, " ", bg=self.bg)
         
         lines = self._get_lines()
-        # Handle trailing empty line (cursor at very end)
+        # Handle trailing empty line (cursor at very end of a newline)
         if self.text.endswith('\n'):
-            lines.append("")
+            lines.append(" " * display_width(self.prompt))
 
         prompt_width = display_width(self.prompt)
         
         # Calculate cursor position (row, col)
-        curr_r = 0
-        curr_c = prompt_width
-        
-        for i in range(self.cursor_pos):
-            if i >= len(self.text): break
-            char = self.text[i]
-            if char == '\n':
-                curr_r += 1
-                curr_c = prompt_width
-                continue
-            
-            w = display_width(char)
-            if curr_c + w > self.width:
-                curr_r += 1
-                curr_c = prompt_width + w
-            else:
-                curr_c += w
-        
-        cursor_row = curr_r
-        cursor_col = curr_c
+        cursor_row, cursor_col = self._get_cursor_coords(self.cursor_pos)
         
         # Adjust scroll_y if cursor is out of view (during typing/movement)
         # Note: Mouse wheel also modifies scroll_y, we only force visibility on cursor movement
@@ -331,7 +330,8 @@ class InputComponent(Component):
             
             display_line = ""
             if i == 0:
-                display_line = self.prompt + (line[prompt_width:] if line.startswith(" " * prompt_width) else line)
+                # First line starts with the prompt
+                display_line = self.prompt + (line if not line.startswith(" " * prompt_width) else line[prompt_width:])
             else:
                 display_line = line
                 
