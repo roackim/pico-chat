@@ -51,10 +51,7 @@ class chatTUI:
                 user_input = await asyncio.wait_for(self.message_queue.get(), timeout=0.1)
                 
                 # Show thinking indicator
-                self.chat_history_panel.add_message(
-                    f"{self.assistant_color_code}pico:{self.reset_code} ",
-                    append=False
-                )
+                self.chat_history_panel.add_pico_message("", self.assistant_color)
                 
                 # Process streaming response from Harness
                 full_response = ""
@@ -71,7 +68,9 @@ class chatTUI:
                 self.chat_history_panel.finalize_last_message()
                 
                 # Ensure we end with a newline after the agent finishes
-                if not self.chat_history_panel.get_history().endswith("\n"):
+                # check message objects directly instead of hitting deprecated get_history
+                messages = self.chat_history_panel.get_messages()
+                if messages and not messages[-1].base_text.endswith("\n"):
                     self.chat_history_panel.add_message("\n", append=True)
                 
                 # Notify completion if needed (e.g. state update, captured via poller anyway)
@@ -80,7 +79,7 @@ class chatTUI:
                 continue
             except Exception as e:
                 self.chat_history_panel.add_message(
-                    f"\n\033[31m[Error]:{self.reset_code} {str(e)}"
+                    f"\n\033[31m[Error]:\033[0m {str(e)}"
                 )
 
 
@@ -90,10 +89,8 @@ class chatTUI:
             if self.compositor:
                 self.compositor.running = False
         else:
-            # Add user message immediately with color
-            self.chat_history_panel.add_message(
-                f"{self.user_color_code}user:{self.reset_code} {text}"
-            )
+            # Add user message immediately with color and header
+            self.chat_history_panel.add_user_message(text, self.user_color)
             # Add to processing queue for agent
             self.message_queue.put_nowait(text)
 

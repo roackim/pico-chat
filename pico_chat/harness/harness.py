@@ -166,6 +166,10 @@ class Harness:
                 # Append assistant message to history
                 assistant_msg = {"role": "assistant", "content": full_content if full_content else None}
                 
+                # Log final answer if not a tool call
+                if full_content and not tool_calls_buffer:
+                    self.debug_stream.log("RESPONSE", full_content)
+                
                 # Reconstruct tool calls for history
                 tool_calls_list = []
                 if tool_calls_buffer:

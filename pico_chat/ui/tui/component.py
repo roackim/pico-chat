@@ -57,16 +57,24 @@ class TextComponent(Component):
             line_index = i - start_line
             buffer.write_str(self.x, self.y + line_index, lines[i], fg=self.fg, bg=self.bg, max_width=self.width)
 
+    def get_preferred_height(self, width: int) -> int:
+        """Calculate height needed for wrapped text."""
+        # Note: If this TextComponent doesn't wrap itself (like ChatHistoryPanel currently does),
+        # we still consider splitlines() count.
+        lines = self.text.splitlines()
+        return len(lines)
+
     def update(self, text: str):
         self.text = text
 
 class Box(Component):
-    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None):
+    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None):
         super().__init__(id)
         self.child = child
         self.child.parent = self
         self.title = title
         self.bg = bg
+        self.fg = fg
 
     @property
     def children(self):
@@ -101,13 +109,13 @@ class Box(Component):
 
         # 1. Top + Left borders
         # Top border (excluding right corner)
-        buffer.set(self.x, self.y, "┌")
+        buffer.set(self.x, self.y, "┌", fg=self.fg)
         for i in range(1, self.width - 1):
-            buffer.set(self.x + i, self.y, "─")
+            buffer.set(self.x + i, self.y, "─", fg=self.fg)
         
         # Left border (excluding bottom corner)
         for i in range(1, self.height - 1):
-            buffer.set(self.x, self.y + i, "│")
+            buffer.set(self.x, self.y + i, "│", fg=self.fg)
 
         # 2. Background (optional)
         if self.bg:
@@ -122,21 +130,21 @@ class Box(Component):
         # 4. Bottom + Right borders (overwrites any content overflow)
         # Right border
         for i in range(1, self.height - 1):
-            buffer.set(self.x + self.width - 1, self.y + i, "│")
+            buffer.set(self.x + self.width - 1, self.y + i, "│", fg=self.fg)
         
         # Bottom border
         for i in range(1, self.width - 1):
-            buffer.set(self.x + i, self.y + self.height - 1, "─")
+            buffer.set(self.x + i, self.y + self.height - 1, "─", fg=self.fg)
 
         # Corners
-        buffer.set(self.x + self.width - 1, self.y, "┐")
-        buffer.set(self.x, self.y + self.height - 1, "└")
-        buffer.set(self.x + self.width - 1, self.y + self.height - 1, "┘")
+        buffer.set(self.x + self.width - 1, self.y, "┐", fg=self.fg)
+        buffer.set(self.x, self.y + self.height - 1, "└", fg=self.fg)
+        buffer.set(self.x + self.width - 1, self.y + self.height - 1, "┘", fg=self.fg)
 
         # Title (on top of top border)
         if self.title:
             title_str = f" {self.title[:self.width-4]} "
-            buffer.write_str(self.x + 2, self.y, title_str)
+            buffer.write_str(self.x + 2, self.y, title_str, fg=self.fg)
 
     def handle_input(self, event) -> bool:
         return self.child.handle_input(event)

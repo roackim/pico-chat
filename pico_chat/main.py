@@ -7,7 +7,7 @@ import sys
 import asyncio
 
 from pico_chat.harness.harness import get_harness
-from pico_chat.ui.chat import chatTUI
+from pico_chat.ui.app import chatTUI
 
 
 def main():

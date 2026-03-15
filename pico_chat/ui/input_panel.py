@@ -15,7 +15,7 @@ class InputPanel:
         Args:
             user_color: RGB color tuple for user text
         """
-        self.component = InputComponent("> ", id="entry", fg=user_color)
+        self.component = InputComponent(" ", id="entry", fg=user_color)
         self.box = Box(self.component, title="Input")
         self.on_submit_callback: Optional[Callable[[str], None]] = None
 
