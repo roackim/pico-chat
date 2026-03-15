@@ -5,6 +5,7 @@ from typing import Optional, Callable, List
 
 from pico_chat.ui.tui.component import InputComponent, Box
 from pico_chat.ui.tui.command_menu import CommandMenu
+from pico_chat.ui.commands import get_command_list
 
 
 class InputPanel:
@@ -22,7 +23,7 @@ class InputPanel:
         self.on_submit_callback: Optional[Callable[[str], None]] = None
         
         # Command menu
-        self.commands = ["help", "status", "exit", "clear"]
+        self.commands = get_command_list()
         self.command_menu = CommandMenu(self.commands, fg=user_color, bg=(0, 0, 0))
         self.command_menu.on_select = self.on_command_selected
         

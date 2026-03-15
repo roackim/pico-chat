@@ -11,6 +11,7 @@ from pico_chat.ui.portrait_panel import PortraitPanel
 from pico_chat.ui.stats_panel import StatsPanel
 from pico_chat.ui.input_panel import InputPanel
 from pico_chat.ui.chat_history_panel import ChatHistoryPanel
+from pico_chat.ui.commands import handle_command
 
 
 TARGET_FPS = 60
@@ -90,56 +91,8 @@ class chatTUI:
 
     def on_command_submit(self, text: str):
         """Handle execution of commands."""
-        cmd = text.strip().lower()
-        if cmd == "/exit":
-            if self.compositor:
-                self.compositor.running = False
-        elif cmd == "/clear":
-            # 1. Clear the UI
-            self.chat_history_panel.clear()
-            # 2. Clear the agent's history if clear_history is available
-            if hasattr(self.agent, 'clear_history'):
-                self.agent.clear_history()
-            # 3. Inform the user in the new cleared history (without adding another welcome)
-            self.chat_history_panel.add_system_message("Conversation history cleared.")
-            self.chat_history_panel.finalize_last_message()
-        elif cmd == "/status":
-            # Use a closure or helper to run the async check and update UI
-            async def run_status():
-                is_online = await self.agent.check_connection()
-                status_text = "online" if is_online else "offline"
-                color_code = "\x1b[32m" if is_online else "\x1b[31m"
-                
-                # Context estimation
-                cur, max_ctx, perc = self.agent.check_context() if hasattr(self.agent, 'check_context') else self.agent.estimate_context_usage()
-                
-                # Retrieve model name from config
-                model_name = getattr(self.agent.config, 'model', 'unknown')
-                
-                report = (
-                    f"LLM Connectivity : {color_code}{status_text}\x1b[0m\n"
-                    f"Active Model     : {model_name}\n"
-                    f"Context Pressure : {perc:.1f}% | {cur/1024:.1f}k / {max_ctx/1024:.1f}k"
-                )
-                self.chat_history_panel.add_system_message(report, title="status")
-                self.chat_history_panel.finalize_last_message()
-            
-            asyncio.create_task(run_status())
-
-        elif cmd == "/help":
-            help_text = (
-                "\033[1mAvailable commands:\033[0m\n"
-                "/help   - Show this help\n"
-                "/status - Show system and connection status\n"
-                "/exit   - Close the application\n"
-                "/clear  - Clear chat history"
-            )
-            # Add as a system message
-            self.chat_history_panel.add_system_message(help_text, title=cmd[1:])
-            self.chat_history_panel.finalize_last_message()
-        else:
-            self.chat_history_panel.add_system_message(f"Unknown command: {cmd}", color=(255, 0, 0))
-            self.chat_history_panel.finalize_last_message()
+        # Use the command module to handle the command
+        asyncio.create_task(handle_command(self, text))
 
     def on_user_submit(self, text: str):
         """Handle user input submission."""

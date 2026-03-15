@@ -2,6 +2,7 @@
 
 import re
 from typing import Optional, Any
+from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.layout_utils import display_width, wrap_text, strip_ansi
 
 from pico_chat.ui.tui.component import TextComponent, Box

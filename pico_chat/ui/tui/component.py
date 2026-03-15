@@ -171,15 +171,20 @@ class InputComponent(Component):
     def _get_cursor_coords(self, pos: int) -> tuple[int, int]:
         """Convert a string index to (row, col) coordinates."""
         prompt_width = display_width(self.prompt)
+        available_width = self.width
         r, c = 0, prompt_width
+        
         for i in range(min(pos, len(self.text))):
             char = self.text[i]
             if char == '\n':
                 r += 1
                 c = prompt_width
                 continue
+            
+            # Simple wrapping logic mirroring what's likely happening in wrap_text
+            # But the real fix is in how we handle the "end of line" cursor position.
             w = display_width(char)
-            if c + w > self.width:
+            if c + w > available_width:
                 r += 1
                 c = prompt_width + w
             else:
@@ -189,6 +194,7 @@ class InputComponent(Component):
     def _get_pos_from_coords(self, target_r: int, target_c: int) -> int:
         """Find the closest string index for given (row, col) coordinates."""
         prompt_width = display_width(self.prompt)
+        available_width = self.width
         r, c = 0, prompt_width
         
         # If targeting a row before the start, return 0
@@ -198,18 +204,13 @@ class InputComponent(Component):
         
         for i, char in enumerate(self.text):
             if r == target_r:
-                # We are on the target row
                 if c >= target_c:
                     return i
                 best_pos_in_row = i + 1
             elif r > target_r:
-                # We just moved past the target row (either by wrapping or newline)
-                # The position we want is definitely in the row we just finished.
                 return best_pos_in_row
             
-            # Advancement logic
             if char == '\n':
-                # Register the position just before the newline as the end of the current row
                 if r == target_r:
                     return i
                 r += 1
@@ -217,8 +218,7 @@ class InputComponent(Component):
                 continue
             
             w = display_width(char)
-            if c + w > self.width:
-                # Register the position just before wrapping as the end of the current row
+            if c + w > available_width:
                 if r == target_r:
                     return i
                 r += 1
@@ -226,7 +226,6 @@ class InputComponent(Component):
             else:
                 c += w
         
-        # If we reach the end of the text while on the target row, return the end position
         return len(self.text)
 
     def _get_lines(self) -> list[str]:
@@ -235,23 +234,26 @@ class InputComponent(Component):
         available_width = self.width
         
         if available_width <= prompt_width:
-            return [""] # Too narrow
+            return [""]
             
-        # Split text by explicit newlines
         paragraphs = self.text.split('\n')
         all_lines = []
         
         for i, para in enumerate(paragraphs):
             is_first_para = (i == 0)
-            # For the very first line of the first paragraph, we account for the prompt
             if is_first_para:
                 wrapped = wrap_text(para, available_width, padding_width=prompt_width, first_line_padding=False)
             else:
-                # Subsequent paragraphs (from Ctrl+J) should start with padding
                 wrapped = wrap_text(para, available_width, padding_width=prompt_width, first_line_padding=True)
             
-            # wrap_text returns a string with \n, split it to get individual lines
-            all_lines.extend(wrapped.split('\n') if wrapped else [""])
+            para_lines = wrapped.split('\n') if wrapped else [""]
+            # Handle empty continuation lines (e.g. trailing newline)
+            if not para_lines:
+                para_lines = [""]
+            
+            # If the paragraph ends in a newline (except the last one which is handled by paragraphs iterate),
+            # or if it's an empty paragraph between newlines
+            all_lines.extend(para_lines)
             
         return all_lines
 
@@ -261,8 +263,6 @@ class InputComponent(Component):
         if width <= prompt_width:
             return 1
             
-        # We need to manually duplicate _get_lines logic but with the passed width
-        # instead of self.width (which might not be updated yet)
         paragraphs = self.text.split('\n')
         total_lines = 0
         
@@ -275,6 +275,10 @@ class InputComponent(Component):
             
             total_lines += len(wrapped.split('\n')) if wrapped else 1
             
+        # Ensure trailing newline is accounted for in height calculation
+        if self.text.endswith('\n'):
+            total_lines += 1
+            
         return total_lines
 
     def render(self, buffer: Buffer):
@@ -283,6 +287,10 @@ class InputComponent(Component):
         buffer.fill(self.x, self.y, self.width, self.height, " ", bg=self.bg)
         
         lines = self._get_lines()
+        # Handle trailing empty line (cursor at very end)
+        if self.text.endswith('\n'):
+            lines.append("")
+
         prompt_width = display_width(self.prompt)
         
         # Calculate cursor position (row, col)
@@ -323,7 +331,7 @@ class InputComponent(Component):
             
             display_line = ""
             if i == 0:
-                display_line = self.prompt + line
+                display_line = self.prompt + (line[prompt_width:] if line.startswith(" " * prompt_width) else line)
             else:
                 display_line = line
                 
