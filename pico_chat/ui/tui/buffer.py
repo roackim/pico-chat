@@ -24,6 +24,12 @@ class Buffer:
         if 0 <= x < self.width and 0 <= y < self.height:
             self.cells[y][x] = Cell(char, fg, bg, bold)
 
+    def fill(self, x: int, y: int, width: int, height: int, char: str = " ", fg=None, bg=None):
+        """Fill a rectangular area with a character."""
+        for iy in range(y, y + height):
+            for ix in range(x, x + width):
+                self.set(ix, iy, char, fg=fg, bg=bg)
+
     def write_str(self, x: int, y: int, s: str, fg=None, bg=None, bold=False, max_width: Optional[int] = None):
         """
         Writes a string to the buffer starting at (x, y).

@@ -2,6 +2,7 @@ import re
 from abc import ABC, abstractmethod
 from typing import Optional, Any
 from pico_chat.ui.tui.buffer import Buffer
+from pico_chat.ui.tui.terminal import MouseEvent
 from pico_chat.ui.tui.layout_utils import display_width, wrap_text, strip_ansi
 
 class Component(ABC):
@@ -146,7 +147,13 @@ class Box(Component):
             title_str = f" {self.title[:self.width-4]} "
             buffer.write_str(self.x + 2, self.y, title_str, fg=self.fg)
 
-    def handle_input(self, event) -> bool:
+    def handle_input(self, event: Any) -> bool:
+        """Pass input to child, but check mouse bounds for the box area."""
+        if isinstance(event, MouseEvent):
+            if self.x <= event.x < self.x + self.width and \
+               self.y <= event.y < self.y + self.height:
+                return self.child.handle_input(event)
+            return False
         return self.child.handle_input(event)
 
 class InputComponent(Component):
@@ -159,6 +166,7 @@ class InputComponent(Component):
         self.on_submit = None  # Callback for when enter is pressed
         self.cursor_pos = 0
         self.scroll_y = 0
+        self._last_cursor_pos = -1
 
     def _get_lines(self) -> list[str]:
         """Wrap text into lines based on current width, preserving newlines and applying left padding for multiline."""
@@ -192,11 +200,27 @@ class InputComponent(Component):
         if width <= prompt_width:
             return 1
             
-        lines = self._get_lines()
-        return len(lines)
+        # We need to manually duplicate _get_lines logic but with the passed width
+        # instead of self.width (which might not be updated yet)
+        paragraphs = self.text.split('\n')
+        total_lines = 0
+        
+        for i, para in enumerate(paragraphs):
+            is_first_para = (i == 0)
+            if is_first_para:
+                wrapped = wrap_text(para, width, padding_width=prompt_width, first_line_padding=False)
+            else:
+                wrapped = wrap_text(para, width, padding_width=prompt_width, first_line_padding=True)
+            
+            total_lines += len(wrapped.split('\n')) if wrapped else 1
+            
+        return total_lines
 
     def render(self, buffer: Buffer):
         """Render the input field with prompt, text, and scrolling."""
+        # Clear background first (to prevent artifacts when scrolling/resizing)
+        buffer.fill(self.x, self.y, self.width, self.height, " ", bg=self.bg)
+        
         lines = self._get_lines()
         prompt_width = display_width(self.prompt)
         
@@ -222,11 +246,14 @@ class InputComponent(Component):
         cursor_row = curr_r
         cursor_col = curr_c
         
-        # Adjust scroll_y if cursor is out of view
-        if cursor_row < self.scroll_y:
-            self.scroll_y = cursor_row
-        elif cursor_row >= self.scroll_y + self.height:
-            self.scroll_y = cursor_row - self.height + 1
+        # Adjust scroll_y if cursor is out of view (during typing/movement)
+        # Note: Mouse wheel also modifies scroll_y, we only force visibility on cursor movement
+        if self.cursor_pos != self._last_cursor_pos:
+            if cursor_row < self.scroll_y:
+                self.scroll_y = cursor_row
+            elif cursor_row >= self.scroll_y + self.height:
+                self.scroll_y = cursor_row - self.height + 1
+            self._last_cursor_pos = self.cursor_pos
 
         # Render visible lines
         for i in range(self.scroll_y, min(len(lines), self.scroll_y + self.height)):
@@ -247,6 +274,30 @@ class InputComponent(Component):
             buffer.set_cursor(self.x + cursor_col, self.y + screen_cursor_row)
 
     def handle_input(self, event: Any) -> bool:
+        """Handle mouse wheel for scrolling."""
+        if isinstance(event, MouseEvent):
+            # Use parent (Box) boundaries if available for a larger hit-box
+            target = self.parent if self.parent else self
+            if target.x <= event.x < target.x + target.width and \
+               target.y <= event.y < target.y + target.height:
+                
+                # Button 64/65 are scroll wheels
+                if event.button == 64: # Scroll Up
+                    if self.scroll_y > 0:
+                        self.scroll_y -= 1
+                        # If cursor is at bottom boundary, push it up to stay in view
+                        # (Using a simple heuristic: if it would be off-screen, push it)
+                        # More precisely: if we scroll UP, the cursor row relative to view INCREASES.
+                        # But wait, if we scroll up, we see earlier lines. 
+                        pass 
+                    return True
+                elif event.button == 65: # Scroll Down
+                    lines = self._get_lines()
+                    max_scroll = max(0, len(lines) - self.height)
+                    if self.scroll_y < max_scroll:
+                        self.scroll_y += 1
+                    return True
+        
         """Handle keyboard input for the text field."""
         if isinstance(event, str):
             # Key constants

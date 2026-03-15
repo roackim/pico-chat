@@ -113,6 +113,11 @@ class Hsplit(Split):
         # Identify the flexible (percentage) components
         percent_indices = [i for i, s in enumerate(self.sizes) if (isinstance(s, float) or (isinstance(s, str) and s.endswith('%')))]
         
+        # Apply max_height constraints to actual_sizes BEFORE calculating percentage distribution
+        for i, child in enumerate(self.children):
+            if hasattr(child, 'max_height') and child.max_height:
+                actual_sizes[i] = min(actual_sizes[i], child.max_height)
+
         if percent_indices:
             total_auto_and_fixed = sum(actual_sizes[i] for i in range(len(actual_sizes)) if i not in percent_indices)
             remaining_for_percents = max(0, self.height - total_auto_and_fixed)
@@ -121,15 +126,9 @@ class Hsplit(Split):
             for i in percent_indices:
                 actual_sizes[i] = remaining_for_percents
 
-        # 4. Final verification: If total > self.height, we need to clip from bottom auto components?
-        # Actually, let's just let Render handle clipping. 
-
         curr_y = self.y
         for i, child in enumerate(self.children):
-            # Apply max height if specified by child (e.g. InputPanel might want max 12)
             final_h = actual_sizes[i]
-            if hasattr(child, 'max_height') and child.max_height:
-                final_h = min(final_h, child.max_height)
             
             child.set_layout(self.x, curr_y, self.width, final_h)
             child.render(buffer)

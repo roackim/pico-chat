@@ -1,9 +1,10 @@
 """Pico-Chat TUI Application."""
 
 import asyncio
-from typing import Optional
+from typing import Optional, Any
 
 from pico_chat.ui.tui.compositor import Compositor
+from pico_chat.ui.tui.terminal import MouseEvent
 from pico_chat.ui.tui.container import Vsplit, Hsplit
 from pico_chat.ui.portrait_panel import PortraitPanel
 from pico_chat.ui.stats_panel import StatsPanel
@@ -21,6 +22,7 @@ class chatTUI:
         self.agent = agent
         self.message_queue = asyncio.Queue()
         self.compositor: Optional[Compositor] = None
+        self._last_focus_id: Optional[str] = None
         
         # Get colors from config
         self.user_color = agent.config.ui_user_color
@@ -51,7 +53,7 @@ class chatTUI:
                 user_input = await asyncio.wait_for(self.message_queue.get(), timeout=0.1)
                 
                 # Show thinking indicator
-                self.chat_history_panel.add_pico_message("Thinking...", self.assistant_color)
+                self.chat_history_panel.add_pico_message("Thinking..", self.assistant_color)
                 
                 # Process streaming response from Harness
                 full_response = ""
@@ -96,6 +98,34 @@ class chatTUI:
             # Add to processing queue for agent
             self.message_queue.put_nowait(text)
 
+    def handle_global_input(self, event: Any) -> bool:
+        """Handle focus logging and input dispatch."""
+        if isinstance(event, MouseEvent):
+            if event.pressed:
+                # Find which component was clicked to log focus
+                target_id = None
+                
+                # Very simple hit detection for our two main panels
+                h_comp = self.chat_history_panel.get_component()
+                i_box = self.input_panel.get_component()
+                
+                if h_comp.x <= event.x < h_comp.x + h_comp.width and \
+                   h_comp.y <= event.y < h_comp.y + h_comp.height:
+                    target_id = "history"
+                elif i_box.x <= event.x < i_box.x + i_box.width and \
+                     i_box.y <= event.y < i_box.y + i_box.height:
+                    target_id = "input"
+                    
+                if target_id and target_id != self._last_focus_id:
+                    # Log focus change
+                    import logging
+                    logger = logging.getLogger("harness")
+                    logger.info(f"[UI] Focus changed to: {target_id}")
+                    self._last_focus_id = target_id
+            
+        # Call the original method to avoid infinite recursion
+        return self._original_handle_input(event)
+
     async def run(self):
         """Run the TUI application."""
         # Start the harness services if available
@@ -106,23 +136,21 @@ class chatTUI:
         self.portrait_panel.set_portrait("clank_term_text")
         self.input_panel.set_on_submit(self.on_user_submit)
         
-        # # Left Column
-        # left_col = Hsplit([
-        #     self.portrait_panel.get_component(),
-        #     self.stats_panel.get_component()
-        # ], ["9c", "100%"])
-
         # Right Column
         right_col = Hsplit([
             self.chat_history_panel.get_component(),
             self.input_panel.get_component()
-        ], ["100%", 0]) # Change 3c to 0 (auto-calculate height)
+        ], ["100%", 0])
 
         # Main Layout
-        # root = Vsplit([left_col, right_col], ["20c", "100%"])
-        root = right_col # For Phase 1, we focus on the chat and input panels only.
+        root = right_col
+        self.root = root  # Store root for global handler
         self.compositor = Compositor(root, fps=TARGET_FPS)
         
+        # Store the original handle_input method before overriding
+        self._original_handle_input = root.handle_input
+        self.root.handle_input = self.handle_global_input
+
         # Set compositor for all panels
         self.portrait_panel.set_compositor(self.compositor)
         self.stats_panel.set_compositor(self.compositor)

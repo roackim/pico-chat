@@ -16,7 +16,7 @@ class InputPanel:
             user_color: RGB color tuple for user text
         """
         self.component = InputComponent(" ", id="entry", fg=user_color)
-        self.box = Box(self.component, title="Input")
+        self.box = Box(self.component, title="message")
         self.box.max_height = 14 # 12 lines of text + 2 for borders
         self.on_submit_callback: Optional[Callable[[str], None]] = None
 

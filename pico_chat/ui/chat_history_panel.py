@@ -1,16 +1,17 @@
 """Chat history panel for the Pico-Chat TUI."""
 
 import re
-from typing import Optional
+from typing import Optional, Any
 from pico_chat.ui.tui.layout_utils import display_width, wrap_text, strip_ansi
 
 from pico_chat.ui.tui.component import TextComponent, Box
 from pico_chat.ui.tui.container import Hsplit
+from pico_chat.ui.tui.terminal import MouseEvent
 
 # Simple markdown formatting with ANSI codes
 
 
-WELCOME_MESSAGE = "Welcome to Pico-Chat!\n"
+WELCOME_MESSAGE = "Welcome to pico-chat!\n"
 
 
 class Message:    
@@ -154,6 +155,8 @@ class ChatHistoryPanel(TextComponent):
         self.padding_right = padding_right
         self.enable_markdown = enable_markdown
         self.max_messages = 150  # Maximum number of messages to keep
+        self.scroll_offset = 0   # How many rows to scroll up from the bottom
+        self.auto_scroll = True
         
         # Container for all message boxes
         self.msg_container = Hsplit([], [])
@@ -202,24 +205,54 @@ class ChatHistoryPanel(TextComponent):
 
     def render(self, buffer: Buffer):
         """Custom render to handle scrolling/clipping of messages."""
+        # Clear background first (to prevent artifacts from previous frames/scrolls)
+        buffer.fill(self.x, self.y, self.width, self.height)
+
         total_height = self._get_all_rows()
-        start_y = 0
         
-        # Auto-scroll logic: if content exceeds panel height, offset start_y
-        if total_height > self.height:
-            start_y = total_height - self.height
+        # Base offset (how much we need to scroll to see the bottom)
+        max_scroll = max(0, total_height - self.height)
+        
+        # If auto-scroll is on, we always show the bottom
+        if self.auto_scroll:
+            self.scroll_offset = 0
+            
+        # Actual offset from the TOP of the content
+        # scroll_offset 0 means we are at the bottom.
+        # scroll_offset > 0 means we are scrolled up.
+        start_y = max_scroll - self.scroll_offset
         
         # Reset any previous layout of the container children to prevent stale rendering
         curr_y = self.y - start_y
         for i, child in enumerate(self.msg_container.children):
             child_h = child.get_preferred_height(self.width)
             
-            # Draw child if it is within the vertical bounds of the panel
-            # Buffer.write_str in child.render handles X bounds and Y bounds.
+            # Draw child if it is within or partially within the vertical bounds of the panel
             child.set_layout(self.x, curr_y, self.width, child_h)
             child.render(buffer)
             
             curr_y += child_h
+
+    def handle_input(self, event: Any) -> bool:
+        """Handle mouse wheel for scrolling."""
+        if isinstance(event, MouseEvent):
+            # Check if mouse is over this panel
+            if self.x <= event.x < self.x + self.width and \
+               self.y <= event.y < self.y + self.height:
+                
+                # Button 64 is scroll up, 65 is scroll down
+                if event.button == 64: # Scroll Up
+                    total_height = self._get_all_rows()
+                    max_scroll = max(0, total_height - self.height)
+                    self.scroll_offset = min(max_scroll, self.scroll_offset + 3)
+                    self.auto_scroll = False # Scrolling up disables auto-scroll
+                    return True
+                elif event.button == 65: # Scroll Down
+                    self.scroll_offset = max(0, self.scroll_offset - 3)
+                    if self.scroll_offset == 0:
+                        self.auto_scroll = True # Back at bottom enables auto-scroll
+                    return True
+        return False
 
     def _render_messages(self) -> str:
         """DEPRECATED: No longer used with per-message boxes.
@@ -244,6 +277,10 @@ class ChatHistoryPanel(TextComponent):
             frame_color: Optional RGB color for the box frame
             overwrite_last: If True, replaces text of last message.
         """
+        # If we are near the bottom (within a few pixels), stay at bottom
+        if self.scroll_offset < 1 or self.auto_scroll:
+            self.auto_scroll = True
+            
         if overwrite_last and self.messages:
             last_msg = self.messages[-1]
             last_msg.base_text = message
