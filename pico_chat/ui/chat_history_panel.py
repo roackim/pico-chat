@@ -509,7 +509,7 @@ class ChatHistoryPanel:
         content = re.sub(r'```(\w*)\n(.+?)\n```', format_code_block, content, flags=re.DOTALL)
         
         # Inline code: `code` → yellow
-        content = re.sub(r'`([^`]+)`', r'\033[38;5;227m\1\033[0m', content)
+        # content = re.sub(r'`([^`]+)`', r'\033[38;5;227m\1\033[0m', content)
         
         # Bold: **text** → bold
         content = re.sub(r'\*\*(.+?)\*\*', r'\033[1m\1\033[22m', content)
