@@ -17,6 +17,7 @@ class InputPanel:
         """
         self.component = InputComponent(" ", id="entry", fg=user_color)
         self.box = Box(self.component, title="Input")
+        self.box.max_height = 14 # 12 lines of text + 2 for borders
         self.on_submit_callback: Optional[Callable[[str], None]] = None
 
     def set_on_submit(self, callback: Callable[[str], None]):

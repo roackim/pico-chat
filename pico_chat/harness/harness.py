@@ -32,13 +32,16 @@ class Harness:
         self._user_response_queue = asyncio.Queue()
         
         # Tools initialization with minimal toolset
-        # Use current working directory as workspace if not specified
         import os
         workspace = workspace_path or os.getcwd()
         self.tools_map = create_minimal_tools(
             workspace_path=workspace,
             confirmation_callback=self._request_user_confirmation
         )
+        
+        # Calculate schemas once and log
+        self.tool_schemas = [tool.get_schema() for tool in self.tools_map.values()] if self.tools_map else None
+        self.debug_stream.log("TOOL_SCHEMAS", self.tool_schemas)
         
         # Direct Client Initialization (No Polling, No Gateway)
         self.client = AsyncOpenAI(
@@ -106,14 +109,11 @@ class Harness:
             self.state = AgentState.THINKING
             self.debug_stream.log("REQUEST", messages)
             
-            # Tools are dynamic, so we recalculate schemas for the CLI architecture
-            tool_schemas = [tool.get_schema() for tool in self.tools_map.values()] if self.tools_map else None
-
             try:
                 stream = await self.client.chat.completions.create(
                     model=self.config.model,
                     messages=messages,
-                    tools=tool_schemas,
+                    tools=self.tool_schemas,
                     stream=True
                 )
                 

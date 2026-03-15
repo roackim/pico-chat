@@ -39,35 +39,13 @@ def parse_patch(content: str) -> PatchBlock:
         
     Raises:
         PatchParseError: If patch format is invalid
-        
-    Example:
-        >>> patch = parse_patch('''app.py
-        ... <<<<<<< SEARCH
-        ... def foo():
-        ...     pass
-        ... =======
-        ... def foo():
-        ...     return 42
-        ... >>>>>>> REPLACE
-        ... ''')
-        >>> patch.filename
-        'app.py'
     """
     lines = content.strip().split('\n')
     
     if not lines:
         raise PatchParseError("Empty patch content")
     
-    # First line is filename
-    filename = lines[0].strip()
-    if not filename:
-        raise PatchParseError("Missing filename on first line")
-    
-    # Validate filename is not a marker
-    if any(marker in filename for marker in ['<<<<<<< SEARCH', '=======', '>>>>>>> REPLACE']):
-        raise PatchParseError("Missing filename on first line (found marker instead)")
-    
-    # Find markers
+    # Markers
     search_marker = '<<<<<<< SEARCH'
     divider_marker = '======='
     replace_marker = '>>>>>>> REPLACE'
@@ -76,33 +54,44 @@ def parse_patch(content: str) -> PatchBlock:
     divider = None
     replace_end = None
     
-    for i, line in enumerate(lines[1:], start=1):
+    # 1. Find the SEARCH marker first (it might be indented or have preamble lines before it)
+    for i, line in enumerate(lines):
         if search_marker in line:
-            if search_start is not None:
-                raise PatchParseError("Multiple SEARCH markers found")
             search_start = i
-        elif divider_marker in line:
+            break
+            
+    if search_start is None:
+        raise PatchParseError(f"Missing '{search_marker}' marker")
+    
+    # 2. Extract filename from the line immediately before SEARCH marker
+    if search_start == 0:
+        raise PatchParseError("Missing filename before SEARCH marker")
+        
+    filename = lines[search_start - 1].strip()
+    # Basic sanity check for filename (shouldn't have markers or be too long)
+    if not filename or any(m in filename for m in [search_marker, divider_marker, replace_marker]):
+         raise PatchParseError("Invalid or missing filename immediately before SEARCH marker")
+
+    # 3. Find remaining markers after search_start
+    for i in range(search_start + 1, len(lines)):
+        line = lines[i]
+        if divider_marker in line:
             if divider is not None:
-                raise PatchParseError("Multiple divider markers found")
+                raise PatchParseError(f"Multiple {divider_marker} markers found")
             divider = i
         elif replace_marker in line:
             if replace_end is not None:
-                raise PatchParseError("Multiple REPLACE markers found")
+                raise PatchParseError(f"Multiple {replace_marker} markers found")
             replace_end = i
+            break # Stop at first REPLACE marker
     
-    # Validate markers found
-    if search_start is None:
-        raise PatchParseError("Missing '<<<<<<< SEARCH' marker")
+    # Validate markers found and order
     if divider is None:
-        raise PatchParseError("Missing '=======' marker")
+        raise PatchParseError(f"Missing '{divider_marker}' marker")
     if replace_end is None:
-        raise PatchParseError("Missing '>>>>>>> REPLACE' marker")
+        raise PatchParseError(f"Missing '{replace_marker}' marker")
     
-    # Validate order
-    if not (search_start < divider < replace_end):
-        raise PatchParseError("Markers in wrong order (must be SEARCH, =======, REPLACE)")
-    
-    # Extract content
+    # 4. Extract content
     search_lines = lines[search_start + 1:divider]
     replace_lines = lines[divider + 1:replace_end]
     

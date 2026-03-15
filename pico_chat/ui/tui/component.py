@@ -158,58 +158,80 @@ class InputComponent(Component):
         self.bg = bg
         self.on_submit = None  # Callback for when enter is pressed
         self.cursor_pos = 0
+        self.scroll_y = 0
 
     def _get_lines(self) -> list[str]:
-        """Wrap text into lines based on current width."""
+        """Wrap text into lines based on current width, preserving newlines and applying left padding for multiline."""
         prompt_width = display_width(self.prompt)
         available_width = self.width
         
         if available_width <= prompt_width:
             return [""] # Too narrow
             
-        full_text = self.text
-        # Use our new wrap_text utility
-        wrapped = wrap_text(full_text, available_width, padding_width=0, first_line_padding=False)
-        lines = wrapped.split('\n')
-        return lines
+        # Split text by explicit newlines
+        paragraphs = self.text.split('\n')
+        all_lines = []
+        
+        for i, para in enumerate(paragraphs):
+            is_first_para = (i == 0)
+            # For the very first line of the first paragraph, we account for the prompt
+            if is_first_para:
+                wrapped = wrap_text(para, available_width, padding_width=prompt_width, first_line_padding=False)
+            else:
+                # Subsequent paragraphs (from Ctrl+J) should start with padding
+                wrapped = wrap_text(para, available_width, padding_width=prompt_width, first_line_padding=True)
+            
+            # wrap_text returns a string with \n, split it to get individual lines
+            all_lines.extend(wrapped.split('\n') if wrapped else [""])
+            
+        return all_lines
 
     def get_preferred_height(self, width: int) -> int:
-        """Calculate height needed for wrapped text."""
+        """Calculate height needed for wrapped text, considering prompt indentation."""
         prompt_width = display_width(self.prompt)
         if width <= prompt_width:
             return 1
             
-        wrapped = wrap_text(self.text, width, padding_width=0, first_line_padding=False)
-        return len(wrapped.split('\n'))
+        lines = self._get_lines()
+        return len(lines)
 
     def render(self, buffer: Buffer):
-        """Render the input field with prompt and text."""
+        """Render the input field with prompt, text, and scrolling."""
         lines = self._get_lines()
+        prompt_width = display_width(self.prompt)
         
-        # We need to re-calculate cursor position based on lines
-        # Basically repeat the wrapping logic but stop at cursor_pos
+        # Calculate cursor position (row, col)
         curr_r = 0
-        curr_c = display_width(self.prompt)
+        curr_c = prompt_width
+        
         for i in range(self.cursor_pos):
+            if i >= len(self.text): break
             char = self.text[i]
             if char == '\n':
                 curr_r += 1
-                curr_c = 0
+                curr_c = prompt_width
                 continue
             
             w = display_width(char)
             if curr_c + w > self.width:
                 curr_r += 1
-                curr_c = w
+                curr_c = prompt_width + w
             else:
                 curr_c += w
         
         cursor_row = curr_r
         cursor_col = curr_c
+        
+        # Adjust scroll_y if cursor is out of view
+        if cursor_row < self.scroll_y:
+            self.scroll_y = cursor_row
+        elif cursor_row >= self.scroll_y + self.height:
+            self.scroll_y = cursor_row - self.height + 1
 
-        for i, line in enumerate(lines):
-            if i >= self.height:
-                break
+        # Render visible lines
+        for i in range(self.scroll_y, min(len(lines), self.scroll_y + self.height)):
+            line_idx = i - self.scroll_y
+            line = lines[i]
             
             display_line = ""
             if i == 0:
@@ -217,11 +239,12 @@ class InputComponent(Component):
             else:
                 display_line = line
                 
-            buffer.write_str(self.x, self.y + i, display_line, fg=self.fg, bg=self.bg, max_width=self.width)
+            buffer.write_str(self.x, self.y + line_idx, display_line, fg=self.fg, bg=self.bg, max_width=self.width)
         
-        # Set hardware cursor position in buffer
-        if 0 <= cursor_row < self.height:
-            buffer.set_cursor(self.x + cursor_col, self.y + cursor_row)
+        # Set hardware cursor position in buffer if within visible range
+        screen_cursor_row = cursor_row - self.scroll_y
+        if 0 <= screen_cursor_row < self.height:
+            buffer.set_cursor(self.x + cursor_col, self.y + screen_cursor_row)
 
     def handle_input(self, event: Any) -> bool:
         """Handle keyboard input for the text field."""
@@ -273,6 +296,7 @@ class InputComponent(Component):
                     self.on_submit(self.text)
                     self.text = ""
                     self.cursor_pos = 0
+                    self.scroll_y = 0
                 return True
             
             # 2. STANDARD KEYS

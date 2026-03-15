@@ -91,40 +91,46 @@ class Vsplit(Split):
 
 class Hsplit(Split):
     def render(self, buffer: Buffer):
+        # 1. First, calculate fixed and percentage sizes as baseline
         actual_sizes = self._calculate_actual_sizes(self.height)
         
-        # Identify 'auto' components (marked with 0 string, 0 int, or "auto")
-        # Sizes that are percentages or fixed numbers are calculated by 
-        # _calculate_actual_sizes already.
-        
-        # We need to refine actual_sizes for dynamic components BEFORE distributing
-        # the remaining space.
-        
-        # 1. First, find components that WANT a specific size based on content
+        # 2. Find "auto" components (0 or "auto") and get their preferred height
+        total_non_auto = 0
+        auto_indices = []
         for i, size in enumerate(self.sizes):
-             # Only override if it wasn't a % or fixed > 0
-             # Actually, if the user explicitly said "auto" or 0, we check.
-             if size == 0 or size == "auto":
-                 child = self.children[i]
-                 if hasattr(child, 'get_preferred_height'):
-                     actual_sizes[i] = child.get_preferred_height(self.width)
+            if size == 0 or size == "auto":
+                auto_indices.append(i)
+                child = self.children[i]
+                if hasattr(child, 'get_preferred_height'):
+                    actual_sizes[i] = child.get_preferred_height(self.width)
+            else:
+                total_non_auto += actual_sizes[i]
         
-        # 2. Re-calculate the distribution for any "100%" or truly flexible parts
-        # If there's a "100%", it should take whatever is left after fixed AND dynamic ones.
-        total_used = sum(s for i, s in enumerate(actual_sizes) if not (isinstance(self.sizes[i], float) or (isinstance(self.sizes[i], str) and self.sizes[i].endswith('%'))))
-        remaining = self.height - total_used
+        # 3. Handle constraints. If we have a "100%" component, it should take
+        # the REMAINING space after fixed and auto components are accounted for,
+        # but capped at the total height.
         
-        percent_indices = [i for i, s in enumerate(self.sizes) if isinstance(s, float) or (isinstance(s, str) and s.endswith('%'))]
-        if percent_indices and remaining > 0:
+        # Identify the flexible (percentage) components
+        percent_indices = [i for i, s in enumerate(self.sizes) if (isinstance(s, float) or (isinstance(s, str) and s.endswith('%')))]
+        
+        if percent_indices:
+            total_auto_and_fixed = sum(actual_sizes[i] for i in range(len(actual_sizes)) if i not in percent_indices)
+            remaining_for_percents = max(0, self.height - total_auto_and_fixed)
+            
+            # For now, if there's a 100%, give it all that's left
             for i in percent_indices:
-                # Simplification: if we have 100%, it takes all remaining.
-                # If multiple percents, we'd need to distribute. 
-                # For pico-chat, it's usually one "100%" and one dynamic.
-                actual_sizes[i] = max(0, remaining)
-                # (This is basic but works for the current layout)
+                actual_sizes[i] = remaining_for_percents
+
+        # 4. Final verification: If total > self.height, we need to clip from bottom auto components?
+        # Actually, let's just let Render handle clipping. 
 
         curr_y = self.y
         for i, child in enumerate(self.children):
-            child.set_layout(self.x, curr_y, self.width, actual_sizes[i])
+            # Apply max height if specified by child (e.g. InputPanel might want max 12)
+            final_h = actual_sizes[i]
+            if hasattr(child, 'max_height') and child.max_height:
+                final_h = min(final_h, child.max_height)
+            
+            child.set_layout(self.x, curr_y, self.width, final_h)
             child.render(buffer)
-            curr_y += actual_sizes[i]
+            curr_y += final_h

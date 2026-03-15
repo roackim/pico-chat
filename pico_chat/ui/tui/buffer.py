@@ -66,7 +66,8 @@ class Buffer:
                     break
                 
                 # Write the character plus any accumulated ANSI sequences to a single cell
-                self.set(curr_x, y, pending_ansi + char, fg, bg, bold)
+                if 0 <= curr_x < self.width and 0 <= y < self.height:
+                    self.set(curr_x, y, pending_ansi + char, fg, bg, bold)
                 pending_ansi = ""
                 
                 # If this is a wide character (emoji), mark the next cell as continuation
@@ -87,11 +88,11 @@ class Buffer:
         
         # Handle any trailing ANSI sequences (e.g., color resets)
         if pending_ansi and (max_width is None or count < max_width):
-            if curr_x > x:
+            if curr_x > x and 0 <= y < self.height:
                 # Attach trailing ANSI to the last character written
                 prev_cell = self.cells[y][curr_x - 1]
                 prev_cell.char += pending_ansi
-            else:
+            elif 0 <= curr_x < self.width and 0 <= y < self.height:
                 # If no characters were written, put ANSI in an empty cell
                 self.set(curr_x, y, pending_ansi + " ", fg, bg, bold)
 

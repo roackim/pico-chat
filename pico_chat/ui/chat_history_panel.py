@@ -16,19 +16,21 @@ WELCOME_MESSAGE = "Welcome to Pico-Chat!\n"
 class Message:    
     """Represents a message in the chat history with formatting support."""
     
-    def __init__(self, text: str, max_width: int = 80, left_padding: int = 0, title: str = "", frame_color: tuple[int, int, int] = None):
+    def __init__(self, text: str, max_width: int = 80, padding_left: int = 1, padding_right: int = 1, title: str = "", frame_color: tuple[int, int, int] = None):
         """Initialize a message.
         
         Args:
             text: The raw message text
             max_width: Maximum width for line wrapping
-            left_padding: Number of spaces to pad continuation lines
+            padding_left: Number of spaces to pad the left side
+            padding_right: Number of spaces to pad the right side
             title: Title for the message box
             frame_color: RGB color for the box frame and title
         """
         self.base_text = text
         self.max_width = max_width
-        self.left_padding = left_padding
+        self.padding_left = padding_left
+        self.padding_right = padding_right
         self.title = title
         self.frame_color = frame_color
         self.formatted_text = self._format_line_wrap()
@@ -62,25 +64,35 @@ class Message:
         return False
     
     def _format_line_wrap(self) -> str:
-        """Format the message text with smart word wrapping.
+        """Format the message text with smart word wrapping and padding.
         
-        Implements smart line breaking at word boundaries and adds left padding
-        to continuation lines to align text after the name prefix.
-        Properly handles emojis and wide Unicode characters using wcwidth.
-        Long words that exceed max_width are broken into chunks.
+        Uses the provided left and right padding for each line.
         """
         if self.max_width is None or self.max_width <= 0:
             return self.base_text
         
-        # Determine padding
-        padding_width = self.left_padding
-        if padding_width == 0:
-            # Auto-detect common patterns like "name: "
-            match = re.match(r'^[^:]+:\s', strip_ansi(self.base_text))
-            if match:
-                padding_width = display_width(match.group())
+        # Calculate available width for content after padding
+        content_width = self.max_width - self.padding_left - self.padding_right
+        if content_width < 1:
+            content_width = 1
         
-        return wrap_text(self.base_text, self.max_width, padding_width, first_line_padding=False)
+        # Wrap text into lines based on content_width
+        # We wrap each line of base_text separately to preserve existing newlines
+        lines = []
+        for line in self.base_text.split('\n'):
+            if not line:
+                # Still add padding to empty lines to maintain vertical alignment if needed
+                # (though usually just a newline is fine)
+                lines.append(" " * self.padding_left)
+                continue
+                
+            # Wrap the line
+            wrapped = wrap_text(line, content_width, padding_width=0, first_line_padding=False)
+            for w_line in wrapped.split('\n'):
+                # Apply left padding
+                lines.append(" " * self.padding_left + w_line)
+        
+        return "\n".join(lines)
     
     def reformat(self, max_width: int) -> str:
         """Reformat the message with a new maximum width.
@@ -126,18 +138,20 @@ class ChatHistoryTextComponent(TextComponent):
 class ChatHistoryPanel(TextComponent):
     """Manages the chat history display panel with dynamic width support."""
 
-    def __init__(self, max_width: int = 80, left_padding: int = 0, enable_markdown: bool = True):
+    def __init__(self, max_width: int = 80, padding_left: int = 1, padding_right: int = 1, enable_markdown: bool = True):
         """Initialize the chat history panel.
         
         Args:
-            max_width: Initial maximum width for message line wrapping (will be updated dynamically)
-            left_padding: Number of spaces to pad continuation lines (0 = auto-detect)
-            enable_markdown: Enable automatic markdown detection and rendering (default True)
+            max_width: Initial maximum width for message line wrapping
+            padding_left: Default number of spaces to pad the left side
+            padding_right: Default number of spaces to pad the right side
+            enable_markdown: Enable automatic markdown detection and rendering
         """
         super().__init__("", id="history")
         self.messages = []
         self.max_width = max_width
-        self.left_padding = left_padding
+        self.padding_left = padding_left
+        self.padding_right = padding_right
         self.enable_markdown = enable_markdown
         self.max_messages = 150  # Maximum number of messages to keep
         
@@ -240,7 +254,8 @@ class ChatHistoryPanel(TextComponent):
             new_message = Message(
                 message, 
                 max_width=self.max_width - 2, 
-                left_padding=self.left_padding,
+                padding_left=self.padding_left,
+                padding_right=self.padding_right,
                 title=title,
                 frame_color=frame_color
             )
