@@ -87,6 +87,40 @@ class Harness:
     def get_state(self) -> AgentState:
         return self.state
 
+    def clear_history(self):
+        """Clear the conversation history for the agent."""
+        self.history = []
+        self.debug_stream.log("CLEAR", "Conversation history cleared")
+
+    def estimate_context_usage(self) -> tuple[int, int, float]:
+        """
+        Estimate current context usage in tokens.
+        Returns: (current_tokens, max_tokens, percentage)
+        """
+        # Simple estimation: 1 token ~= 4 characters for English text
+        total_chars = 0
+        for msg in self.history:
+            total_chars += len(msg.get("content", ""))
+            
+        # Add system prompt estimation (approx 500 chars)
+        total_chars += 500
+        
+        current_tokens = total_chars // 4
+        # Get max context from config or default to 32k
+        max_tokens = getattr(self.config, 'max_context', 32768)
+        
+        percentage = (current_tokens / max_tokens) * 100 if max_tokens > 0 else 0
+        return current_tokens, max_tokens, percentage
+
+    async def check_connection(self) -> bool:
+        """Check if the LLM server is reachable."""
+        try:
+            # Try a very lightweight request (models list)
+            await asyncio.wait_for(self.client.models.list(), timeout=2.0)
+            return True
+        except Exception:
+            return False
+
     async def chat(self, user_input: str) -> AsyncGenerator[str, None]:
         """
         Main chat loop, mimicking minichat.py's direct execution flow.

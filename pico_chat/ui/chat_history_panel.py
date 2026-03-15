@@ -163,6 +163,7 @@ class ChatHistoryPanel(TextComponent):
         
         # Add welcome message
         self.add_message(WELCOME_MESSAGE.rstrip())
+        self.finalize_last_message()
         
         # Initial component - self is now the component
         self.compositor: Optional[object] = None
@@ -284,6 +285,9 @@ class ChatHistoryPanel(TextComponent):
         if overwrite_last and self.messages:
             last_msg = self.messages[-1]
             last_msg.base_text = message
+            if title:
+                last_msg.title = title
+                last_msg.box.title = title
             last_msg.reformat(self.max_width - 2)
             return
 
@@ -291,8 +295,10 @@ class ChatHistoryPanel(TextComponent):
             # Append to the last message
             last_msg = self.messages[-1]
             last_msg.base_text += message
+            if title:
+                last_msg.title = title
+                last_msg.box.title = title
             # Reformat with current width (inner width)
-            last_msg.reformat(self.max_width - 2)
             last_msg.reformat(self.max_width - 2)
         else:
             # Create a new message
@@ -316,13 +322,29 @@ class ChatHistoryPanel(TextComponent):
             
         # No implicit render call here, compositor's main loop handles it
 
-    def add_user_message(self, message: str, color: tuple[int, int, int] = None):
+    def add_user_message(self, message: str, color: tuple[int, int, int] = None, title: str = "user"):
         """Add a user message with the appropriate header and formatting."""
-        self.add_message(message, title="user", frame_color=color)
+        self.add_message(message, title=title, frame_color=color)
 
-    def add_pico_message(self, message: str, color: tuple[int, int, int] = None):
+    def add_pico_message(self, message: str, color: tuple[int, int, int] = None, title: str = "pico"):
         """Add a Pico assistant message with the appropriate header and formatting."""
-        self.add_message(message, title="pico", frame_color=color)
+        self.add_message(message, title=title, frame_color=color)
+
+    def add_system_message(self, message: str, color: tuple[int, int, int] = (100, 100, 100), title: str = "system"):
+        """Add a system or command result message."""
+        self.add_message(message, title=title, frame_color=color)
+
+    def clear(self):
+        """Clear the chat history UI."""
+        self.messages = []
+        self.msg_container.children = []
+        self.msg_container.sizes = []
+        self.scroll_offset = 0
+        self.auto_scroll = True
+        
+        # Optionally re-add welcome message
+        self.add_message(WELCOME_MESSAGE.rstrip())
+        self.finalize_last_message()
     
     def _contains_markdown(self, text: str) -> bool:
         """Detect if text contains markdown syntax.

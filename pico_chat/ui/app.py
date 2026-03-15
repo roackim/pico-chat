@@ -1,5 +1,6 @@
 """Pico-Chat TUI Application."""
 
+import sys
 import asyncio
 from typing import Optional, Any
 
@@ -87,8 +88,65 @@ class chatTUI:
                 )
 
 
+    def on_command_submit(self, text: str):
+        """Handle execution of commands."""
+        cmd = text.strip().lower()
+        if cmd == "/exit":
+            if self.compositor:
+                self.compositor.running = False
+        elif cmd == "/clear":
+            # 1. Clear the UI
+            self.chat_history_panel.clear()
+            # 2. Clear the agent's history if clear_history is available
+            if hasattr(self.agent, 'clear_history'):
+                self.agent.clear_history()
+            # 3. Inform the user in the new cleared history (without adding another welcome)
+            self.chat_history_panel.add_system_message("Conversation history cleared.")
+            self.chat_history_panel.finalize_last_message()
+        elif cmd == "/status":
+            # Use a closure or helper to run the async check and update UI
+            async def run_status():
+                is_online = await self.agent.check_connection()
+                status_text = "online" if is_online else "offline"
+                color_code = "\x1b[32m" if is_online else "\x1b[31m"
+                
+                # Context estimation
+                cur, max_ctx, perc = self.agent.check_context() if hasattr(self.agent, 'check_context') else self.agent.estimate_context_usage()
+                
+                # Retrieve model name from config
+                model_name = getattr(self.agent.config, 'model', 'unknown')
+                
+                report = (
+                    f"LLM Connectivity : {color_code}{status_text}\x1b[0m\n"
+                    f"Active Model     : {model_name}\n"
+                    f"Context Pressure : {perc:.1f}% | {cur/1024:.1f}k / {max_ctx/1024:.1f}k"
+                )
+                self.chat_history_panel.add_system_message(report, title="status")
+                self.chat_history_panel.finalize_last_message()
+            
+            asyncio.create_task(run_status())
+
+        elif cmd == "/help":
+            help_text = (
+                "\033[1mAvailable commands:\033[0m\n"
+                "/help   - Show this help\n"
+                "/status - Show system and connection status\n"
+                "/exit   - Close the application\n"
+                "/clear  - Clear chat history"
+            )
+            # Add as a system message
+            self.chat_history_panel.add_system_message(help_text, title=cmd[1:])
+            self.chat_history_panel.finalize_last_message()
+        else:
+            self.chat_history_panel.add_system_message(f"Unknown command: {cmd}", color=(255, 0, 0))
+            self.chat_history_panel.finalize_last_message()
+
     def on_user_submit(self, text: str):
         """Handle user input submission."""
+        if text.startswith('/'):
+            self.on_command_submit(text)
+            return
+
         if text.strip().lower() in ["exit", "quit", "q"]:
             if self.compositor:
                 self.compositor.running = False
@@ -128,6 +186,24 @@ class chatTUI:
         # Call the original method to avoid infinite recursion
         return self._original_handle_input(event)
 
+    def render(self, force_full=False):
+        if not self.compositor or self.compositor.width == 0 or self.compositor.height == 0:
+            return
+
+        self.compositor.buffer.clear()
+        self.root.set_layout(0, 0, self.compositor.width, self.compositor.height)
+        self.root.render(self.compositor.buffer)
+        
+        # 1. Render Floating Panels
+        # Input Menu (ensure it's on top of history)
+        if hasattr(self, 'input_panel'):
+            self.input_panel.render_menu(self.compositor.buffer)
+            
+        # Use Buffer's built-in render method
+        output = self.compositor.buffer.render()
+        sys.stdout.write(output)
+        sys.stdout.flush()
+
     async def run(self):
         """Run the TUI application."""
         # Start the harness services if available
@@ -160,6 +236,9 @@ class chatTUI:
 
         # Run all tasks
         try:
+            # Override compositor.render to use our render
+            self.compositor.render = self.render
+            
             done, pending = await asyncio.wait(
                 [
                     asyncio.create_task(self.compositor.run()),
