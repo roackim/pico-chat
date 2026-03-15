@@ -2,6 +2,7 @@
 
 import re
 from typing import Optional
+from wcwidth import wcswidth
 
 from pico_chat.ui.tui.component import TextComponent, Box
 
@@ -15,6 +16,24 @@ ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 def strip_ansi(text: str) -> str:
     """Strip ANSI escape codes from text."""
     return ANSI_ESCAPE.sub('', text)
+
+
+def display_width(text: str) -> int:
+    """Calculate the display width of text including emojis and wide characters.
+    
+    Strips ANSI codes first, then uses wcwidth to calculate actual terminal width.
+    
+    Args:
+        text: The text to measure
+        
+    Returns:
+        The display width in terminal columns
+    """
+    clean_text = strip_ansi(text)
+    width = wcswidth(clean_text)
+    # wcswidth returns -1 for strings with control characters
+    # Fall back to len() in that case
+    return width if width >= 0 else len(clean_text)
 
 
 class Message:    
@@ -38,9 +57,8 @@ class Message:
         
         Implements smart line breaking at word boundaries and adds left padding
         to continuation lines to align text after the name prefix.
-        
-        TODO: (hard) find a way to handle ANSI color codes correctly in all cases
-              (currently strips them for width calculation and preserves them in output)
+        Properly handles emojis and wide Unicode characters using wcwidth.
+        Long words that exceed max_width are broken into chunks.
         """
         if self.max_width is None or self.max_width <= 0:
             return self.base_text
@@ -52,7 +70,7 @@ class Message:
             # Auto-detect common patterns like "name: "
             match = re.match(r'^[^:]+:\s', strip_ansi(self.base_text))
             if match:
-                padding_width = len(match.group())
+                padding_width = display_width(match.group())
         
         # Split into words but preserve newlines from the original text
         lines = []
@@ -74,9 +92,9 @@ class Message:
             line_max_width = self.max_width
             
             for word_idx, word in enumerate(words):
-                # Use ANSI-stripped version for width calculations
-                word_display_width = len(strip_ansi(word))
-                current_display_width = len(strip_ansi(current_line))
+                # Use display_width for proper emoji and wide character support
+                word_display_width = display_width(word)
+                current_display_width = display_width(current_line)
                 
                 # Check if adding this word would exceed the width
                 space_needed = 1 if current_line else 0
@@ -88,22 +106,139 @@ class Message:
                     else:
                         current_line = word
                 else:
-                    # Word doesn't fit, start a new line
-                    if current_line:
-                        lines.append(current_line)
+                    # Word doesn't fit on current line
                     
-                    # Start new line with padding (except for the very first line)
+                    # Check if word is too long to fit on any line
+                    # Determine available space for first chunk
                     if is_first_line:
-                        is_first_line = False
-                        line_max_width = self.max_width - padding_width
+                        # On first line, use available space after current content
+                        available_for_first_chunk = line_max_width - current_display_width - space_needed
+                    else:
+                        # On continuation lines, account for padding
+                        available_for_first_chunk = line_max_width
                     
-                    current_line = " " * padding_width + word
+                    if word_display_width > line_max_width:
+                        # Word is too long, need to break it into chunks
+                        if current_line and available_for_first_chunk > 0:
+                            # Fill the current line as much as possible
+                            first_chunk, rest = self._split_word_at_width(word, available_for_first_chunk)
+                            if first_chunk:
+                                current_line += (" " if space_needed else "") + first_chunk
+                                lines.append(current_line)
+                                
+                                # Process the rest of the word
+                                if is_first_line:
+                                    is_first_line = False
+                                    line_max_width = self.max_width - padding_width
+                                
+                                remaining_chunks = self._break_long_word(rest, line_max_width, padding_width)
+                                for chunk_idx, chunk in enumerate(remaining_chunks):
+                                    if chunk_idx > 0:
+                                        lines.append(current_line)
+                                    current_line = " " * padding_width + chunk
+                            else:
+                                # First chunk is empty, just move to next line
+                                lines.append(current_line)
+                                if is_first_line:
+                                    is_first_line = False
+                                    line_max_width = self.max_width - padding_width
+                                
+                                chunks = self._break_long_word(word, line_max_width, padding_width)
+                                for chunk_idx, chunk in enumerate(chunks):
+                                    if chunk_idx > 0:
+                                        lines.append(current_line)
+                                    current_line = " " * padding_width + chunk
+                        else:
+                            # No current content, start fresh
+                            if current_line:
+                                lines.append(current_line)
+                            
+                            if is_first_line:
+                                is_first_line = False
+                                line_max_width = self.max_width - padding_width
+                            
+                            chunks = self._break_long_word(word, line_max_width, padding_width)
+                            for chunk_idx, chunk in enumerate(chunks):
+                                if chunk_idx > 0:
+                                    lines.append(current_line)
+                                current_line = " " * padding_width + chunk
+                    else:
+                        # Word fits on a new line, move it there
+                        if current_line:
+                            lines.append(current_line)
+                        
+                        if is_first_line:
+                            is_first_line = False
+                            line_max_width = self.max_width - padding_width
+                        
+                        current_line = " " * padding_width + word
             
             # Add any remaining text
             if current_line:
                 lines.append(current_line)
         
         return "\n".join(lines)
+    
+    def _split_word_at_width(self, word: str, max_width: int) -> tuple[str, str]:
+        """Split a word at a specific width.
+        
+        Args:
+            word: The word to split
+            max_width: Maximum width for the first part
+            
+        Returns:
+            Tuple of (first_part, remaining_part)
+        """
+        if max_width <= 0:
+            return ("", word)
+        
+        first_part = ""
+        for i, char in enumerate(word):
+            char_width = display_width(char)
+            current_width = display_width(first_part)
+            
+            if current_width + char_width > max_width:
+                # Stop here, return what we have
+                return (first_part, word[i:])
+            
+            first_part += char
+        
+        # Entire word fits
+        return (word, "")
+    
+    def _break_long_word(self, word: str, max_width: int, padding_width: int) -> list[str]:
+        """Break a word that's too long into chunks that fit within max_width.
+        
+        Args:
+            word: The word to break
+            max_width: Maximum width for each chunk
+            padding_width: Padding width (to calculate available space)
+            
+        Returns:
+            List of word chunks
+        """
+        chunks = []
+        current_chunk = ""
+        
+        # Process word character by character
+        for char in word:
+            char_width = display_width(char)
+            current_width = display_width(current_chunk)
+            
+            # Check if adding this character would exceed max_width
+            if current_width + char_width > max_width:
+                # Save current chunk and start a new one
+                if current_chunk:
+                    chunks.append(current_chunk)
+                current_chunk = char
+            else:
+                current_chunk += char
+        
+        # Add remaining chunk
+        if current_chunk:
+            chunks.append(current_chunk)
+        
+        return chunks
     
     def reformat(self, max_width: int) -> str:
         """Reformat the message with a new maximum width.

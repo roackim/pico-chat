@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional
+from wcwidth import wcwidth
 
 @dataclass
 class Cell:
@@ -24,6 +25,7 @@ class Buffer:
         This method is ANSI-aware: escape sequences are stored alongside the next
         printable character in a single cell, ensuring they don't occupy extra
         horizontal space in the grid.
+        Properly handles emoji and wide character widths using wcwidth.
         """
         import re
         # Regex for standard ANSI escape sequences
@@ -32,7 +34,7 @@ class Buffer:
         curr_x = x
         pending_ansi = "" # Accumulates ANSI sequences to be attached to the next character
         i = 0
-        count = 0 # Tracks visible character count for clipping
+        count = 0 # Tracks visible character width (columns) for clipping
         
         while i < len(s):
             # Respect max_width if provided (clipping)
@@ -49,12 +51,21 @@ class Buffer:
                 if char == '\n':
                     break
                 
+                # Calculate the display width of this character
+                char_width = wcwidth(char)
+                if char_width < 0:  # Control characters return -1
+                    char_width = 1
+                
+                # Check if this character would exceed max_width
+                if max_width is not None and count + char_width > max_width:
+                    break
+                
                 # Write the character plus any accumulated ANSI sequences to a single cell
                 self.set(curr_x, y, pending_ansi + char, fg, bg, bold)
                 pending_ansi = ""
                 curr_x += 1
                 i += 1
-                count += 1
+                count += char_width
         
         # Handle any trailing ANSI sequences (e.g., color resets)
         if pending_ansi and (max_width is None or count < max_width):
