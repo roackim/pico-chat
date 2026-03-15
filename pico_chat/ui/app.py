@@ -93,6 +93,8 @@ class chatTUI:
             if self.compositor:
                 self.compositor.running = False
         else:
+            # Enable auto-scroll to show the new message
+            self.chat_history_panel.auto_scroll = True
             # Add user message immediately with color and header
             self.chat_history_panel.add_user_message(text, self.user_color)
             # Add to processing queue for agent

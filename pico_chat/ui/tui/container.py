@@ -12,6 +12,10 @@ class Container(Component):
         for child in self.children:
             child.parent = self
 
+    def render(self, buffer: Buffer):
+        for child in self.children:
+            child.render(buffer)
+
     def handle_input(self, event) -> bool:
         for child in self.children:
             if child.handle_input(event):
