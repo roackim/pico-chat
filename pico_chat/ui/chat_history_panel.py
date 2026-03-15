@@ -234,7 +234,7 @@ class ChatHistoryPanel(TextComponent):
         rendered_lines = [msg.get_formatted() for msg in self.messages]
         return "\n".join(rendered_lines) + "\n"
 
-    def add_message(self, message: str, append: bool = False, title: str = "", frame_color: tuple[int, int, int] = None):
+    def add_message(self, message: str, append: bool = False, title: str = "", frame_color: tuple[int, int, int] = None, overwrite_last: bool = False):
         """Add a message to chat history and update UI.
         
         Args:
@@ -242,12 +242,20 @@ class ChatHistoryPanel(TextComponent):
             append: If True, appends to the last message without creating a new one
             title: Optional title for the message box
             frame_color: Optional RGB color for the box frame
+            overwrite_last: If True, replaces text of last message.
         """
+        if overwrite_last and self.messages:
+            last_msg = self.messages[-1]
+            last_msg.base_text = message
+            last_msg.reformat(self.max_width - 2)
+            return
+
         if append and self.messages:
             # Append to the last message
             last_msg = self.messages[-1]
             last_msg.base_text += message
             # Reformat with current width (inner width)
+            last_msg.reformat(self.max_width - 2)
             last_msg.reformat(self.max_width - 2)
         else:
             # Create a new message

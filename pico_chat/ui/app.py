@@ -11,7 +11,7 @@ from pico_chat.ui.input_panel import InputPanel
 from pico_chat.ui.chat_history_panel import ChatHistoryPanel
 
 
-TARGET_FPS = 30
+TARGET_FPS = 60
 
 
 class chatTUI:
@@ -51,17 +51,25 @@ class chatTUI:
                 user_input = await asyncio.wait_for(self.message_queue.get(), timeout=0.1)
                 
                 # Show thinking indicator
-                self.chat_history_panel.add_pico_message("", self.assistant_color)
+                self.chat_history_panel.add_pico_message("Thinking...", self.assistant_color)
                 
                 # Process streaming response from Harness
                 full_response = ""
+                is_first_chunk = True
                 try:
                     async for chunk in self.agent.chat(user_input):
-                        self.chat_history_panel.add_message(chunk, append=True)
+                        if is_first_chunk:
+                            # Replace "Thinking..." with the first real chunk
+                            self.chat_history_panel.add_message(chunk, append=False, overwrite_last=True)
+                            is_first_chunk = False
+                        else:
+                            self.chat_history_panel.add_message(chunk, append=True)
                         full_response += chunk
                         # Yield to let the compositor render the update
                         await asyncio.sleep(0)
                 except Exception as e:
+                     # If we fail before getting any chunk, the "Thinking..." might still be there.
+                     # We can append the error.
                      self.chat_history_panel.add_message(f"\n\033[31m[Error]: {str(e)}\033[0m", append=True)
                 
                 # Finalize the message to render markdown now that streaming is complete
