@@ -15,6 +15,10 @@ class Buffer:
         self.width = width
         self.height = height
         self.cells = [[Cell() for _ in range(width)] for _ in range(height)]
+        self.cursor_pos: Optional[tuple[int, int]] = None  # (x, y)
+
+    def set_cursor(self, x: int, y: int):
+        self.cursor_pos = (x, y)
 
     def set(self, x: int, y: int, char: str, fg=None, bg=None, bold=False):
         if 0 <= x < self.width and 0 <= y < self.height:
@@ -148,6 +152,14 @@ class Buffer:
                     terminal_col += 2  # Wide character occupies 2 columns
                 else:
                     terminal_col += 1  # Normal character occupies 1 column
+        
+        # Finally, move the cursor to its desired position if specified
+        if self.cursor_pos:
+            cx, cy = self.cursor_pos
+            res.append(ANSI.move_to(cy + 1, cx + 1))
+            res.append(ANSI.SHOW_CURSOR)
+        else:
+            res.append(ANSI.HIDE_CURSOR)
                 
         res.append(ANSI.RESET)
         return "".join(res)

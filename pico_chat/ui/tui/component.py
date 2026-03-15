@@ -2,11 +2,7 @@ import re
 from abc import ABC, abstractmethod
 from typing import Optional, Any
 from pico_chat.ui.tui.buffer import Buffer
-
-ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-
-def strip_ansi(s: str) -> str:
-    return ANSI_ESCAPE.sub('', s)
+from pico_chat.ui.tui.layout_utils import display_width, wrap_text, strip_ansi
 
 class Component(ABC):
     def __init__(self, id: Optional[str] = None):
@@ -80,6 +76,16 @@ class Box(Component):
         super().set_layout(x, y, width, height)
         self.child.set_layout(x + 1, y + 1, width - 2, height - 2)
 
+    def get_preferred_height(self, width: int) -> int:
+        """Box adds 2 rows of height for borders (top/bottom)."""
+        if hasattr(self.child, 'get_preferred_height'):
+            # Height of child inside the box plus top/bottom borders.
+            # Child's width inside box is box_width - 2.
+            inner_height = self.child.get_preferred_height(width - 2)
+            return inner_height + 2
+        # Otherwise fall back to a reasonable default or 0
+        return 0
+
     def render(self, buffer: Buffer):
         """
         Renders a box with borders and an optional title.
@@ -145,32 +151,183 @@ class InputComponent(Component):
         self.on_submit = None  # Callback for when enter is pressed
         self.cursor_pos = 0
 
+    def _get_lines(self) -> list[str]:
+        """Wrap text into lines based on current width."""
+        prompt_width = display_width(self.prompt)
+        available_width = self.width
+        
+        if available_width <= prompt_width:
+            return [""] # Too narrow
+            
+        full_text = self.text
+        # Use our new wrap_text utility
+        wrapped = wrap_text(full_text, available_width, padding_width=0, first_line_padding=False)
+        lines = wrapped.split('\n')
+        return lines
+
+    def get_preferred_height(self, width: int) -> int:
+        """Calculate height needed for wrapped text."""
+        prompt_width = display_width(self.prompt)
+        if width <= prompt_width:
+            return 1
+            
+        wrapped = wrap_text(self.text, width, padding_width=0, first_line_padding=False)
+        return len(wrapped.split('\n'))
+
     def render(self, buffer: Buffer):
         """Render the input field with prompt and text."""
-        display_text = self.prompt + self.text
-        if self.height > 0:
-            # Show cursor at the end
-            cursor_display = display_text + "█"
-            buffer.write_str(self.x, self.y, cursor_display, fg=self.fg, bg=self.bg, max_width=self.width)
+        lines = self._get_lines()
+        
+        # We need to re-calculate cursor position based on lines
+        # Basically repeat the wrapping logic but stop at cursor_pos
+        curr_r = 0
+        curr_c = display_width(self.prompt)
+        for i in range(self.cursor_pos):
+            char = self.text[i]
+            if char == '\n':
+                curr_r += 1
+                curr_c = 0
+                continue
+            
+            w = display_width(char)
+            if curr_c + w > self.width:
+                curr_r += 1
+                curr_c = w
+            else:
+                curr_c += w
+        
+        cursor_row = curr_r
+        cursor_col = curr_c
+
+        for i, line in enumerate(lines):
+            if i >= self.height:
+                break
+            
+            display_line = ""
+            if i == 0:
+                display_line = self.prompt + line
+            else:
+                display_line = line
+                
+            buffer.write_str(self.x, self.y + i, display_line, fg=self.fg, bg=self.bg, max_width=self.width)
+        
+        # Set hardware cursor position in buffer
+        if 0 <= cursor_row < self.height:
+            buffer.set_cursor(self.x + cursor_col, self.y + cursor_row)
 
     def handle_input(self, event: Any) -> bool:
         """Handle keyboard input for the text field."""
         if isinstance(event, str):
-            if event == '\r' or event == '\n':  # Enter key
+            # Key constants
+            KEY_ENTER = '\r'
+            KEY_NEWLINE = '\n'
+            KEY_BACKSPACE = '\x7f'
+            
+            # 1. SPECIAL COMBINATIONS
+            
+            # Ctrl+Left (Word back)
+            if event == '\x1b[1;5D':
+                if self.cursor_pos > 0:
+                    i = self.cursor_pos - 1
+                    while i > 0 and self.text[i-1].isspace(): i -= 1
+                    while i > 0 and not self.text[i-1].isspace(): i -= 1
+                    self.cursor_pos = i
+                return True
+                
+            # Ctrl+Right (Word forward)
+            if event == '\x1b[1;5C':
+                if self.cursor_pos < len(self.text):
+                    i = self.cursor_pos
+                    while i < len(self.text) and self.text[i].isspace(): i += 1
+                    while i < len(self.text) and not self.text[i].isspace(): i += 1
+                    self.cursor_pos = i
+                return True
+
+            # Ctrl+W (Delete word back) or Ctrl+Backspace (\x1b\x7f or \x08)
+            if event in ('\x17', '\x1b\x7f', '\x08'):
+                if self.cursor_pos > 0:
+                    i = self.cursor_pos
+                    while i > 0 and self.text[i-1].isspace(): i -= 1
+                    while i > 0 and not self.text[i-1].isspace(): i -= 1
+                    self.text = self.text[:i] + self.text[self.cursor_pos:]
+                    self.cursor_pos = i
+                return True
+
+            # Shift+Enter or Ctrl+Enter -> Newline
+            if event in ('\x1b[13;2u', '\x1b[13;5u', '\x0a'):
+                self.text = self.text[:self.cursor_pos] + "\n" + self.text[self.cursor_pos:]
+                self.cursor_pos += 1
+                return True
+
+            # Regular Enter -> Submit
+            if event == KEY_ENTER or event == KEY_NEWLINE:
                 if self.on_submit and self.text.strip():
                     self.on_submit(self.text)
                     self.text = ""
                     self.cursor_pos = 0
                 return True
-            elif event == '\x7f':  # Backspace
-                if self.text:
-                    self.text = self.text[:-1]
-                    self.cursor_pos = len(self.text)
+            
+            # 2. STANDARD KEYS
+            
+            if event == KEY_BACKSPACE:
+                if self.cursor_pos > 0:
+                    self.text = self.text[:self.cursor_pos-1] + self.text[self.cursor_pos:]
+                    self.cursor_pos -= 1
                 return True
-            elif len(event) == 1 and event.isprintable():
-                self.text += event
-                self.cursor_pos = len(self.text)
+            
+            # Arrow Keys
+            if event == '\x1b[D': # Left
+                self.cursor_pos = max(0, self.cursor_pos - 1)
                 return True
+            if event == '\x1b[C': # Right
+                self.cursor_pos = min(len(self.text), self.cursor_pos + 1)
+                return True
+            
+            if event == '\x1b[A': # Up
+                curr_r, curr_c = 0, display_width(self.prompt)
+                for i in range(self.cursor_pos):
+                    char = self.text[i]
+                    if char == '\n': curr_r += 1; curr_c = 0; continue
+                    w = display_width(char); curr_c += w
+                    if curr_c > self.width: curr_r += 1; curr_c = w
+                
+                if curr_r > 0:
+                    target_row, target_col = curr_r - 1, curr_c
+                    new_pos, r, c = 0, 0, display_width(self.prompt)
+                    for i, char in enumerate(self.text):
+                        if r == target_row and c >= target_col: break
+                        new_pos = i + 1
+                        if char == '\n': r += 1; c = 0; continue
+                        w = display_width(char); c += w
+                        if c > self.width: r += 1; c = w
+                    self.cursor_pos = new_pos
+                return True
+                
+            if event == '\x1b[B': # Down
+                curr_r, curr_c = 0, display_width(self.prompt)
+                for i in range(self.cursor_pos):
+                    char = self.text[i]
+                    if char == '\n': curr_r += 1; curr_c = 0; continue
+                    w = display_width(char); curr_c += w
+                    if curr_c > self.width: curr_r += 1; curr_c = w
+                
+                target_row, target_col = curr_r + 1, curr_c
+                new_pos, r, c = 0, 0, display_width(self.prompt)
+                for i, char in enumerate(self.text):
+                    if r == target_row and c >= target_col: break
+                    new_pos = i + 1
+                    if char == '\n': r += 1; c = 0; continue
+                    w = display_width(char); c += w
+                    if c > self.width: r += 1; c = w
+                self.cursor_pos = new_pos
+                return True
+            
+            # Default: insert character
+            if len(event) == 1 and ord(event) >= 32:
+                self.text = self.text[:self.cursor_pos] + event + self.text[self.cursor_pos:]
+                self.cursor_pos += 1
+                return True
+        return False
         return False
 
     def update(self, text: str):

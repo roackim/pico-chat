@@ -117,7 +117,7 @@ class chatTUI:
         right_col = Hsplit([
             self.chat_history_panel.get_component(),
             self.input_panel.get_component()
-        ], ["100%", "3c"])
+        ], ["100%", 0]) # Change 3c to 0 (auto-calculate height)
 
         # Main Layout
         # root = Vsplit([left_col, right_col], ["20c", "100%"])

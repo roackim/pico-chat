@@ -92,6 +92,37 @@ class Vsplit(Split):
 class Hsplit(Split):
     def render(self, buffer: Buffer):
         actual_sizes = self._calculate_actual_sizes(self.height)
+        
+        # Identify 'auto' components (marked with 0 string, 0 int, or "auto")
+        # Sizes that are percentages or fixed numbers are calculated by 
+        # _calculate_actual_sizes already.
+        
+        # We need to refine actual_sizes for dynamic components BEFORE distributing
+        # the remaining space.
+        
+        # 1. First, find components that WANT a specific size based on content
+        for i, size in enumerate(self.sizes):
+             # Only override if it wasn't a % or fixed > 0
+             # Actually, if the user explicitly said "auto" or 0, we check.
+             if size == 0 or size == "auto":
+                 child = self.children[i]
+                 if hasattr(child, 'get_preferred_height'):
+                     actual_sizes[i] = child.get_preferred_height(self.width)
+        
+        # 2. Re-calculate the distribution for any "100%" or truly flexible parts
+        # If there's a "100%", it should take whatever is left after fixed AND dynamic ones.
+        total_used = sum(s for i, s in enumerate(actual_sizes) if not (isinstance(self.sizes[i], float) or (isinstance(self.sizes[i], str) and self.sizes[i].endswith('%'))))
+        remaining = self.height - total_used
+        
+        percent_indices = [i for i, s in enumerate(self.sizes) if isinstance(s, float) or (isinstance(s, str) and s.endswith('%'))]
+        if percent_indices and remaining > 0:
+            for i in percent_indices:
+                # Simplification: if we have 100%, it takes all remaining.
+                # If multiple percents, we'd need to distribute. 
+                # For pico-chat, it's usually one "100%" and one dynamic.
+                actual_sizes[i] = max(0, remaining)
+                # (This is basic but works for the current layout)
+
         curr_y = self.y
         for i, child in enumerate(self.children):
             child.set_layout(self.x, curr_y, self.width, actual_sizes[i])
