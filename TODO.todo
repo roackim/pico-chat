@@ -1,0 +1,105 @@
+[x] commands to implement:
+    [x] /help - list available commands
+    [x] /clear - clear the chat history
+    [x] /exit - exit the application
+    [x] /status - show infos about connection, model, context etc
+    [ ] /stop - stop the current generation
+    [ ] /retry
+
+[ ] split command:
+    - splits the terminal in 2 vertical panels, seperate conversations in each panel ?
+        [?] think more about the use case for this. Should not be so difficult to implement.
+        [ ] maybe the vsplit should be attached to the conversation
+            - can monitor the status, use commands without polluting the main conversation
+            - could imagine having a 2nd AI but without tools access in the vsplit for testing, brainstorming, general questions etc
+
+[ ] Steer the model while generating (e.g user message in the middle of generation)
+
+[!] Focus / Select messages in the history (UP/DOWN to navigate, changing focus, MOUSE click to focus)
+    [ ] Add vim like actions for focused message 
+        - e to edit user messages, c to copy, r to retry assistant messages, etc
+        
+    [ ] Allow / Deny button on the 'Interactive' commands from tool calls (e.g pico wants to open a file, [allow] / [deny], etc)
+        -> spawn a system message with the tool call content and buttons for allow / deny
+        -> should be clickable with mouse or keyboard with LEFT/RIGHT to select button and ENTER to confirm
+            -> or maybe also Y / N
+
+[ ] Bubblewrap containerize tool calls for security (e.g. file access, command execution, etc)
+
+[x] Input field: dynamic height when line wrapping
+[x] Input field: ergonomics (ctrl+w, cursor movement, home/end, ctrl+backspace etc)
+[!] Input field: @file = upward menu with fuzzy file seach current dir
+[ ] Input and History: support mouse selection and copy
+
+[x] Scroll with mouse wheel (either in history or input when focused (if long enough to scroll))
+
+[ ] Scroll bars for panels when content exceeds visible area ?
+    
+[ ]  expandable thinking while focused to show intermediate thoughts / tool calls if the model is configured to stream those
+    - [expand] [collapse] button to toggle visibility of intermediate thoughts / tool calls
+    - show last N lines of intermediate thoughts / tool calls in the history panel while generating
+        
+[ ] Complexify Markdown rendering
+    [ ] Live markdown rendering (e.g. render code blocks as they are being generated, render headers, lists, etc)
+    [ ] Add AsciiTable for interpreting markdown tables in the chat history
+    [ ] Codeblock should not wrap lines or add continuation chars (way simpler)
+    
+[ ] Add timestamps to messages
+[x] Add message thinking status (static)
+[ ] Add message thinking status (dynamic, animated)
+[ ] Add support for multiple conversations / threads
+[x] PATCH tool problems 
+    patch: Invalid patch format: Missing '<<<<<<< SEARCH' marker 
+
+BUGS:
+[x] Fix cursor blip / flcikering with big terminals
+    [x] Disable cursor, emulate one
+    [x] Re-enable cursor after program closes OR ctrl+c
+
+LONG TERM:
+[ ] Config
+[ ] Open Router support
+[ ] Custom System prompts / Personalities
+[ ] Custom commands / tools
+[ ] Custom prompts aliases like @docs to quickly ask for documentation 
+[!] Context builder
+
+    
+Cool test prompts:
+* Can you explain to me how a PRNG LCG works ?
+* Make a python script binairo.py to generate a binairo puzzle and its solution. (Sudoku variant)
+
+ROADMAP:
+1: focus / select messages
+2: buttons working
+3: bublewrap containerization of tool calls ! [really important for security]
+4: inference interactivity (steering, stopping, showing intermediate thoughts, etc)
+5: markdown rendering improvements (tables, code blocks, etc)
+
+
+
+TODO FIX ERROR: (should not happend AND IF IT HAPPENS IT SHOULD NOT CRASH THE APP)
+
+Traceback (most recent call last):
+  File "/home/joackim/Projects/pico-chat/pico_chat/ui/tui/compositor.py", line 68, in run
+    self.render()
+    ~~~~~~~~~~~^^
+  File "/home/joackim/Projects/pico-chat/pico_chat/ui/app.py", line 148, in render
+    self.root.render(self.compositor.buffer)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/joackim/Projects/pico-chat/pico_chat/ui/tui/container.py", line 138, in render
+    child.render(buffer)
+    ~~~~~~~~~~~~^^^^^^^^
+  File "/home/joackim/Projects/pico-chat/pico_chat/ui/chat_history_panel.py", line 234, in render
+    child.render(buffer)
+    ~~~~~~~~~~~~^^^^^^^^
+  File "/home/joackim/Projects/pico-chat/pico_chat/ui/tui/component.py", line 129, in render
+    self.child.render(buffer)
+    ~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "/home/joackim/Projects/pico-chat/pico_chat/ui/tui/component.py", line 59, in render
+    buffer.write_str(self.x, self.y + line_index, lines[i], fg=self.fg, bg=self.bg, max_width=self.width)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/joackim/Projects/pico-chat/pico_chat/ui/tui/buffer.py", line 81, in write_str
+    self.cells[y][curr_x + 1] = Cell(
+    ~~~~~~~~~~^^^
+IndexError: list index out of range
