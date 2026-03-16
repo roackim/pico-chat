@@ -339,10 +339,25 @@ class InputComponent(Component):
                 
             buffer.write_str(self.x, self.y + line_idx, display_line, fg=self.fg, bg=self.bg, max_width=self.width)
         
-        # Set hardware cursor position in buffer if within visible range
+        # No longer setting hardware cursor, we render an emulated cursor below
         screen_cursor_row = cursor_row - self.scroll_y
         if 0 <= screen_cursor_row < self.height:
-            buffer.set_cursor(self.x + cursor_col, self.y + screen_cursor_row)
+            # Emulate cursor by modifying the cell at cursor position
+            # We use a simple block or inverted character for now
+            cx = self.x + cursor_col
+            cy = self.y + screen_cursor_row
+            
+            # Ensure within bounds
+            if 0 <= cx < buffer.width and 0 <= cy < buffer.height:
+                # Basic cursor representation: Inverse color or a block
+                # Currently we just mark it for highlighting in the next step
+                # We can't easily invert without knowing current cell color, 
+                # but we can set a distinct cursor color.
+                # Use a blink or underline if supported, or just a block.
+                # Let's use a simple background highlight for now.
+                curr_cell = buffer.cells[cy][cx]
+                # Default cursor: White background, black/dark foreground
+                buffer.set(cx, cy, curr_cell.char or " ", fg=(0,0,0), bg=(200, 200, 200), bold=True)
 
     def handle_input(self, event: Any) -> bool:
         """Handle mouse wheel for scrolling."""

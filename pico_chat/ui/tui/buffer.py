@@ -160,13 +160,8 @@ class Buffer:
                 else:
                     terminal_col += 1  # Normal character occupies 1 column
         
-        # Finally, move the cursor to its desired position if specified
-        if self.cursor_pos:
-            cx, cy = self.cursor_pos
-            res.append(ANSI.move_to(cy + 1, cx + 1))
-            res.append(ANSI.SHOW_CURSOR)
-        else:
-            res.append(ANSI.HIDE_CURSOR)
-                
+        # Reset color and hide the hardware cursor at the end to avoid flickering.
+        # We handle cursor display manually in components to prevent terminal cursor jitter.
+        res.append(ANSI.HIDE_CURSOR)
         res.append(ANSI.RESET)
         return "".join(res)

@@ -53,10 +53,23 @@ class Terminal:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """Restore terminal state and ensure cursor visibility."""
+        # 1. First reset any colors and show the cursor immediately
+        sys.stdout.write(ANSI.RESET + ANSI.SHOW_CURSOR + ANSI.DISABLE_MOUSE + ANSI.MOVE_HOME + ANSI.CLEAR_SCREEN)
+        sys.stdout.flush()
+        
+        # 2. Restore signal handlers
         signal.signal(signal.SIGWINCH, signal.SIG_DFL)
+        
+        # 3. Restore serial TTY settings (this effectively exits raw mode)
         if self.old_settings:
-            termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old_settings)
-        sys.stdout.write(ANSI.SHOW_CURSOR + ANSI.DISABLE_MOUSE + ANSI.CLEAR_SCREEN + ANSI.MOVE_HOME)
+            try:
+                termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old_settings)
+            except Exception:
+                pass
+        
+        # 4. Final flush to ensure everything is sent before the program terminates
+        sys.stdout.write(ANSI.RESET + ANSI.SHOW_CURSOR)
         sys.stdout.flush()
 
     def _handle_resize(self, signum, frame):
