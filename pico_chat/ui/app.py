@@ -40,7 +40,7 @@ class chatTUI:
         self.stats_panel = StatsPanel(agent) 
         
         self.chat_history_panel = ChatHistoryPanel()
-        self.input_panel = InputPanel(self.user_color)
+        self.input_panel = InputPanel(agent)
         
     @staticmethod
     def _rgb_to_ansi_fg(r: int, g: int, b: int) -> str:

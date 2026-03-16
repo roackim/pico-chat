@@ -167,6 +167,8 @@ class InputComponent(Component):
         self.cursor_pos = 0
         self.scroll_y = 0
         self._last_cursor_pos = -1
+        self._last_input_time = 0.0 # Track time of last user input
+        self.config = None # Config object passed during initialization
 
     def _get_cursor_coords(self, pos: int) -> tuple[int, int]:
         """Convert a string index to (row, col) coordinates."""
@@ -342,24 +344,49 @@ class InputComponent(Component):
         # No longer setting hardware cursor, we render an emulated cursor below
         screen_cursor_row = cursor_row - self.scroll_y
         if 0 <= screen_cursor_row < self.height:
-            # Emulate cursor by modifying the cell at cursor position
-            # We use a simple block or inverted character for now
+            # Emulated pulsating cursor
             cx = self.x + cursor_col
             cy = self.y + screen_cursor_row
             
-            # Ensure within bounds
             if 0 <= cx < buffer.width and 0 <= cy < buffer.height:
-                # Basic cursor representation: Inverse color or a block
-                # Currently we just mark it for highlighting in the next step
-                # We can't easily invert without knowing current cell color, 
-                # but we can set a distinct cursor color.
-                # Use a blink or underline if supported, or just a block.
-                # Let's use a simple background highlight for now.
+                import time
+                import math
+                
+                # Get settings from config or use defaults
+                cursor_char = self.config.ui_cursor_char if self.config else "█"
+                freq = self.config.ui_cursor_frequency if self.config else 1.0
+                cursor_color = self.config.ui_cursor_color if self.config else (200, 200, 200)
+                pulse_delay = self.config.ui_cursor_pulse_delay if self.config else 0.5
+
+                # Pulsate visibility according to time and frequency
+                now = time.time()
+                time_since_input = now - self._last_input_time
+                
+                # If we've recently typed, keep cursor solid (pulse max)
+                if time_since_input < pulse_delay:
+                    pulse = 1.0
+                else:
+                    # Sine wave pulse: 0 to 1 back to 0
+                    pulse = (math.sin(now * 2 * math.pi * freq) + 1) / 2
+                
                 curr_cell = buffer.cells[cy][cx]
-                # Default cursor: White background, black/dark foreground
-                buffer.set(cx, cy, curr_cell.char or " ", fg=(0,0,0), bg=(200, 200, 200), bold=True)
+                
+                # Only draw "extra" cursor char if the cell is empty or has a space
+                # Otherwise we overlay/highlight the existing character
+                char_to_show = curr_cell.char or " "
+                if char_to_show.isspace() and pulse > 0.3: # Show cursor char for most of the cycle
+                     char_to_show = cursor_char
+                
+                # If pulse is high enough, we show the cursor styling
+                if pulse > 0.1:
+                    buffer.set(cx, cy, char_to_show, fg=cursor_color, bg=self.bg, bold=True)
 
     def handle_input(self, event: Any) -> bool:
+        """Update last input time for cursor pulse logic."""
+        import time
+        if isinstance(event, (str, MouseEvent)):
+            self._last_input_time = time.time()
+
         """Handle mouse wheel for scrolling."""
         if isinstance(event, MouseEvent):
             # Use parent (Box) boundaries if available for a larger hit-box

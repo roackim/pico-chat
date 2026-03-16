@@ -11,13 +11,16 @@ from pico_chat.ui.commands import get_command_list
 class InputPanel:
     """Manages the user input panel."""
 
-    def __init__(self, user_color: tuple[int, int, int]):
+    def __init__(self, agent):
         """Initialize the input panel.
         
         Args:
-            user_color: RGB color tuple for user text
+            agent: The Pico-Chat agent instance (for config)
         """
+        self.agent = agent
+        user_color = agent.config.ui_user_color
         self.component = InputComponent(" ", id="entry", fg=user_color)
+        self.component.config = agent.config # Pass config for cursor behavior
         self.box = Box(self.component, title="message")
         self.box.max_height = 14 # 12 lines of text + 2 for borders
         self.on_submit_callback: Optional[Callable[[str], None]] = None

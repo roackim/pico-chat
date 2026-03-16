@@ -53,6 +53,12 @@ class Config:
         self.ui_user_color: tuple[int, int, int] = (150, 255, 150)  # Green
         self.ui_assistant_color: tuple[int, int, int] = (242, 207, 101)  # Orange
 
+        # Cursor settings
+        self.ui_cursor_char: str = "█"
+        self.ui_cursor_frequency: float = 1.0  # Hz (flashes per second)
+        self.ui_cursor_color: tuple[int, int, int] = (200, 200, 200)
+        self.ui_cursor_pulse_delay: float = 0.5  # Seconds before pulsating starts
+
         # Load from file if exists
         path = Path(config_path) if config_path else Path("pico_chat.toml")
         if not path.exists():
@@ -98,8 +104,15 @@ class Config:
             if "user_color" in ui:
                 self.ui_user_color = tuple(ui["user_color"])
             if "assistant_color" in ui:
-                self.ui_assistant_color = tuple(ui["assistant_color"])
-
+                self.ui_assistant_color = tuple(ui["assistant_color"])            
+            # Cursor settings in UI section
+            if "cursor" in ui:
+                cursor = ui["cursor"]
+                self.ui_cursor_char = cursor.get("char", self.ui_cursor_char)
+                self.ui_cursor_frequency = cursor.get("frequency", self.ui_cursor_frequency)
+                self.ui_cursor_pulse_delay = cursor.get("pulse_delay", self.ui_cursor_pulse_delay)
+                if "color" in cursor:
+                    self.ui_cursor_color = tuple(cursor["color"])
     def get_permission(self, tool: str) -> Permission:
         """Get permission for a tool."""
         return self.permissions.get(tool, "deny")
