@@ -1,5 +1,8 @@
 import os
 import pathspec
+
+from pathlib import Path
+
 # from tree_sitter import Language, Parser
 # import tree_sitter_python as tspython
 
@@ -47,7 +50,9 @@ def build_harness_context(root):
     spec = get_ignore_spec(root)
     context_output = []
 
-    context_output.append(f"Project Files (filtered by .gitignore):")
+    
+    context_output.append(f"Project Root: {root}")
+    context_output.append(f"Files (filtered by .gitignore):")
     for dirpath, dirnames, filenames in os.walk(root):
         # 1. Prune dot-folders and ignored directories in-place
         dirnames[:] = [d for d in dirnames if not d.startswith('.') 
