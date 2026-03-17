@@ -6,10 +6,10 @@ from typing import Optional, Any
 
 from pico_chat.ui.tui.compositor import Compositor
 from pico_chat.ui.tui.terminal import MouseEvent
-from pico_chat.ui.tui.container import Vsplit, Hsplit
-from pico_chat.ui.input_panel import InputPanel
+from pico_chat.ui.tui.components import TextComponent, Box, InputComponent
 from pico_chat.ui.chat_history_panel import ChatHistoryPanel
-from pico_chat.ui.commands import handle_command
+from pico_chat.ui.commands import handle_command, get_command_list
+from pico_chat.ui.tui.container import Vsplit, Hsplit
 
 
 TARGET_FPS = 60
@@ -34,7 +34,18 @@ class chatTUI:
         self.reset_code = "\033[0m"
         
         self.chat_history_panel = ChatHistoryPanel()
-        self.input_panel = InputPanel(agent)
+        
+        # New: Direct InputComponent usage
+        self.input_component = InputComponent(" ", id="entry", fg=self.user_color)
+        self.input_component.config = agent.config
+        self.input_component.on_submit = self.on_user_submit
+        
+        # Setup menus
+        commands = get_command_list()
+        get_context = lambda: agent.list_files_and_folders() if hasattr(agent, 'list_files_and_folders') else []
+        self.input_component.setup_menus(commands, get_context_items=get_context)
+        
+        self.input_box = Box(self.input_component, title="message")
         
         # Track the current generation task
         self.current_generation_task: Optional[asyncio.Task] = None
@@ -150,7 +161,7 @@ class chatTUI:
                 
                 # Very simple hit detection for our two main panels
                 h_comp = self.chat_history_panel.get_component()
-                i_box = self.input_panel.get_component()
+                i_box = self.input_box
                 
                 if h_comp.x <= event.x < h_comp.x + h_comp.width and \
                    h_comp.y <= event.y < h_comp.y + h_comp.height:
@@ -177,11 +188,6 @@ class chatTUI:
         self.root.set_layout(0, 0, self.compositor.width, self.compositor.height)
         self.root.render(self.compositor.buffer)
         
-        # 1. Render Floating Panels
-        # Input Menu (ensure it's on top of history)
-        if hasattr(self, 'input_panel'):
-            self.input_panel.render_menu(self.compositor.buffer)
-            
         # Use Buffer's built-in render method
         output = self.compositor.buffer.render()
         sys.stdout.write(output)
@@ -193,14 +199,11 @@ class chatTUI:
         if hasattr(self.agent, 'start'):
             self.agent.start()
             
-        # Set up panels
-        self.input_panel.set_on_submit(self.on_user_submit)
-        
         # Right Column
         right_col = Hsplit([
             self.chat_history_panel.get_component(),
-            self.input_panel.get_component()
-        ], ["100%", 0])
+            self.input_box
+        ], ["100%", 10]) # Set a reasonable height for input box or leave it to layout
 
         # Main Layout
         root = right_col

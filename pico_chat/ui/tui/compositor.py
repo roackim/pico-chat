@@ -4,7 +4,7 @@ import asyncio
 from typing import Optional, Dict, Any
 from pico_chat.ui.tui.terminal import ANSI, Terminal, MouseEvent
 from pico_chat.ui.tui.buffer import Buffer
-from pico_chat.ui.tui.component import Component
+from pico_chat.ui.tui.components import Component
 
 class Compositor:
     def __init__(self, root: Component, fps: int = 30):

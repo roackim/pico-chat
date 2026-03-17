@@ -1,161 +1,11 @@
-import re
-from abc import ABC, abstractmethod
-from typing import Optional, Any
-import subprocess
+import math
+import time
+from typing import Optional, Any, List, Callable
+from pico_chat.ui.tui.components.base import Component
+from pico_chat.ui.tui.components.menu import CommandMenu
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.terminal import MouseEvent, PasteEvent
-from pico_chat.ui.tui.layout_utils import display_width, wrap_text, strip_ansi
-
-class Component(ABC):
-    def __init__(self, id: Optional[str] = None):
-        self.id = id
-        self.x = 0
-        self.y = 0
-        self.width = 0
-        self.height = 0
-        self.parent: Optional['Component'] = None
-
-    def set_layout(self, x: int, y: int, width: int, height: int):
-        self.x = x
-        self.y = y
-        self.width = width
-        self.height = height
-
-    @abstractmethod
-    def render(self, buffer: Buffer):
-        pass
-
-    def handle_input(self, event: Any) -> bool:
-        """Return True if event was handled."""
-        return False
-
-    def update(self, data: Any):
-        """Update component state with new data."""
-        pass
-
-class TextComponent(Component):
-    def __init__(self, text: str, id: Optional[str] = None, fg=None, bg=None, auto_scroll_bottom: bool = False):
-        super().__init__(id)
-        self.text = text
-        self.fg = fg
-        self.bg = bg
-        self.auto_scroll_bottom = auto_scroll_bottom
-
-    def render(self, buffer: Buffer):
-        """
-        Renders text lines with ANSI-aware clipping.
-        Uses Buffer.write_str which handles absolute positioning and ensures
-        ANSI sequences don't corrupt the grid layout.
-        """
-        lines = self.text.splitlines()
-        
-        # If auto_scroll_bottom is enabled and there are more lines than height,
-        # show the last lines that fit
-        start_line = 0
-        if self.auto_scroll_bottom and len(lines) > self.height:
-            start_line = len(lines) - self.height
-        
-        for i in range(start_line, min(len(lines), start_line + self.height)):
-            line_index = i - start_line
-            buffer.write_str(self.x, self.y + line_index, lines[i], fg=self.fg, bg=self.bg, max_width=self.width)
-
-    def get_preferred_height(self, width: int) -> int:
-        """Calculate height needed for wrapped text."""
-        # Note: If this TextComponent doesn't wrap itself (like ChatHistoryPanel currently does),
-        # we still consider splitlines() count.
-        lines = self.text.splitlines()
-        return len(lines)
-
-    def update(self, text: str):
-        self.text = text
-
-class Box(Component):
-    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None):
-        super().__init__(id)
-        self.child = child
-        self.child.parent = self
-        self.title = title
-        self.bg = bg
-        self.fg = fg
-
-    @property
-    def children(self):
-        return [self.child]
-
-    def set_layout(self, x: int, y: int, width: int, height: int):
-        super().set_layout(x, y, width, height)
-        self.child.set_layout(x + 1, y + 1, width - 2, height - 2)
-
-    def get_preferred_height(self, width: int) -> int:
-        """Box adds 2 rows of height for borders (top/bottom)."""
-        if hasattr(self.child, 'get_preferred_height'):
-            # Height of child inside the box plus top/bottom borders.
-            # Child's width inside box is box_width - 2.
-            inner_height = self.child.get_preferred_height(width - 2)
-            return inner_height + 2
-        # Otherwise fall back to a reasonable default or 0
-        return 0
-
-    def render(self, buffer: Buffer):
-        """
-        Renders a box with borders and an optional title.
-        Implements a 'painter's algorithm' approach to ensure visual integrity:
-        1. Top + Left borders are drawn first.
-        2. Background is filled (if provided).
-        3. Child content is rendered.
-        4. Bottom + Right borders are drawn LAST to overwrite any content overflow.
-        All drawing uses absolute coordinates.
-        """
-        if self.width < 2 or self.height < 2:
-            return
-
-        # 1. Top + Left borders
-        # Top border (excluding right corner)
-        buffer.set(self.x, self.y, "┌", fg=self.fg)
-        for i in range(1, self.width - 1):
-            buffer.set(self.x + i, self.y, "─", fg=self.fg)
-        
-        # Left border (excluding bottom corner)
-        for i in range(1, self.height - 1):
-            buffer.set(self.x, self.y + i, "│", fg=self.fg)
-
-        # 2. Background (optional)
-        if self.bg:
-            for iy in range(1, self.height - 1):
-                for ix in range(1, self.width - 1):
-                    buffer.set(self.x + ix, self.y + iy, " ", bg=self.bg)
-
-        # 3. Content (child components)
-        # Content is rendered before right/bottom borders so borders can constrain it.
-        self.child.render(buffer)
-
-        # 4. Bottom + Right borders (overwrites any content overflow)
-        # Right border
-        for i in range(1, self.height - 1):
-            buffer.set(self.x + self.width - 1, self.y + i, "│", fg=self.fg)
-        
-        # Bottom border
-        for i in range(1, self.width - 1):
-            buffer.set(self.x + i, self.y + self.height - 1, "─", fg=self.fg)
-
-        # Corners
-        buffer.set(self.x + self.width - 1, self.y, "┐", fg=self.fg)
-        buffer.set(self.x, self.y + self.height - 1, "└", fg=self.fg)
-        buffer.set(self.x + self.width - 1, self.y + self.height - 1, "┘", fg=self.fg)
-
-        # Title (on top of top border)
-        if self.title:
-            title_str = f" {self.title[:self.width-4]} "
-            buffer.write_str(self.x + 2, self.y, title_str, fg=self.fg)
-
-    def handle_input(self, event: Any) -> bool:
-        """Pass input to child, but check mouse bounds for the box area."""
-        if isinstance(event, MouseEvent):
-            if self.x <= event.x < self.x + self.width and \
-               self.y <= event.y < self.y + self.height:
-                return self.child.handle_input(event)
-            return False
-        return self.child.handle_input(event)
+from pico_chat.ui.tui.layout_utils import display_width, wrap_text
 
 class InputComponent(Component):
     def __init__(self, prompt: str = "> ", id: Optional[str] = None, fg=None, bg=None):
@@ -168,8 +18,36 @@ class InputComponent(Component):
         self.cursor_pos = 0
         self.scroll_y = 0
         self._last_cursor_pos = -1
-        self._last_input_time = 0.0 # Track time of last user input
         self.config = None # Config object passed during initialization
+        
+        # New: Integrated Command/Context menus
+        self.command_menu: Optional[CommandMenu] = None
+        self.context_menu: Optional[CommandMenu] = None
+        self.get_context_items_callback: Optional[Callable[[], List[str]]] = None
+
+    def setup_menus(self, commands: List[str], get_context_items: Optional[Callable[[], List[str]]] = None):
+        """Initialize built-in menus."""
+        self.command_menu = CommandMenu(commands, fg=self.fg, bg=(0, 0, 0))
+        self.command_menu.on_select = self._on_command_selected
+        
+        self.context_menu = CommandMenu([], fg=self.fg, bg=(0, 0, 0), trigger="@")
+        self.context_menu.on_select = self._on_context_selected
+        self.get_context_items_callback = get_context_items
+
+    def _on_command_selected(self, command: str):
+        self.text = command
+        self.cursor_pos = len(command)
+        if self.command_menu:
+            self.command_menu.is_visible = False
+
+    def _on_context_selected(self, item: str):
+        last_at = self.text.rfind('@')
+        if last_at != -1:
+            new_text = self.text[:last_at] + item
+            self.text = new_text
+            self.cursor_pos = len(new_text)
+        if self.context_menu:
+            self.context_menu.is_visible = False
 
     def _get_cursor_coords(self, pos: int) -> tuple[int, int]:
         """Convert a string index to (row, col) coordinates."""
@@ -305,7 +183,7 @@ class InputComponent(Component):
         return total_lines
 
     def render(self, buffer: Buffer):
-        """Render the input field with prompt, text, and scrolling."""
+        """Render the input field with prompt, text, scrolling, and menus."""
         # Clear background first (to prevent artifacts when scrolling/resizing)
         buffer.fill(self.x, self.y, self.width, self.height, " ", bg=self.bg)
         
@@ -350,76 +228,63 @@ class InputComponent(Component):
             cy = self.y + screen_cursor_row
             
             if 0 <= cx < buffer.width and 0 <= cy < buffer.height:
-                import time
-                import math
-                
                 # Get settings from config or use defaults
                 cursor_char = self.config.ui_cursor_char if self.config else "█"
                 freq = self.config.ui_cursor_frequency if self.config else 1.0
                 cursor_color = self.config.ui_cursor_color if self.config else (200, 200, 200)
-                pulse_delay = self.config.ui_cursor_pulse_delay if self.config else 0.5
 
                 # Pulsate visibility according to time and frequency
                 now = time.time()
-                time_since_input = now - self._last_input_time
+                # Sine wave pulse: 0 to 1 back to 0
+                pulse = (math.sin(now * 2 * math.pi * freq) + 1) / 2
                 
-                # If we've recently typed, keep cursor solid (pulse max)
-                if time_since_input:
-                    # We always want max opacity immediately after typing
-                    # but `time_since_input < pulse_delay` handles the *start* of the pulse
-                    pass
+                curr_cell = buffer.cells[cy][cx]
                 
-                # Calculate pulse value (0.0 to 1.0)
-                if time_since_input < pulse_delay:
-                    pulse = 1.0
-                else:
-                    # Sine wave pulse: 0 to 1 back to 0
-                    pulse = (math.sin(now * 2 * math.pi * freq) + 1) / 2
+                # Only draw "extra" cursor char if the cell is empty or has a space
+                # Otherwise we overlay/highlight the existing character
+                char_to_show = curr_cell.char or " "
+                if char_to_show.isspace() and pulse > 0.3: # Show cursor char for most of the cycle
+                     char_to_show = cursor_char
                 
-                # Render the cursor effect
-                if 0 <= cx < buffer.width and 0 <= cy < buffer.height:
-                    curr_cell = buffer.cells[cy][cx]
-                    char_under_cursor = curr_cell.char or " "
-                    
-                    # Determine rendering strategy based on what's under the cursor
-                    if char_under_cursor.isspace() or not char_under_cursor:
-                        # Case 1: Cursor is on a space/empty cell (typical append mode)
-                        # We use the configured cursor character (block, pipe, etc.)
-                        # Opacity modulation for "pulsing" effect on the character itself
-                        
-                        # Only draw if pulse is "on" (> 50% duty cycle usually, or gradient)
-                        # For block cursor, let's just use the character
-                        if pulse > 0.5:
-                           buffer.set(cx, cy, cursor_char, fg=(255, 255, 255), bg=curr_cell.bg)
-                    else:
-                        # Case 2: Cursor is overlapping a character (insert/overwrite mode)
-                        # We switch to a "block" style by inverting background color
-                        # This ensures the character remains legible
-                        
-                        if pulse > 0.5:
-                            # High contrast: Black text on White background
-                            # preserving the character
-                            buffer.cells[cy][cx].fg = (0, 0, 0)
-                            buffer.cells[cy][cx].bg = (255, 255, 255)
-                            buffer.cells[cy][cx].bold = False
+                # If pulse is high enough, we show the cursor styling
+                if pulse > 0.1:
+                    buffer.set(cx, cy, char_to_show, fg=cursor_color, bg=self.bg, bold=True)
 
-                            # Handle wide characters (emojis) - update the background of the continuation cell
-                            if display_width(char_under_cursor) == 2 and cx + 1 < buffer.width:
-                                buffer.cells[cy][cx + 1].bg = (255, 255, 255)
+        # RENDER MENUS OVER THE INPUT AREA
+        if self.command_menu and self.command_menu.is_visible:
+            # Position menu relative to this component's top
+            menu_height = len(self.command_menu.filtered_items) + 2
+            self.command_menu.set_layout(
+                self.x, 
+                self.y - menu_height, 
+                self.width - 2, # Subtract some margin to fit nicely inside current layouts
+                menu_height
+            )
+            self.command_menu.render(buffer)
+            
+        if self.context_menu and self.context_menu.is_visible:
+            menu_height = min(len(self.context_menu.filtered_items) + 2, 12)
+            self.context_menu.set_layout(
+                self.x, 
+                self.y - menu_height, 
+                self.width - 2, 
+                menu_height
+            )
+            self.context_menu.render(buffer)
 
     def handle_input(self, event: Any) -> bool:
-        """Update last input time for cursor pulse logic."""
-        import time
-        if isinstance(event, (str, MouseEvent, PasteEvent)):
-            self._last_input_time = time.time()
-        
-        # 1. Handle Paste Events (from bracketed paste)
-        if isinstance(event, PasteEvent):
-            self._insert_text(event.text)
-            return True
+        """Handle mouse wheel, keyboard input, and menus."""
+        # 1. Menu handling (intercept navigation keys)
+        if self.command_menu and self.command_menu.is_visible:
+            if self.command_menu.handle_input(event):
+                return True
+        if self.context_menu and self.context_menu.is_visible:
+            if self.context_menu.handle_input(event):
+                return True
 
-        """Handle mouse wheel for scrolling."""
+        # 2. Mouse handling
         if isinstance(event, MouseEvent):
+            # ... existing mouse scroll logic ...
             # Use parent (Box) boundaries if available for a larger hit-box
             target = self.parent if self.parent else self
             if target.x <= event.x < target.x + target.width and \
@@ -429,11 +294,6 @@ class InputComponent(Component):
                 if event.button == 64: # Scroll Up
                     if self.scroll_y > 0:
                         self.scroll_y -= 1
-                        # If cursor is at bottom boundary, push it up to stay in view
-                        # (Using a simple heuristic: if it would be off-screen, push it)
-                        # More precisely: if we scroll UP, the cursor row relative to view INCREASES.
-                        # But wait, if we scroll up, we see earlier lines. 
-                        pass 
                     return True
                 elif event.button == 65: # Scroll Down
                     lines = self._get_lines()
@@ -477,11 +337,6 @@ class InputComponent(Component):
                     while i > 0 and not self.text[i-1].isspace(): i -= 1
                     self.text = self.text[:i] + self.text[self.cursor_pos:]
                     self.cursor_pos = i
-                return True
-
-            # Ctrl+V (Paste)
-            if event == '\x16':
-                self._handle_paste_from_clipboard()
                 return True
 
             # Alt+Enter (\x1b\r) or Ctrl+Enter/Ctrl+J (\x0a) -> Newline
@@ -529,58 +384,35 @@ class InputComponent(Component):
             
             # Default: insert character
             if len(event) == 1 and ord(event) >= 32:
-                # Explicitly disable space as the first character (user request)
-                if self.cursor_pos == 0 and event.isspace():
-                    return True
-
-                # Insert at cursor position
                 self.text = self.text[:self.cursor_pos] + event + self.text[self.cursor_pos:]
                 self.cursor_pos += 1
+                
+                # UPDATE MENU VISIBILITY
+                full_text = self.text
+                clean_text = full_text.lstrip()
+                
+                if self.command_menu:
+                    if clean_text.startswith('/') and ' ' not in clean_text:
+                        self.command_menu.filter(clean_text)
+                    else:
+                        self.command_menu.is_visible = False
+                        
+                if self.context_menu:
+                    last_at = full_text.rfind('@')
+                    if last_at != -1:
+                        after_at = full_text[last_at+1:]
+                        if ' ' not in after_at:
+                            # Refresh items via callback if needed
+                            if not self.context_menu.all_items and self.get_context_items_callback:
+                                self.context_menu.all_items = self.get_context_items_callback()
+                            self.context_menu.filter(full_text)
+                        else:
+                            self.context_menu.is_visible = False
+                    else:
+                        self.context_menu.is_visible = False
+
                 return True
         return False
-        
-    def _insert_text(self, text: str):
-        """Insert text at current cursor position."""
-        if not text:
-            return
-            
-        # Normalize line endings
-        text = text.replace('\r\n', '\n').replace('\r', '\n')
-        
-        self.text = self.text[:self.cursor_pos] + text + self.text[self.cursor_pos:]
-        self.cursor_pos += len(text)
-        
-    def _handle_paste_from_clipboard(self):
-        """Try to paste from system clipboard using external tools."""
-        content = None
-        
-        # Try different clipboard tools
-        commands = [
-            ['xclip', '-o', '-selection', 'clipboard'],
-            ['wl-paste'],
-            ['pbpaste'],
-            ['xsel', '--clipboard', '--output']
-        ]
-        
-        for cmd in commands:
-            try:
-                result = subprocess.run(
-                    cmd, 
-                    stdout=subprocess.PIPE, 
-                    stderr=subprocess.DEVNULL,
-                    text=True,
-                    timeout=0.5
-                )
-                if result.returncode == 0:
-                    content = result.stdout
-                    break
-            except FileNotFoundError:
-                continue
-            except Exception:
-                continue
-                
-        if content:
-            self._insert_text(content)
 
     def update(self, text: str):
         """Update the input field text programmatically."""

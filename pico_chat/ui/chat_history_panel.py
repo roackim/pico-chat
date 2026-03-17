@@ -5,7 +5,7 @@ from typing import Optional, Any
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.layout_utils import display_width, wrap_text, strip_ansi
 
-from pico_chat.ui.tui.component import TextComponent, Box
+from pico_chat.ui.tui.components import TextComponent, Box
 from pico_chat.ui.tui.container import Hsplit
 from pico_chat.ui.tui.terminal import MouseEvent
 

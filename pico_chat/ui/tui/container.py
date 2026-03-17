@@ -1,5 +1,5 @@
 from typing import List, Union, Optional
-from pico_chat.ui.tui.component import Component
+from pico_chat.ui.tui.components import Component
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.terminal import MouseEvent
 
