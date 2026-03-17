@@ -7,6 +7,8 @@ from openai import AsyncOpenAI
 from pico_chat.config import get_config
 from pico_chat.harness.llm_status import AgentState
 from pico_chat.harness.debug import get_debug_stream
+from pico_chat.harness.context_builder import build_harness_context
+from pico_chat.harness.system_prompt import get_system_message
 
 # Import the minimal toolset
 from pico_chat.harness.tool_wrappers import create_minimal_tools
@@ -33,11 +35,15 @@ class Harness:
         
         # Tools initialization with minimal toolset
         import os
-        workspace = workspace_path or os.getcwd()
+        self.workspace = workspace_path or os.getcwd()
         self.tools_map = create_minimal_tools(
-            workspace_path=workspace,
+            workspace_path=self.workspace,
             confirmation_callback=self._request_user_confirmation
         )
+        
+        # Build initial project context
+        self.project_context = build_harness_context(self.workspace)
+        self.debug_stream.log("CONTEXT", "Project context built")
         
         # Calculate schemas once and log
         self.tool_schemas = [tool.get_schema() for tool in self.tools_map.values()] if self.tools_map else None
@@ -141,13 +147,10 @@ class Harness:
         # Add user message to history
         self.history.append({"role": "user", "content": user_input})
         
-        # System prompt - Minimal (Progressive Discovery principle)
-        system_msg = {
-            "role": "system", 
-            "content": (
-                "You are a helpful AI assistant named Pico. Avoid using emojis. Make concise answers when possible."
-            )
-        }
+        # Build System Prompt with Context
+        # Refresh context here if we want dynamic updates, for now we use the one built at init
+        system_msg = get_system_message(self.project_context)
+        
         messages = [system_msg] + self.history
 
         # Agent Loop (Handle Multi-step Tool Calls)
