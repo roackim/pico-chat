@@ -246,77 +246,66 @@ class ChatHistoryPanel(TextComponent):
         rendered_lines = [msg.get_formatted() for msg in self.messages]
         return "\n".join(rendered_lines) + "\n"
 
-    def add_message(self, message: str, append: bool = False, title: str = "", frame_color: tuple[int, int, int] = None, overwrite_last: bool = False) -> Message:
-        """Add a message to chat history and update UI.
+    def new_message(self, message: str, title: str = "", frame_color: tuple[int, int, int] = None) -> Message:
+        """Create a new message and append it to the chat history.
         
         Args:
             message: The text to add
-            append: If True, appends to the last message without creating a new one
             title: Optional title for the message box
             frame_color: Optional RGB color for the box frame
-            overwrite_last: If True, replaces text of last message.
-        
+            
         Returns:
-            The modified or created Message object.
+            The created Message object.
         """
         # If we are near the bottom (within a few pixels), stay at bottom
         if self.scroll_offset < 1 or self.auto_scroll:
             self.auto_scroll = True
             
-        if overwrite_last and self.messages:
-            last_msg = self.messages[-1]
-            last_msg.base_text = message
-            if title:
-                last_msg.title = title
-                last_msg.box.title = title
-            last_msg.reformat(self.max_width - 2)
-            return last_msg
+        # Create a new message
+        new_message = Message(
+            message, 
+            max_width=self.max_width - 2, 
+            padding_left=self.padding_left,
+            padding_right=self.padding_right,
+            title=title,
+            frame_color=frame_color
+        )
+        self.messages.append(new_message)
+        self.msg_container.children.append(new_message.get_component())
+        self.msg_container.sizes.append("auto")
+        
+        # Keep only last max_messages
+        if len(self.messages) > self.max_messages:
+            self.messages = self.messages[-self.max_messages:]
+            self.msg_container.children = [m.get_component() for m in self.messages]
+            self.msg_container.sizes = ["auto"] * len(self.messages)
+        
+        return new_message
 
-        if append and self.messages:
-            # Append to the last message
-            last_msg = self.messages[-1]
-            last_msg.base_text += message
-            if title:
-                last_msg.title = title
-                last_msg.box.title = title
-            # Reformat with current width (inner width)
-            last_msg.reformat(self.max_width - 2)
-            return last_msg
-        else:
-            # Create a new message
-            new_message = Message(
-                message, 
-                max_width=self.max_width - 2, 
-                padding_left=self.padding_left,
-                padding_right=self.padding_right,
-                title=title,
-                frame_color=frame_color
-            )
-            self.messages.append(new_message)
-            self.msg_container.children.append(new_message.get_component())
-            self.msg_container.sizes.append("auto")
-            
-            # Keep only last max_messages
-            if len(self.messages) > self.max_messages:
-                self.messages = self.messages[-self.max_messages:]
-                self.msg_container.children = [m.get_component() for m in self.messages]
-                self.msg_container.sizes = ["auto"] * len(self.messages)
-            
-            return new_message
-            
-        # No implicit render call here, compositor's main loop handles it
+    def add_message(self, message: str, title: str = "", frame_color: tuple[int, int, int] = None) -> Message:
+        """Add a message to chat history and update UI.
+        
+        Args:
+            message: The text to add
+            title: Optional title for the message box
+            frame_color: Optional RGB color for the box frame
+        
+        Returns:
+            The created Message object.
+        """
+        return self.new_message(message, title, frame_color)
 
     def add_user_message(self, message: str, color: tuple[int, int, int] = None, title: str = "user") -> Message:
         """Add a user message with the appropriate header and formatting."""
-        return self.add_message(message, title=title, frame_color=color)
+        return self.new_message(message, title=title, frame_color=color)
 
     def add_pico_message(self, message: str, color: tuple[int, int, int] = None, title: str = "pico") -> Message:
         """Add a Pico assistant message with the appropriate header and formatting."""
-        return self.add_message(message, title=title, frame_color=color)
+        return self.new_message(message, title=title, frame_color=color)
 
     def add_system_message(self, message: str, color: tuple[int, int, int] = (100, 100, 100), title: str = "system") -> Message:
         """Add a system or command result message."""
-        return self.add_message(message, title=title, frame_color=color)
+        return self.new_message(message, title=title, frame_color=color)
 
     def clear(self):
         """Clear the chat history UI."""
@@ -327,7 +316,7 @@ class ChatHistoryPanel(TextComponent):
         self.auto_scroll = True
         
         # Optionally re-add welcome message
-        self.add_message(WELCOME_MESSAGE.rstrip())
+        self.new_message(WELCOME_MESSAGE.rstrip())
         self.finalize_last_message()
     
     def finalize_last_message(self):

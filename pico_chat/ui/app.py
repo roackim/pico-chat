@@ -85,7 +85,7 @@ class chatTUI:
             except asyncio.TimeoutError:
                 continue
             except Exception as e:
-                self.chat_history_panel.add_message(
+                self.chat_history_panel.new_message(
                     f"\n\033[31m[Error]:\033[0m {str(e)}"
                 )
 
