@@ -52,6 +52,21 @@
     patch: Invalid patch format: Missing '<<<<<<< SEARCH' marker 
 
 BUGS:
+
+[x] /command doesn't work after space as first char
+    - spaces as first chars were stored but not rendered
+    - commands works as first char
+
+[ ] Once a tool call happened, /status doesn't work anymore
+    - /help and /clear work
+
+[ ] When tool calling fails, the error is not sent to the LLM, causing it to get stuck waiting for the tool response that will never come (e.g. patch tool with invalid patch format)
+    - Need to catch tool call errors and send them back to the LLM as a message in the conversation so it can react accordingly (e.g. retry, ask user for clarification, etc)
+    
+[ ] CTRL + V in terminal causes issues 
+    - pastes content but also triggers some keybindings (like \n => submit, etc)
+       needs to be fixed for better ergonomics
+       
 [x] Fix cursor blip / flcikering with big terminals
     [x] Disable cursor, emulate one
     [x] Re-enable cursor after program closes OR ctrl+c
@@ -76,30 +91,3 @@ ROADMAP:
 4: inference interactivity (steering, stopping, showing intermediate thoughts, etc)
 5: markdown rendering improvements (tables, code blocks, etc)
 
-
-
-TODO FIX ERROR: (should not happend AND IF IT HAPPENS IT SHOULD NOT CRASH THE APP)
-
-Traceback (most recent call last):
-  File "/home/joackim/Projects/pico-chat/pico_chat/ui/tui/compositor.py", line 68, in run
-    self.render()
-    ~~~~~~~~~~~^^
-  File "/home/joackim/Projects/pico-chat/pico_chat/ui/app.py", line 148, in render
-    self.root.render(self.compositor.buffer)
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/joackim/Projects/pico-chat/pico_chat/ui/tui/container.py", line 138, in render
-    child.render(buffer)
-    ~~~~~~~~~~~~^^^^^^^^
-  File "/home/joackim/Projects/pico-chat/pico_chat/ui/chat_history_panel.py", line 234, in render
-    child.render(buffer)
-    ~~~~~~~~~~~~^^^^^^^^
-  File "/home/joackim/Projects/pico-chat/pico_chat/ui/tui/component.py", line 129, in render
-    self.child.render(buffer)
-    ~~~~~~~~~~~~~~~~~^^^^^^^^
-  File "/home/joackim/Projects/pico-chat/pico_chat/ui/tui/component.py", line 59, in render
-    buffer.write_str(self.x, self.y + line_index, lines[i], fg=self.fg, bg=self.bg, max_width=self.width)
-    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/joackim/Projects/pico-chat/pico_chat/ui/tui/buffer.py", line 81, in write_str
-    self.cells[y][curr_x + 1] = Cell(
-    ~~~~~~~~~~^^^
-IndexError: list index out of range

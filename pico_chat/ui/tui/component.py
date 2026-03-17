@@ -517,15 +517,17 @@ class InputComponent(Component):
                 return True
             
             # Default: insert character
-            
-            # Default: insert character
             if len(event) == 1 and ord(event) >= 32:
+                # Explicitly disable space as the first character (user request)
+                if self.cursor_pos == 0 and event.isspace():
+                    return True
+
+                # Insert at cursor position
                 self.text = self.text[:self.cursor_pos] + event + self.text[self.cursor_pos:]
                 self.cursor_pos += 1
                 return True
         return False
-        return False
-
+        
     def update(self, text: str):
         """Update the input field text programmatically."""
         self.text = text

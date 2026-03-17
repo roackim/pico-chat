@@ -55,13 +55,18 @@ class InputPanel:
                 return True
         
         # 2. Pass to standard input component
+        # IMPORTANT: We purposefully do NOT filter standard input here
         handled = self._original_handle_input(event)
         
         # 3. After input, check if we need to show/filter menu
         if isinstance(event, str):
-            # If start of message is '/' and has no spaces, show/filter menu
-            if self.component.text.startswith('/') and ' ' not in self.component.text:
-                self.command_menu.filter(self.component.text)
+            # Check for leading spaces logic only for MENU visibility, not for preventing input
+            clean_text = self.component.text.lstrip()
+            
+            # If start of message is '/' AND there are NO spaces AFTER the slash
+            # (meaning we are typing the command name)
+            if clean_text.startswith('/') and ' ' not in clean_text:
+                self.command_menu.filter(clean_text)
             else:
                 self.command_menu.is_visible = False
                 
