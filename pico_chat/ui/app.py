@@ -122,11 +122,15 @@ class chatTUI:
 
     def on_user_submit(self, text: str):
         """Handle user input submission."""
-        if text.startswith('/'):
-            self.on_command_submit(text)
+        clean_text = text.strip()
+        if not clean_text:
+            return  # Ignore empty or whitespace-only input
+            
+        if clean_text.startswith('/'):
+            self.on_command_submit(clean_text)
             return
 
-        if text.strip().lower() in ["exit", "quit", "q"]:
+        if clean_text.lower() in ["exit", "quit", "q"]:
             if self.compositor:
                 self.compositor.running = False
         else:

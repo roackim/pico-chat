@@ -22,6 +22,7 @@ class Buffer:
 
     def set(self, x: int, y: int, char: str, fg=None, bg=None, bold=False):
         if 0 <= x < self.width and 0 <= y < self.height:
+            # Important: Always create a fresh Cell instance to avoid sharing
             self.cells[y][x] = Cell(char, fg, bg, bold)
 
     def fill(self, x: int, y: int, width: int, height: int, char: str = " ", fg=None, bg=None):
@@ -145,13 +146,15 @@ class Buffer:
                     if cell.fg:
                         res.append(ANSI.color_rgb_fg(*cell.fg))
                     else:
-                        res.append(ANSI.RESET)
-                        curr_bg = None
+                        # Reset FG (and unfortunately BG, so we force BG reset state)
+                        res.append("\033[39m") # Reset FG only (standard ANSI)
                     curr_fg = cell.fg
                 
                 if cell.bg != curr_bg:
                     if cell.bg:
                         res.append(ANSI.color_rgb_bg(*cell.bg))
+                    else:
+                        res.append("\033[49m") # Reset BG only (standard ANSI)
                     curr_bg = cell.bg
                     
                 res.append(cell.char)

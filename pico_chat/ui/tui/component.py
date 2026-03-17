@@ -363,23 +363,48 @@ class InputComponent(Component):
                 time_since_input = now - self._last_input_time
                 
                 # If we've recently typed, keep cursor solid (pulse max)
+                if time_since_input:
+                    # We always want max opacity immediately after typing
+                    # but `time_since_input < pulse_delay` handles the *start* of the pulse
+                    pass
+                
+                # Calculate pulse value (0.0 to 1.0)
                 if time_since_input < pulse_delay:
                     pulse = 1.0
                 else:
                     # Sine wave pulse: 0 to 1 back to 0
                     pulse = (math.sin(now * 2 * math.pi * freq) + 1) / 2
                 
-                curr_cell = buffer.cells[cy][cx]
-                
-                # Only draw "extra" cursor char if the cell is empty or has a space
-                # Otherwise we overlay/highlight the existing character
-                char_to_show = curr_cell.char or " "
-                if char_to_show.isspace() and pulse > 0.3: # Show cursor char for most of the cycle
-                     char_to_show = cursor_char
-                
-                # If pulse is high enough, we show the cursor styling
-                if pulse > 0.1:
-                    buffer.set(cx, cy, char_to_show, fg=cursor_color, bg=self.bg, bold=True)
+                # Render the cursor effect
+                if 0 <= cx < buffer.width and 0 <= cy < buffer.height:
+                    curr_cell = buffer.cells[cy][cx]
+                    char_under_cursor = curr_cell.char or " "
+                    
+                    # Determine rendering strategy based on what's under the cursor
+                    if char_under_cursor.isspace() or not char_under_cursor:
+                        # Case 1: Cursor is on a space/empty cell (typical append mode)
+                        # We use the configured cursor character (block, pipe, etc.)
+                        # Opacity modulation for "pulsing" effect on the character itself
+                        
+                        # Only draw if pulse is "on" (> 50% duty cycle usually, or gradient)
+                        # For block cursor, let's just use the character
+                        if pulse > 0.5:
+                           buffer.set(cx, cy, cursor_char, fg=(255, 255, 255), bg=curr_cell.bg)
+                    else:
+                        # Case 2: Cursor is overlapping a character (insert/overwrite mode)
+                        # We switch to a "block" style by inverting background color
+                        # This ensures the character remains legible
+                        
+                        if pulse > 0.5:
+                            # High contrast: Black text on White background
+                            # preserving the character
+                            buffer.cells[cy][cx].fg = (0, 0, 0)
+                            buffer.cells[cy][cx].bg = (255, 255, 255)
+                            buffer.cells[cy][cx].bold = False
+
+                            # Handle wide characters (emojis) - update the background of the continuation cell
+                            if display_width(char_under_cursor) == 2 and cx + 1 < buffer.width:
+                                buffer.cells[cy][cx + 1].bg = (255, 255, 255)
 
     def handle_input(self, event: Any) -> bool:
         """Update last input time for cursor pulse logic."""
