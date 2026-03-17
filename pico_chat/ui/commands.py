@@ -48,6 +48,22 @@ class ExitCommand(Command):
         if ui.compositor:
             ui.compositor.running = False
 
+class StopCommand(Command):
+    def __init__(self):
+        super().__init__("stop", "Stop current generation")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        # Check if stop_generation method exists (runtime check)
+        if hasattr(ui, 'stop_generation'):
+            if ui.stop_generation():
+                # Message is already appended by the cancelled task handler
+                pass
+            else:
+                 ui.chat_history_panel.add_system_message("No active generation to stop.")
+        else:
+             ui.chat_history_panel.add_system_message("Stop command not supported by this UI.")
+        ui.chat_history_panel.finalize_last_message()
+
 class StatusCommand(Command):
     def __init__(self):
         super().__init__("status", "Show system and connection status")
@@ -78,6 +94,7 @@ COMMANDS: Dict[str, Command] = {
     "help": HelpCommand(),
     "clear": ClearCommand(),
     "exit": ExitCommand(),
+    "stop": StopCommand(),
     "status": StatusCommand(),
 }
 

@@ -36,10 +36,51 @@ class chatTUI:
         self.chat_history_panel = ChatHistoryPanel()
         self.input_panel = InputPanel(agent)
         
+        # Track the current generation task
+        self.current_generation_task: Optional[asyncio.Task] = None
+        
     @staticmethod
     def _rgb_to_ansi_fg(r: int, g: int, b: int) -> str:
         """Convert RGB to ANSI foreground color code."""
         return f"\033[38;2;{r};{g};{b}m"
+
+    async def _process_generation(self, user_input: str):
+        """Process a single generation request."""
+        # Show thinking indicator
+        current_msg = self.chat_history_panel.add_pico_message("Thinking..", self.assistant_color)
+        
+        # Process streaming response from Harness
+        try:
+            is_first_chunk = True
+            async for chunk in self.agent.chat(user_input):
+                if is_first_chunk:
+                    # Replace "Thinking..." with the first real chunk
+                    current_msg.base_text = chunk
+                    current_msg.reformat(self.chat_history_panel.max_width - 2)
+                    is_first_chunk = False
+                else:
+                    current_msg.append(chunk)
+
+                # Ensure we scroll to bottom if needed (handled by panel logic ideally, 
+                # but we can poke it)
+                if self.chat_history_panel.auto_scroll:
+                    self.chat_history_panel.scroll_offset = 0
+
+                # Yield to let the compositor render the update
+                await asyncio.sleep(0)
+        except asyncio.CancelledError:
+             # If cancelled, we want to stop and show that
+             current_msg.append("\n\033[90m[Generation stopped]\033[0m")
+             # Finalize and re-raise
+             self.chat_history_panel.finalize_last_message()
+             raise 
+        except Exception as e:
+             # If we fail before getting any chunk, the "Thinking..." might still be there.
+             # We can append the error.
+             current_msg.append(f"\n\033[31m[Error]: {str(e)}\033[0m")
+        
+        # Finalize the message to render markdown now that streaming is complete
+        self.chat_history_panel.finalize_last_message()
 
     async def agent_worker(self):
         """Background worker that processes harness requests."""
@@ -48,39 +89,16 @@ class chatTUI:
                 # Wait for a message with timeout
                 user_input = await asyncio.wait_for(self.message_queue.get(), timeout=0.1)
                 
-                # Show thinking indicator
-                current_msg = self.chat_history_panel.add_pico_message("Thinking..", self.assistant_color)
+                # Create a task for generation so it can be cancelled
+                self.current_generation_task = asyncio.create_task(self._process_generation(user_input))
                 
-                # Process streaming response from Harness
-                full_response = ""
-                is_first_chunk = True
                 try:
-                    async for chunk in self.agent.chat(user_input):
-                        if is_first_chunk:
-                            # Replace "Thinking..." with the first real chunk
-                            current_msg.base_text = chunk
-                            current_msg.reformat(self.chat_history_panel.max_width - 2)
-                            is_first_chunk = False
-                        else:
-                            current_msg.append(chunk)
-
-                        # Ensure we scroll to bottom if needed (handled by panel logic ideally, 
-                        # but we can poke it)
-                        if self.chat_history_panel.auto_scroll:
-                            self.chat_history_panel.scroll_offset = 0
-
-                        full_response += chunk
-                        # Yield to let the compositor render the update
-                        await asyncio.sleep(0)
-                except Exception as e:
-                     # If we fail before getting any chunk, the "Thinking..." might still be there.
-                     # We can append the error.
-                     current_msg.append(f"\n\033[31m[Error]: {str(e)}\033[0m")
-                
-                # Finalize the message to render markdown now that streaming is complete
-                self.chat_history_panel.finalize_last_message()
-                
-                # Notify completion if needed (e.g. state update, captured via poller anyway)
+                    await self.current_generation_task
+                except asyncio.CancelledError:
+                    # Task was cancelled (by /stop), continue to next message
+                    pass
+                finally:
+                    self.current_generation_task = None
                 
             except asyncio.TimeoutError:
                 continue
@@ -88,6 +106,13 @@ class chatTUI:
                 self.chat_history_panel.new_message(
                     f"\n\033[31m[Error]:\033[0m {str(e)}"
                 )
+
+    def stop_generation(self):
+        """Stop the current generation task if active."""
+        if self.current_generation_task and not self.current_generation_task.done():
+            self.current_generation_task.cancel()
+            return True
+        return False
 
 
     def on_command_submit(self, text: str):
