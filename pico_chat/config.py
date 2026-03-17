@@ -56,8 +56,8 @@ class Config:
         # Cursor settings
         self.ui_cursor_char: str = "█"
         self.ui_cursor_frequency: float = 1.0  # Hz (flashes per second)
-        self.ui_cursor_color: tuple[int, int, int] = (200, 200, 200)
-        self.ui_cursor_pulse_delay: float = 0.5  # Seconds before pulsating starts
+        self.ui_cursor_color: tuple[int, int, int] = (255, 255, 255)
+        self.ui_cursor_pulse_delay: float = 0.75  # Seconds before pulsating starts
 
         # Load from file if exists
         path = Path(config_path) if config_path else Path("pico_chat.toml")

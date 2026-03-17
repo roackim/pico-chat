@@ -18,6 +18,7 @@ class InputComponent(Component):
         self.cursor_pos = 0
         self.scroll_y = 0
         self._last_cursor_pos = -1
+        self._last_input_time = 0.0
         self.config = None # Config object passed during initialization
         
         # New: Integrated Command/Context menus
@@ -158,23 +159,7 @@ class InputComponent(Component):
         if calc_width <= prompt_width:
             return 1
             
-        paragraphs = self.text.split('\n')
-        total_lines = 0
-        
-        for i, para in enumerate(paragraphs):
-            is_first_para = (i == 0)
-            if is_first_para:
-                wrapped = wrap_text(para, calc_width, padding_width=prompt_width, first_line_padding=False)
-            else:
-                wrapped = wrap_text(para, calc_width, padding_width=prompt_width, first_line_padding=True)
-            
-            total_lines += len(wrapped.split('\n')) if wrapped else 1
-            
-        # Ensure trailing newline is accounted for in height calculation
-        if self.text.endswith('\n'):
-            total_lines += 1
-            
-        return total_lines
+        return len(self._get_lines())
 
     def render(self, buffer: Buffer):
         """Render the input field with prompt, text, scrolling, and menus."""
@@ -182,10 +167,6 @@ class InputComponent(Component):
         buffer.fill(self.x, self.y, self.width, self.height, " ", bg=self.bg)
         
         lines = self._get_lines()
-        # Handle trailing empty line (cursor at very end of a newline)
-        if self.text.endswith('\n'):
-            lines.append(" " * display_width(self.prompt))
-
         prompt_width = display_width(self.prompt)
         
         # Calculate cursor position (row, col)
@@ -224,25 +205,32 @@ class InputComponent(Component):
             if 0 <= cx < buffer.width and 0 <= cy < buffer.height:
                 # Get settings from config or use defaults
                 cursor_char = self.config.ui_cursor_char if (self.config and hasattr(self.config, 'ui_cursor_char')) else "█"
-                freq = self.config.ui_cursor_frequency if (self.config and hasattr(self.config, 'ui_cursor_frequency')) else 1.0
-                cursor_color = self.config.ui_cursor_color if (self.config and hasattr(self.config, 'ui_cursor_color')) else (200, 200, 200)
+                freq = self.config.ui_cursor_frequency if (self.config and hasattr(self.config, 'ui_cursor_frequency')) else 0.0
+                cursor_color = self.config.ui_cursor_color if (self.config and hasattr(self.config, 'ui_cursor_color')) else (255, 255, 255)
 
                 # Pulsate visibility according to time and frequency
                 now = time.time()
-                # Sine wave pulse: 0 to 1 back to 0
-                pulse = (math.sin(now * 2 * math.pi * freq) + 1) / 2
+                
+                # Disable pulsation for a delay after input
+                pulse_delay = self.config.ui_cursor_pulse_delay if (self.config and hasattr(self.config, 'ui_cursor_pulse_delay')) else 0.5
+                if now - self._last_input_time < pulse_delay:
+                    pulse = 1.0
+                else:
+                    # Sine wave pulse: 0 to 1 back to 0
+                    pulse = (math.sin(now * 2 * math.pi * freq) + 1) / 2
                 
                 # Always show cursor (pulse determines intensity)
                 curr_cell = buffer.cells[cy][cx]
                 char_to_show = curr_cell.char or " "
                 
-                # If cell is empty/whitespace and pulse is high, show cursor block
-                if char_to_show.isspace() and pulse > 0.3:
-                    char_to_show = cursor_char
-                
                 # Draw cursor with pulsing visibility
                 if pulse > 0.2:  # Lower threshold so cursor is visible more often
-                    buffer.set(cx, cy, char_to_show, fg=cursor_color, bg=self.bg, bold=True)
+                    # Invert colors for block cursor appearance
+                    # Use cursor_color as background, and original background as foreground
+                    bg_color = cursor_color
+                    fg_color = self.bg if self.bg else (0, 0, 0)
+                    
+                    buffer.set(cx, cy, char_to_show, fg=fg_color, bg=bg_color, bold=True)
 
         # RENDER MENUS OVER THE INPUT AREA
         if self.command_menu and self.command_menu.is_visible:
@@ -298,6 +286,7 @@ class InputComponent(Component):
         
         """Handle keyboard input for the text field."""
         if isinstance(event, str):
+            self._last_input_time = time.time()
             # LOG INPUT FOR DEBUGGING
             # import logging
             # logger = logging.getLogger("harness")

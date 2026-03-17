@@ -96,16 +96,6 @@ def wrap_text(text: str, max_width: int, padding_width: int = 0, first_line_padd
     paragraphs = text.split('\n')
     
     for para_idx, paragraph in enumerate(paragraphs):
-        if not paragraph:
-            lines.append("")
-            continue
-            
-        words = paragraph.split(' ') # Use single space to preserve intent better than .split()
-        if not words:
-            lines.append("")
-            continue
-        
-        current_line = ""
         is_first_line_of_para = (para_idx == 0)
         
         # Determine if we should start with padding
@@ -113,12 +103,23 @@ def wrap_text(text: str, max_width: int, padding_width: int = 0, first_line_padd
             current_prefix = " " * padding_width
         else:
             current_prefix = ""
+
+        if not paragraph:
+            lines.append(current_prefix)
+            continue
+            
+        words = paragraph.split(' ') # Use single space to preserve intent better than .split()
+        if not words:
+            lines.append(current_prefix)
+            continue
+        
+        current_line = ""
             
         line_max_width = max_width
         
         for word_idx, word in enumerate(words):
             if not word and word_idx < len(words) - 1: # Handle double spaces
-                word = "" 
+                word = ""
             
             word_display_width = display_width(word)
             current_display_width = display_width(current_line)
@@ -154,5 +155,8 @@ def wrap_text(text: str, max_width: int, padding_width: int = 0, first_line_padd
                     
         if current_line:
             lines.append(current_line)
+        elif not lines or lines[-1] != current_prefix:
+            # Ensure we add an empty line if the paragraph was just a newline
+            lines.append(current_prefix)
             
     return "\n".join(lines)
