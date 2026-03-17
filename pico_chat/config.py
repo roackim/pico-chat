@@ -50,8 +50,8 @@ class Config:
         ]
         
         # UI colors (RGB tuples)
-        self.ui_user_color: tuple[int, int, int] = (150, 255, 150)  # Green
-        self.ui_assistant_color: tuple[int, int, int] = (242, 207, 101)  # Orange
+        self.ui_user_color: tuple[int, int, int] = (242, 207, 101) # (100, 225, 150) # Green
+        self.ui_assistant_color: tuple[int, int, int] = (125, 175, 255) # (242, 207, 101)  # Orange
 
         # Cursor settings
         self.ui_cursor_char: str = "█"
