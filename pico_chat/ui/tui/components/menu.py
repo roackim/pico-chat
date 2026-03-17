@@ -60,7 +60,7 @@ class CommandMenu(Component):
         if not self.is_visible or not self.filtered_items:
             return
 
-        menu_height = len(self.filtered_items) + 2
+        menu_height = self.height
         
         # Calculate width including trigger
         max_raw_len = max(len(item) for item in self.filtered_items)
@@ -76,7 +76,10 @@ class CommandMenu(Component):
             buffer.set(self.x + i, self.y, "─", fg=self.fg)
         buffer.set(self.x + menu_width - 1, self.y, "┐", fg=self.fg)
         
-        for i, item in enumerate(self.filtered_items):
+        # Only render items that fit in the menu height (minus borders)
+        visible_count = min(len(self.filtered_items), menu_height - 2)
+        for i in range(visible_count):
+            item = self.filtered_items[i]
             curr_y = self.y + 1 + i
             buffer.set(self.x, curr_y, "│", fg=self.fg)
             

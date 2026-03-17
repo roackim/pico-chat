@@ -237,8 +237,8 @@ class InputComponent(Component):
             # Position menu relative to this component's top
             menu_height = len(self.command_menu.filtered_items) + 2
             self.command_menu.set_layout(
-                self.x, 
-                self.y - menu_height, 
+                self.x - 1,
+                self.y - menu_height - 1,
                 self.width - 2, # Subtract some margin to fit nicely inside current layouts
                 menu_height
             )
@@ -247,9 +247,9 @@ class InputComponent(Component):
         if self.context_menu and self.context_menu.is_visible:
             menu_height = min(len(self.context_menu.filtered_items) + 2, 12)
             self.context_menu.set_layout(
-                self.x, 
-                self.y - menu_height, 
-                self.width - 2, 
+                self.x - 1,
+                self.y - menu_height - 1,
+                self.width - 2,
                 menu_height
             )
             self.context_menu.render(buffer)
