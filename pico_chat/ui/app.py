@@ -49,7 +49,7 @@ class chatTUI:
                 user_input = await asyncio.wait_for(self.message_queue.get(), timeout=0.1)
                 
                 # Show thinking indicator
-                self.chat_history_panel.add_pico_message("Thinking..", self.assistant_color)
+                current_msg = self.chat_history_panel.add_pico_message("Thinking..", self.assistant_color)
                 
                 # Process streaming response from Harness
                 full_response = ""
@@ -58,17 +58,24 @@ class chatTUI:
                     async for chunk in self.agent.chat(user_input):
                         if is_first_chunk:
                             # Replace "Thinking..." with the first real chunk
-                            self.chat_history_panel.add_message(chunk, append=False, overwrite_last=True)
+                            current_msg.base_text = chunk
+                            current_msg.reformat(self.chat_history_panel.max_width - 2)
                             is_first_chunk = False
                         else:
-                            self.chat_history_panel.add_message(chunk, append=True)
+                            current_msg.append(chunk)
+
+                        # Ensure we scroll to bottom if needed (handled by panel logic ideally, 
+                        # but we can poke it)
+                        if self.chat_history_panel.auto_scroll:
+                            self.chat_history_panel.scroll_offset = 0
+
                         full_response += chunk
                         # Yield to let the compositor render the update
                         await asyncio.sleep(0)
                 except Exception as e:
                      # If we fail before getting any chunk, the "Thinking..." might still be there.
                      # We can append the error.
-                     self.chat_history_panel.add_message(f"\n\033[31m[Error]: {str(e)}\033[0m", append=True)
+                     current_msg.append(f"\n\033[31m[Error]: {str(e)}\033[0m")
                 
                 # Finalize the message to render markdown now that streaming is complete
                 self.chat_history_panel.finalize_last_message()
