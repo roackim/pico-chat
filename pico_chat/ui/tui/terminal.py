@@ -103,7 +103,11 @@ class Terminal:
                         c = sys.stdin.read(1)
                         if c:
                             seq += c
+                            # Stop reading if we see common terminators
                             if seq.endswith(('m', 'M', 'A', 'B', 'C', 'D', 'H', 'F')):
+                                break
+                            # Specific check for Alt+Enter (\x1b\r or \x1b\n)
+                            if seq in ('\x1b\r', '\x1b\n'):
                                 break
                             if seq.endswith('~'):
                                 # Check for bracketed paste start immediately

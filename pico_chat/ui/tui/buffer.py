@@ -8,6 +8,7 @@ class Cell:
     fg: Optional[tuple[int, int, int]] = None
     bg: Optional[tuple[int, int, int]] = None
     bold: bool = False
+    reverse: bool = False
     is_wide_char_continuation: bool = False  # Marks cells that are part of a wide character
 
 class Buffer:
@@ -20,10 +21,10 @@ class Buffer:
     def set_cursor(self, x: int, y: int):
         self.cursor_pos = (x, y)
 
-    def set(self, x: int, y: int, char: str, fg=None, bg=None, bold=False):
+    def set(self, x: int, y: int, char: str, fg=None, bg=None, bold=False, reverse=False):
         if 0 <= x < self.width and 0 <= y < self.height:
             # Important: Always create a fresh Cell instance to avoid sharing
-            self.cells[y][x] = Cell(char, fg, bg, bold)
+            self.cells[y][x] = Cell(char, fg, bg, bold, reverse)
 
     def fill(self, x: int, y: int, width: int, height: int, char: str = " ", fg=None, bg=None):
         """Fill a rectangular area with a character."""
@@ -119,8 +120,7 @@ class Buffer:
         from pico_chat.ui.tui.terminal import ANSI
         
         res = [ANSI.MOVE_HOME]
-        curr_fg = None
-        curr_bg = None
+        curr_state = {"fg": None, "bg": None, "bold": False, "reverse": False}
         
         for y in range(self.height):
             # Move to start of line
@@ -141,22 +141,43 @@ class Buffer:
                     res.append(ANSI.move_to(y + 1, x + 1))
                     terminal_col = x
                 
-                # Update colors if changed
-                if cell.fg != curr_fg:
-                    if cell.fg:
-                        res.append(ANSI.color_rgb_fg(*cell.fg))
-                    else:
-                        # Reset FG (and unfortunately BG, so we force BG reset state)
-                        res.append("\033[39m") # Reset FG only (standard ANSI)
-                    curr_fg = cell.fg
+                # Update attributes if changed
+                attr_changed = (
+                    cell.fg != curr_state["fg"] or 
+                    cell.bg != curr_state["bg"] or 
+                    cell.bold != curr_state["bold"] or 
+                    cell.reverse != curr_state["reverse"]
+                )
                 
-                if cell.bg != curr_bg:
-                    if cell.bg:
-                        res.append(ANSI.color_rgb_bg(*cell.bg))
-                    else:
-                        res.append("\033[49m") # Reset BG only (standard ANSI)
-                    curr_bg = cell.bg
+                if attr_changed:
+                    # If turning off bold/reverse, we often need a full reset in some terminals
+                    # but we try to be surgical
+                    if (curr_state["bold"] and not cell.bold) or (curr_state["reverse"] and not cell.reverse):
+                        res.append("\033[0m")
+                        curr_state = {"fg": None, "bg": None, "bold": False, "reverse": False}
                     
+                    if cell.fg != curr_state["fg"]:
+                        if cell.fg:
+                            res.append(ANSI.color_rgb_fg(*cell.fg))
+                        else:
+                            res.append("\033[39m")
+                        curr_state["fg"] = cell.fg
+
+                    if cell.bg != curr_state["bg"]:
+                        if cell.bg:
+                            res.append(ANSI.color_rgb_bg(*cell.bg))
+                        else:
+                            res.append("\033[49m")
+                        curr_state["bg"] = cell.bg
+
+                    if cell.bold and not curr_state["bold"]:
+                        res.append("\033[1m")
+                        curr_state["bold"] = True
+
+                    if cell.reverse and not curr_state["reverse"]:
+                        res.append("\033[7m")
+                        curr_state["reverse"] = True
+
                 res.append(cell.char)
                 
                 # Check if next cell is marked as continuation (meaning this char is wide)

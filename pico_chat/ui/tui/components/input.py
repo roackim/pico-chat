@@ -54,78 +54,72 @@ class InputComponent(Component):
         prompt_width = display_width(self.prompt)
         available_width = self.width - 2
         
-        # If text is empty, cursor is after prompt
-        if not self.text[:pos]:
+        if available_width <= 0:
+            return 0, 0
+        
+        # If text is empty or pos is 0, cursor is right after prompt
+        if pos == 0:
             return 0, prompt_width
 
-        paragraphs = self.text[:pos].split('\n')
-        curr_r = 0
+        # Split by actual newlines in the text
+        text_before_cursor = self.text[:pos]
+        paragraphs = text_before_cursor.split('\n')
         
-        for i, para in enumerate(paragraphs):
-            is_first_para = (i == 0)
+        row = 0
+        
+        for para_idx, para in enumerate(paragraphs):
+            is_first_para = (para_idx == 0)
             
-            # Use wrap_text to see how this paragraph is laid out
-            wrapped = wrap_text(para, available_width, padding_width=prompt_width, first_line_padding=(not is_first_para))
+            # Wrap this paragraph the same way _get_lines does
+            if is_first_para:
+                wrapped = wrap_text(para, available_width, padding_width=prompt_width, first_line_padding=False)
+            else:
+                wrapped = wrap_text(para, available_width, padding_width=prompt_width, first_line_padding=True)
+            
             para_lines = wrapped.split('\n') if wrapped else [""]
             
-            if i < len(paragraphs) - 1:
-                # This paragraph is finished (we encountered a \n)
-                curr_r += len(para_lines)
+            if para_idx < len(paragraphs) - 1:
+                # This paragraph was terminated by a newline, count all its display lines
+                row += len(para_lines)
             else:
-                # This is the last paragraph (where the cursor is)
-                last_line = para_lines[-1]
-                curr_r += len(para_lines) - 1
-                curr_c = display_width(last_line)
+                # This is the last paragraph (cursor is here)
+                last_line = para_lines[-1] if para_lines else ""
+                row += len(para_lines) - 1
                 
-                # Adjust for prompt if we are in the first paragraph's first line
-                if i == 0 and len(para_lines) == 1:
-                    curr_c += prompt_width
+                # Column is the display width of the last line
+                col = display_width(last_line)
                 
-                # Handle the case where the very last character was a newline
-                if pos > 0 and self.text[pos-1] == '\n':
-                    curr_r += 1
-                    curr_c = prompt_width
+                # Add prompt width if we're on the first displayed row
+                if para_idx == 0 and len(para_lines) == 1:
+                    col += prompt_width
                 
-                return curr_r, curr_c
+                return row, col
         
         return 0, prompt_width
 
     def _get_pos_from_coords(self, target_r: int, target_c: int) -> int:
         """Find the closest string index for given (row, col) coordinates."""
-        prompt_width = display_width(self.prompt)
-        available_width = self.width - 2
-        r, c = 0, prompt_width
+        if target_r < 0:
+            return 0
         
-        # If targeting a row before the start, return 0
-        if target_r < 0: return 0
+        # Simple brute force: try each position and find best match
+        best_pos = 0
+        best_distance = float('inf')
         
-        best_pos_in_row = 0
-        
-        for i, char in enumerate(self.text):
-            if r == target_r:
-                if c >= target_c:
-                    return i
-                best_pos_in_row = i + 1
-            elif r > target_r:
-                return best_pos_in_row
+        for pos in range(len(self.text) + 1):
+            row, col = self._get_cursor_coords(pos)
             
-            if char == '\n':
-                if r == target_r:
-                    return i
-                r += 1
-                c = prompt_width
-                continue
-            
-            w = display_width(char)
-            if c + w > available_width:
-                if r == target_r:
-                    return i
-                r += 1
-                c = prompt_width + w
-            else:
-                c += w
+            if row == target_r:
+                # On target row, find closest column
+                distance = abs(col - target_c)
+                if distance < best_distance:
+                    best_distance = distance
+                    best_pos = pos
+            elif row > target_r:
+                # Past target row
+                break
         
-        return len(self.text)
+        return best_pos
 
     def _get_lines(self) -> list[str]:
         """Wrap text into lines based on current width, preserving newlines and applying left padding for multiline."""
@@ -229,25 +223,25 @@ class InputComponent(Component):
             
             if 0 <= cx < buffer.width and 0 <= cy < buffer.height:
                 # Get settings from config or use defaults
-                cursor_char = self.config.ui_cursor_char if self.config else "█"
-                freq = self.config.ui_cursor_frequency if self.config else 1.0
-                cursor_color = self.config.ui_cursor_color if self.config else (200, 200, 200)
+                cursor_char = self.config.ui_cursor_char if (self.config and hasattr(self.config, 'ui_cursor_char')) else "█"
+                freq = self.config.ui_cursor_frequency if (self.config and hasattr(self.config, 'ui_cursor_frequency')) else 1.0
+                cursor_color = self.config.ui_cursor_color if (self.config and hasattr(self.config, 'ui_cursor_color')) else (200, 200, 200)
 
                 # Pulsate visibility according to time and frequency
                 now = time.time()
                 # Sine wave pulse: 0 to 1 back to 0
                 pulse = (math.sin(now * 2 * math.pi * freq) + 1) / 2
                 
+                # Always show cursor (pulse determines intensity)
                 curr_cell = buffer.cells[cy][cx]
-                
-                # Only draw "extra" cursor char if the cell is empty or has a space
-                # Otherwise we overlay/highlight the existing character
                 char_to_show = curr_cell.char or " "
-                if char_to_show.isspace() and pulse > 0.3: # Show cursor char for most of the cycle
-                     char_to_show = cursor_char
                 
-                # If pulse is high enough, we show the cursor styling
-                if pulse > 0.1:
+                # If cell is empty/whitespace and pulse is high, show cursor block
+                if char_to_show.isspace() and pulse > 0.3:
+                    char_to_show = cursor_char
+                
+                # Draw cursor with pulsing visibility
+                if pulse > 0.2:  # Lower threshold so cursor is visible more often
                     buffer.set(cx, cy, char_to_show, fg=cursor_color, bg=self.bg, bold=True)
 
         # RENDER MENUS OVER THE INPUT AREA
@@ -304,11 +298,44 @@ class InputComponent(Component):
         
         """Handle keyboard input for the text field."""
         if isinstance(event, str):
+            # LOG INPUT FOR DEBUGGING
+            # import logging
+            # logger = logging.getLogger("harness")
+            # logger.info(f"[Input] Received event: {repr(event)}")
+
             # Key constants
             KEY_ENTER = '\r'
             KEY_NEWLINE = '\n'
             KEY_BACKSPACE = '\x7f'
+            KEY_ESC = '\x1b'
             
+            # 0. IGNORE NAKED ESCAPE (might be start of Alt+Enter or just noise)
+            if event == KEY_ESC:
+                return True
+
+            def _update_menus(text_after_change: str):
+                """Internal helper to update menu state after text modification."""
+                clean_text = text_after_change.lstrip()
+                
+                if self.command_menu:
+                    if clean_text.startswith('/') and ' ' not in clean_text:
+                        self.command_menu.filter(clean_text)
+                    else:
+                        self.command_menu.is_visible = False
+                        
+                if self.context_menu:
+                    last_at = text_after_change.rfind('@')
+                    if last_at != -1:
+                        after_at = text_after_change[last_at+1:]
+                        if ' ' not in after_at:
+                            if not self.context_menu.all_items and self.get_context_items_callback:
+                                self.context_menu.all_items = self.get_context_items_callback()
+                            self.context_menu.filter(text_after_change)
+                        else:
+                            self.context_menu.is_visible = False
+                    else:
+                        self.context_menu.is_visible = False
+
             # 1. SPECIAL COMBINATIONS
             
             # Ctrl+Left (Word back)
@@ -337,12 +364,14 @@ class InputComponent(Component):
                     while i > 0 and not self.text[i-1].isspace(): i -= 1
                     self.text = self.text[:i] + self.text[self.cursor_pos:]
                     self.cursor_pos = i
+                    _update_menus(self.text)
                 return True
 
             # Alt+Enter (\x1b\r) or Ctrl+Enter/Ctrl+J (\x0a) -> Newline
-            if event in ('\x1b\r', '\x0a'):
+            if event in ('\x1b\r', '\x1b\n', '\x0a'):
                 self.text = self.text[:self.cursor_pos] + "\n" + self.text[self.cursor_pos:]
                 self.cursor_pos += 1
+                _update_menus(self.text)
                 return True
 
             # Regular Enter -> Submit
@@ -352,6 +381,7 @@ class InputComponent(Component):
                     self.text = ""
                     self.cursor_pos = 0
                     self.scroll_y = 0
+                    _update_menus(self.text)
                 return True
             
             # 2. STANDARD KEYS
@@ -360,6 +390,7 @@ class InputComponent(Component):
                 if self.cursor_pos > 0:
                     self.text = self.text[:self.cursor_pos-1] + self.text[self.cursor_pos:]
                     self.cursor_pos -= 1
+                    _update_menus(self.text)
                 return True
             
             # Arrow Keys
@@ -386,31 +417,7 @@ class InputComponent(Component):
             if len(event) == 1 and ord(event) >= 32:
                 self.text = self.text[:self.cursor_pos] + event + self.text[self.cursor_pos:]
                 self.cursor_pos += 1
-                
-                # UPDATE MENU VISIBILITY
-                full_text = self.text
-                clean_text = full_text.lstrip()
-                
-                if self.command_menu:
-                    if clean_text.startswith('/') and ' ' not in clean_text:
-                        self.command_menu.filter(clean_text)
-                    else:
-                        self.command_menu.is_visible = False
-                        
-                if self.context_menu:
-                    last_at = full_text.rfind('@')
-                    if last_at != -1:
-                        after_at = full_text[last_at+1:]
-                        if ' ' not in after_at:
-                            # Refresh items via callback if needed
-                            if not self.context_menu.all_items and self.get_context_items_callback:
-                                self.context_menu.all_items = self.get_context_items_callback()
-                            self.context_menu.filter(full_text)
-                        else:
-                            self.context_menu.is_visible = False
-                    else:
-                        self.context_menu.is_visible = False
-
+                _update_menus(self.text)
                 return True
         return False
 

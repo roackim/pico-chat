@@ -203,7 +203,7 @@ class chatTUI:
         right_col = Hsplit([
             self.chat_history_panel.get_component(),
             self.input_box
-        ], ["100%", 10]) # Set a reasonable height for input box or leave it to layout
+        ], ["100%", 0]) # 0 means use preferred height
 
         # Main Layout
         root = right_col
