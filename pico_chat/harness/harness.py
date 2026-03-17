@@ -98,6 +98,14 @@ class Harness:
         self.history = []
         self.debug_stream.log("CLEAR", "Conversation history cleared")
 
+    def list_files_and_folders(self) -> List[str]:
+        """Returns a list of all files and folders in the workspace, respecting .gitignore."""
+        context = build_harness_context(self.workspace)
+        # build_harness_context returns a string with "Project Root: ...", "Files ...", and then the paths
+        lines = context.split('\n')
+        # Skip the first two lines (Project Root and Files header)
+        return [line.strip() for line in lines[2:] if line.strip()]
+
     def estimate_context_usage(self) -> tuple[int, int, float]:
         """
         Estimate current context usage in tokens.

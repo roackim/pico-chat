@@ -6,7 +6,7 @@ from pico_chat.ui.tui.fuzzy import fuzzy_search
 class CommandMenu(Component):
     """A floating menu component for command autocomplete/suggestions."""
     
-    def __init__(self, commands: List[str], id: Optional[str] = None, fg=None, bg=None):
+    def __init__(self, commands: List[str], id: Optional[str] = None, fg=None, bg=None, trigger: str = "/"):
         super().__init__(id)
         self.all_commands = commands
         self.filtered_commands: List[str] = []
@@ -15,16 +15,33 @@ class CommandMenu(Component):
         self.bg = bg
         self.is_visible = False
         self.on_select: Optional[Callable[[str], None]] = None
+        self.trigger = trigger
 
     def filter(self, query: str):
         """Refine the menu based on fuzzy matching of the query."""
-        if not query.startswith('/') or ' ' in query:
-            self.is_visible = False
-            return
+        # For commands, we still only support start of line for now to avoid collision
+        if self.trigger == "/":
+            if not query.startswith('/') or ' ' in query:
+                self.is_visible = False
+                return
+            search_term = query[1:].strip()
+        else:
+            # For context, we find the last trigger in the string
+            last_trigger_idx = query.rfind(self.trigger)
+            if last_trigger_idx == -1:
+                self.is_visible = False
+                return
             
-        search_term = query[1:].strip()
+            # Extract content after the trigger until the end of string
+            search_term = query[last_trigger_idx + len(self.trigger):]
+            
+            # If there's a space after the trigger, it's not a completion anymore
+            if ' ' in search_term:
+                self.is_visible = False
+                return
+
         if not search_term:
-            # Show all commands when just '/' is typed
+            # Show all commands when just trigger is typed
             self.filtered_commands = self.all_commands
             self.is_visible = True
         else:
@@ -43,7 +60,10 @@ class CommandMenu(Component):
             return
 
         menu_height = len(self.filtered_commands) + 2
-        menu_width = max(len(cmd) for cmd in self.filtered_commands) + 4
+        
+        # Calculate width including trigger
+        max_raw_len = max(len(cmd) for cmd in self.filtered_commands)
+        menu_width = max_raw_len + len(self.trigger) + 4
         menu_width = max(menu_width, 15)
         
         # Ensure it doesn't exceed parent width
@@ -68,7 +88,7 @@ class CommandMenu(Component):
             buffer.set(self.x, curr_y, "│", fg=self.fg)
             
             # Text to display
-            display_text = f"/{cmd}"
+            display_text = f"{self.trigger}{cmd}"
             is_selected = (i == self.selected_index)
             
             # We want: │ (space) (highlighted text) (space) │
@@ -77,7 +97,6 @@ class CommandMenu(Component):
             
             # Draw the line
             highlight_width = inner_width - 2
-            display_text = f"/{cmd}"
             # Remove one space before the cmd string
             padded_text = f"{display_text}".ljust(highlight_width)
             
@@ -118,16 +137,20 @@ class CommandMenu(Component):
                 return True
         elif event == '\t': # Tab -> Complete
             if self.filtered_commands and self.on_select:
-                self.on_select('/' + self.filtered_commands[self.selected_index])
+                # For context, we don't want the trigger prefix in the final text
+                completion = self.filtered_commands[self.selected_index]
+                if self.trigger == "/":
+                    completion = self.trigger + completion
+                self.on_select(completion)
                 self.is_visible = False
                 return True
         elif event == '\r' or event == '\n': # Enter
             # If a perfect match is highlighted, complete it and let it submit
             if self.filtered_commands and self.on_select:
-                current_query = self.filtered_commands[self.selected_index]
-                # Check if what user typed so far matches exactly (case insensitive)
-                # query[1:] because filter() already knows it starts with /
-                self.on_select('/' + current_query)
+                completion = self.filtered_commands[self.selected_index]
+                if self.trigger == "/":
+                    completion = self.trigger + completion
+                self.on_select(completion)
                 self.is_visible = False
                 return False # Return False so the Enter event bubbles up and triggers submit
             self.is_visible = False

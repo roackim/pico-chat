@@ -58,6 +58,11 @@ def build_harness_context(root):
         dirnames[:] = [d for d in dirnames if not d.startswith('.') 
                        and not spec.match_file(os.path.relpath(os.path.join(dirpath, d), root))]
 
+        for dirname in sorted(dirnames):
+            full_path = os.path.join(dirpath, dirname)
+            rel_path = os.path.relpath(full_path, root)
+            context_output.append(f"{rel_path}/")
+
         for filename in sorted(filenames):
             # 2. Skip dot-files (except .gitignore if needed)
             if filename.startswith('.'):
