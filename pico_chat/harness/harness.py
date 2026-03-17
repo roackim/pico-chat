@@ -106,7 +106,9 @@ class Harness:
         # Simple estimation: 1 token ~= 4 characters for English text
         total_chars = 0
         for msg in self.history:
-            total_chars += len(msg.get("content", ""))
+            content = msg.get("content")
+            if content:
+                total_chars += len(content)
             
         # Add system prompt estimation (approx 500 chars)
         total_chars += 500
@@ -254,61 +256,80 @@ class Harness:
                     args_str = tc["function"]["arguments"]
                     call_id = tc["id"]
                     
-                    self.debug_stream.log("TOOL_EXEC", {"name": func_name, "args": args_str})
-                    
-                    # Show which tool is being called
-                    yield format_tool_call_start(func_name, args_str)
-                    
                     result = ""
-                    if func_name in self.tools_map:
-                        try:
-                            # Parse args
-                            args = json.loads(args_str)
-                            
-                            # Check for user input required (e.g. 'ask' command in CLI)
-                            # Or if the tool itself is marked as 'suspending' 
-                            # If func is async, we await it
-                            func = self.tools_map[func_name]
-                            
-                            if hasattr(func, "is_blocking") and func.is_blocking:
-                                # We signal the UI that we are waiting for user input
-                                prompt = args.get("prompt", "Please provide input:")
-                                yield f"\n\033[94m[System: Waiting for user input: {prompt}]\033[0m\n"
-                                
-                                # Blocking actually happens here
-                                user_resp = await self._wait_for_user_input(prompt)
-                                result = f"User responded with: {user_resp}"
-                            else:
-                                # Execute normally (sync or async if we support both)
-                                if asyncio.iscoroutinefunction(func.execute):
-                                    result = await func.execute(**args)
-                                else:
-                                    result = func.execute(**args)
-                            
-                            if not isinstance(result, str):
-                                result = str(result)
-
-                        except json.JSONDecodeError:
-                             result = f"Error: Invalid JSON arguments: {args_str}"
-                        except Exception as e:
-                            result = f"Error executing {func_name}: {str(e)}"
-                    else:
-                        result = f"Error: Tool '{func_name}' not found"
-                    
-                    # Log tool result
-                    self.debug_stream.log("TOOL_RESULT", {"call_id": call_id, "result": result})
+                    try:
+                        self.debug_stream.log("TOOL_EXEC", {"name": func_name, "args": args_str})
                         
-                    # Append tool result to history
-                    tool_msg = {
-                        "role": "tool",
-                        "tool_call_id": call_id,
-                        "content": result
-                    }
-                    self.history.append(tool_msg)
-                    messages.append(tool_msg)
-                    
-                    # Show completion feedback
-                    yield format_tool_call_complete(func_name, result)
+                        # Show which tool is being called
+                        yield format_tool_call_start(func_name, args_str)
+                        
+                        if func_name in self.tools_map:
+                            try:
+                                # Parse args
+                                args = json.loads(args_str)
+                                
+                                # Check for user input required (e.g. 'ask' command in CLI)
+                                # Or if the tool itself is marked as 'suspending' 
+                                # If func is async, we await it
+                                func = self.tools_map[func_name]
+                                
+                                if hasattr(func, "is_blocking") and func.is_blocking:
+                                    # We signal the UI that we are waiting for user input
+                                    prompt = args.get("prompt", "Please provide input:")
+                                    yield f"\n\033[94m[System: Waiting for user input: {prompt}]\033[0m\n"
+                                    
+                                    # Blocking actually happens here
+                                    user_resp = await self._wait_for_user_input(prompt)
+                                    result = f"User responded with: {user_resp}"
+                                else:
+                                    # Execute normally (sync or async if we support both)
+                                    if asyncio.iscoroutinefunction(func.execute):
+                                        result = await func.execute(**args)
+                                    else:
+                                        result = func.execute(**args)
+                                
+                                if not isinstance(result, str):
+                                    result = str(result)
+
+                            except json.JSONDecodeError:
+                                result = f"Error: Invalid JSON arguments: {args_str}"
+                            except Exception as e:
+                                result = f"Error executing {func_name}: {str(e)}"
+                        else:
+                            result = f"Error: Tool '{func_name}' not found"
+                        
+                        # Log tool result
+                        self.debug_stream.log("TOOL_RESULT", {"call_id": call_id, "result": result})
+                            
+                        # Append tool result to history
+                        tool_msg = {
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": result
+                        }
+                        self.history.append(tool_msg)
+                        messages.append(tool_msg)
+                        
+                        # Show completion feedback
+                        yield format_tool_call_complete(func_name, result)
+
+                    except Exception as e:
+                        # Fallback for system errors during tool processing logic
+                        err_msg = f"System Error processing tool call: {str(e)}"
+                        self.debug_stream.log("TOOL_SYSTEM_ERROR", {"call_id": call_id, "error": err_msg})
+                        
+                        # Ensure we append SOMETHING to history so LLM doesn't hang
+                        # Check if we already appended (basic check)
+                        if not self.history or self.history[-1].get("tool_call_id") != call_id:
+                            tool_msg = {
+                                "role": "tool",
+                                "tool_call_id": call_id,
+                                "content": err_msg
+                            }
+                            self.history.append(tool_msg)
+                            messages.append(tool_msg)
+                        
+                        yield f"\n\033[31m[System Error]: {str(e)}\033[0m\n"
 
             except Exception as e:
                 yield f"\nError: {str(e)}"
