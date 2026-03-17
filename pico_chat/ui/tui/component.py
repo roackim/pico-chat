@@ -1,8 +1,9 @@
 import re
 from abc import ABC, abstractmethod
 from typing import Optional, Any
+import subprocess
 from pico_chat.ui.tui.buffer import Buffer
-from pico_chat.ui.tui.terminal import MouseEvent
+from pico_chat.ui.tui.terminal import MouseEvent, PasteEvent
 from pico_chat.ui.tui.layout_utils import display_width, wrap_text, strip_ansi
 
 class Component(ABC):
@@ -409,8 +410,13 @@ class InputComponent(Component):
     def handle_input(self, event: Any) -> bool:
         """Update last input time for cursor pulse logic."""
         import time
-        if isinstance(event, (str, MouseEvent)):
+        if isinstance(event, (str, MouseEvent, PasteEvent)):
             self._last_input_time = time.time()
+        
+        # 1. Handle Paste Events (from bracketed paste)
+        if isinstance(event, PasteEvent):
+            self._insert_text(event.text)
+            return True
 
         """Handle mouse wheel for scrolling."""
         if isinstance(event, MouseEvent):
@@ -473,6 +479,11 @@ class InputComponent(Component):
                     self.cursor_pos = i
                 return True
 
+            # Ctrl+V (Paste)
+            if event == '\x16':
+                self._handle_paste_from_clipboard()
+                return True
+
             # Alt+Enter (\x1b\r) or Ctrl+Enter/Ctrl+J (\x0a) -> Newline
             if event in ('\x1b\r', '\x0a'):
                 self.text = self.text[:self.cursor_pos] + "\n" + self.text[self.cursor_pos:]
@@ -528,6 +539,49 @@ class InputComponent(Component):
                 return True
         return False
         
+    def _insert_text(self, text: str):
+        """Insert text at current cursor position."""
+        if not text:
+            return
+            
+        # Normalize line endings
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        
+        self.text = self.text[:self.cursor_pos] + text + self.text[self.cursor_pos:]
+        self.cursor_pos += len(text)
+        
+    def _handle_paste_from_clipboard(self):
+        """Try to paste from system clipboard using external tools."""
+        content = None
+        
+        # Try different clipboard tools
+        commands = [
+            ['xclip', '-o', '-selection', 'clipboard'],
+            ['wl-paste'],
+            ['pbpaste'],
+            ['xsel', '--clipboard', '--output']
+        ]
+        
+        for cmd in commands:
+            try:
+                result = subprocess.run(
+                    cmd, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    timeout=0.5
+                )
+                if result.returncode == 0:
+                    content = result.stdout
+                    break
+            except FileNotFoundError:
+                continue
+            except Exception:
+                continue
+                
+        if content:
+            self._insert_text(content)
+
     def update(self, text: str):
         """Update the input field text programmatically."""
         self.text = text

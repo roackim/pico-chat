@@ -14,6 +14,8 @@ class ANSI:
     SHOW_CURSOR = "\033[?25h"
     ENABLE_MOUSE = "\033[?1000h\033[?1002h\033[?1015h\033[?1006h"
     DISABLE_MOUSE = "\033[?1006l\033[?1015l\033[?1002l\033[?1000l"
+    ENABLE_BRACKETED_PASTE = "\033[?2004h"
+    DISABLE_BRACKETED_PASTE = "\033[?2004l"
     CLEAR_SCREEN = "\033[2J"
     MOVE_HOME = "\033[H"
     RESET = "\033[0m"
@@ -38,6 +40,10 @@ class MouseEvent:
     pressed: bool
     drag: bool = False
 
+@dataclass
+class PasteEvent:
+    text: str
+
 class Terminal:
     def __init__(self):
         self.fd = sys.stdin.fileno()
@@ -47,7 +53,7 @@ class Terminal:
     def __enter__(self):
         self.old_settings = termios.tcgetattr(self.fd)
         tty.setraw(self.fd)
-        sys.stdout.write(ANSI.HIDE_CURSOR + ANSI.ENABLE_MOUSE)
+        sys.stdout.write(ANSI.HIDE_CURSOR + ANSI.ENABLE_MOUSE + ANSI.ENABLE_BRACKETED_PASTE)
         sys.stdout.flush()
         signal.signal(signal.SIGWINCH, self._handle_resize)
         return self
@@ -55,7 +61,7 @@ class Terminal:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Restore terminal state and ensure cursor visibility."""
         # 1. First reset any colors and show the cursor immediately
-        sys.stdout.write(ANSI.RESET + ANSI.SHOW_CURSOR + ANSI.DISABLE_MOUSE + ANSI.MOVE_HOME + ANSI.CLEAR_SCREEN)
+        sys.stdout.write(ANSI.RESET + ANSI.SHOW_CURSOR + ANSI.DISABLE_MOUSE + ANSI.DISABLE_BRACKETED_PASTE + ANSI.MOVE_HOME + ANSI.CLEAR_SCREEN)
         sys.stdout.flush()
         
         # 2. Restore signal handlers
@@ -79,7 +85,7 @@ class Terminal:
         size = shutil.get_terminal_size()
         return size.columns, size.lines
 
-    def get_input(self) -> Optional[str | MouseEvent]:
+    def get_input(self) -> Optional[str | MouseEvent | PasteEvent]:
         # Non-blocking read
         flags = fcntl.fcntl(self.fd, fcntl.F_GETFL)
         fcntl.fcntl(self.fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
@@ -97,7 +103,12 @@ class Terminal:
                         c = sys.stdin.read(1)
                         if c:
                             seq += c
-                            if seq.endswith(('m', 'M', 'A', 'B', 'C', 'D')):
+                            if seq.endswith(('m', 'M', 'A', 'B', 'C', 'D', 'H', 'F')):
+                                break
+                            if seq.endswith('~'):
+                                # Check for bracketed paste start immediately
+                                if seq == '\x1b[200~':
+                                    return self._read_bracketed_paste()
                                 break
                         else:
                             time.sleep(0.001)
@@ -114,6 +125,45 @@ class Terminal:
             return None
         finally:
             fcntl.fcntl(self.fd, fcntl.F_SETFL, flags)
+
+    def _read_bracketed_paste(self) -> PasteEvent:
+        """Read content until end marker in a blocking-like manner."""
+        # Note: We are already in non-blocking mode from get_input's finally context?
+        # No, finally block of get_input restores flags ONLY when get_input returns/exits.
+        # But we are calling this FROM inside get_input, so flags are still set to NONBLOCK.
+        
+        content = ""
+        buffer = ""
+        start_time = time.time()
+        
+        # We allow a generous timeout for paste to complete (e.g. 1 second)
+        # Large pastes might take time, but chunks arrive fast.
+        last_char_time = time.time()
+        
+        while True:
+            # Safety timeout
+            if time.time() - last_char_time > 0.5:
+                # Timed out waiting for end marker
+                return PasteEvent(content + buffer)
+
+            try:
+                c = sys.stdin.read(1)
+                if not c:
+                    time.sleep(0.001)
+                    continue
+                
+                last_char_time = time.time()
+                buffer += c
+                
+                if buffer.endswith('\x1b[201~'):
+                    content += buffer[:-6]
+                    return PasteEvent(content)
+                
+                if len(buffer) > 6:
+                    content += buffer[:-6]
+                    buffer = buffer[-6:]
+            except:
+                time.sleep(0.001)
 
     def _parse_mouse(self, seq: str) -> Optional[MouseEvent]:
         # \033[<Cb;Cx;CyM/m

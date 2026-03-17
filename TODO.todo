@@ -57,13 +57,13 @@ BUGS:
     - spaces as first chars were stored but not rendered
     - commands works as first char
 
-[ ] Once a tool call happened, /status doesn't work anymore
+[x] Once a tool call happened, /status doesn't work anymore
     - /help and /clear work
 
-[ ] When tool calling fails, the error is not sent to the LLM, causing it to get stuck waiting for the tool response that will never come (e.g. patch tool with invalid patch format)
+[x] When tool calling fails, the error is not sent to the LLM, causing it to get stuck waiting for the tool response that will never come (e.g. patch tool with invalid patch format)
     - Need to catch tool call errors and send them back to the LLM as a message in the conversation so it can react accordingly (e.g. retry, ask user for clarification, etc)
     
-[ ] CTRL + V in terminal causes issues 
+[x] CTRL + V in terminal causes issues 
     - pastes content but also triggers some keybindings (like \n => submit, etc)
        needs to be fixed for better ergonomics
        

@@ -4,6 +4,7 @@ import asyncio
 from typing import Optional, Callable, List
 
 from pico_chat.ui.tui.component import InputComponent, Box
+from pico_chat.ui.tui.terminal import PasteEvent
 from pico_chat.ui.tui.command_menu import CommandMenu
 from pico_chat.ui.commands import get_command_list
 
@@ -59,7 +60,7 @@ class InputPanel:
         handled = self._original_handle_input(event)
         
         # 3. After input, check if we need to show/filter menu
-        if isinstance(event, str):
+        if isinstance(event, (str, PasteEvent)):
             # Check for leading spaces logic only for MENU visibility, not for preventing input
             clean_text = self.component.text.lstrip()
             
