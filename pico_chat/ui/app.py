@@ -7,8 +7,6 @@ from typing import Optional, Any
 from pico_chat.ui.tui.compositor import Compositor
 from pico_chat.ui.tui.terminal import MouseEvent
 from pico_chat.ui.tui.container import Vsplit, Hsplit
-from pico_chat.ui.portrait_panel import PortraitPanel
-from pico_chat.ui.stats_panel import StatsPanel
 from pico_chat.ui.input_panel import InputPanel
 from pico_chat.ui.chat_history_panel import ChatHistoryPanel
 from pico_chat.ui.commands import handle_command
@@ -34,10 +32,6 @@ class chatTUI:
         self.user_color_code = self._rgb_to_ansi_fg(*self.user_color)
         self.assistant_color_code = self._rgb_to_ansi_fg(*self.assistant_color)
         self.reset_code = "\033[0m"
-        
-        # Initialize panels
-        self.portrait_panel = PortraitPanel()
-        self.stats_panel = StatsPanel(agent) 
         
         self.chat_history_panel = ChatHistoryPanel()
         self.input_panel = InputPanel(agent)
@@ -164,7 +158,6 @@ class chatTUI:
             self.agent.start()
             
         # Set up panels
-        self.portrait_panel.set_portrait("clank_term_text")
         self.input_panel.set_on_submit(self.on_user_submit)
         
         # Right Column
@@ -183,8 +176,6 @@ class chatTUI:
         self.root.handle_input = self.handle_global_input
 
         # Set compositor for all panels
-        self.portrait_panel.set_compositor(self.compositor)
-        self.stats_panel.set_compositor(self.compositor)
         self.chat_history_panel.set_compositor(self.compositor)
 
         # Run all tasks
@@ -196,8 +187,6 @@ class chatTUI:
                 [
                     asyncio.create_task(self.compositor.run()),
                     asyncio.create_task(self.agent_worker()),
-                    asyncio.create_task(self.stats_panel.update_loop()),
-                    asyncio.create_task(self.portrait_panel.update_loop()),
                 ],
                 return_when=asyncio.FIRST_COMPLETED
             )

@@ -39,32 +39,6 @@ class Message:
         self.component = TextComponent(self.formatted_text)
         self.box = Box(self.component, title=self.title, fg=self.frame_color)
     
-    def _contains_markdown(self, text: str) -> bool:
-        """Detect if text contains markdown syntax.
-        
-        Looks for common markdown patterns:
-        - Code blocks (```)
-        - Bold (**text**)
-        - Italic (*text*)
-        - Inline code (`code`)
-        - Headers (# ## ###)
-        - Lists (- or 1.)
-        """
-        markdown_patterns = [
-            r'```',           # Code blocks
-            r'\*\*\w',        # Bold
-            r'\*\w',          # Italic (but not just *)
-            r'`\w',           # Inline code
-            r'^\s*#{1,6}\s',  # Headers
-            r'^\s*[-*+]\s',   # Bullet lists
-            r'^\s*\d+\.\s',   # Numbered lists
-        ]
-        
-        for pattern in markdown_patterns:
-            if re.search(pattern, text, re.MULTILINE):
-                return True
-        return False
-    
     def _format_line_wrap(self) -> str:
         """Format the message text with smart word wrapping and padding.
         
@@ -140,21 +114,19 @@ class ChatHistoryTextComponent(TextComponent):
 class ChatHistoryPanel(TextComponent):
     """Manages the chat history display panel with dynamic width support."""
 
-    def __init__(self, max_width: int = 80, padding_left: int = 1, padding_right: int = 1, enable_markdown: bool = True):
+    def __init__(self, max_width: int = 80, padding_left: int = 1, padding_right: int = 1):
         """Initialize the chat history panel.
         
         Args:
             max_width: Initial maximum width for message line wrapping
             padding_left: Default number of spaces to pad the left side
             padding_right: Default number of spaces to pad the right side
-            enable_markdown: Enable automatic markdown detection and rendering
         """
         super().__init__("", id="history")
         self.messages = []
         self.max_width = max_width
         self.padding_left = padding_left
         self.padding_right = padding_right
-        self.enable_markdown = enable_markdown
         self.max_messages = 150  # Maximum number of messages to keep
         self.scroll_offset = 0   # How many rows to scroll up from the bottom
         self.auto_scroll = True
@@ -347,111 +319,10 @@ class ChatHistoryPanel(TextComponent):
         self.add_message(WELCOME_MESSAGE.rstrip())
         self.finalize_last_message()
     
-    def _contains_markdown(self, text: str) -> bool:
-        """Detect if text contains markdown syntax.
-        
-        Looks for common markdown patterns:
-        - Code blocks (```)
-        - Bold (**text**)
-        - Italic (*text*)
-        - Inline code (`code`)
-        - Headers (# ## ###)
-        - Lists (- or 1.)
-        """
-        markdown_patterns = [
-            r'```',           # Code blocks
-            r'\*\*\w',        # Bold
-            r'\*\w',          # Italic (but not just *)
-            r'`\w',           # Inline code
-            r'^\s*#{1,6}\s',  # Headers
-            r'^\s*[-*+]\s',   # Bullet lists
-            r'^\s*\d+\.\s',   # Numbered lists
-        ]
-        
-        for pattern in markdown_patterns:
-            if re.search(pattern, text, re.MULTILINE):
-                return True
-        return False
-    
-    def _apply_simple_markdown(self, text: str) -> str:
-        """Apply simple markdown formatting using ANSI codes.
-        
-        Formats:
-        - **bold** → ANSI bold
-        - *italic* → ANSI italic
-        - `code` → yellow color
-        - ```code blocks``` → plain indented text (stub)
-        - # Headers → yellow/gold color + bold
-        - - Lists → bullet points (•)
-        
-        Args:
-            text: Raw text with markdown
-            
-        Returns:
-            Text with ANSI codes applied
-        """
-        # Strip any ANSI prefix (like "pico: ") and process separately
-        prefix_pattern = r'^(\x1B\[[0-9;]*m)*([^:]+:)(\x1B\[[0-9;]*m)*\s'
-        prefix_match = re.match(prefix_pattern, text)
-        
-        if prefix_match:
-            # Get clean prefix without ANSI
-            full_prefix = text[:prefix_match.end()]
-            clean_prefix = strip_ansi(full_prefix)
-            content = text[prefix_match.end():]
-        else:
-            clean_prefix = ""
-            content = text
-        
-        # Process code blocks first (multiline) - just remove markers for now (stub)
-        def format_code_block(match):
-            lang = match.group(1) or 'text'
-            code = match.group(2)
-            # Stub: Just return code as-is, indented
-            lines = code.split('\n')
-            formatted_lines = [f' {line}' for line in lines]
-            return '\n'.join(formatted_lines)
-        
-        content = re.sub(r'```(\w*)\n(.+?)\n```', format_code_block, content, flags=re.DOTALL)
-        
-        # Inline code: `code` → yellow
-        # content = re.sub(r'`([^`]+)`', r'\033[38;5;227m\1\033[0m', content)
-        
-        # Bold: **text** → bold
-        content = re.sub(r'\*\*(.+?)\*\*', r'\033[1m\1\033[22m', content)
-        
-        # Italic: *text* → italic
-        content = re.sub(r'(?<!\*)\*([^\*]+?)\*(?!\*)', r'\033[3m\1\033[23m', content)
-        
-        # Headers: # → yellow/gold color + bold
-        content = re.sub(r'^(#{1,6})\s+(.+)$', r'\033[1;38;5;220m\2\033[0m', content, flags=re.MULTILINE)
-        
-        # Bullet lists: - → •
-        content = re.sub(r'^(\s*)[-*+]\s', r'\1• ', content, flags=re.MULTILINE)
-        
-        # Numbered lists: keep as-is but add space
-        # (already formatted correctly)
-        
-        return clean_prefix + content
-    
     def finalize_last_message(self):
-        """Finalize the last message after streaming is complete.
-        
-        Applies simple markdown formatting with ANSI codes if enabled.
-        """
-        if not self.messages:
-            return
-        
-        last_msg = self.messages[-1]
-        
-        # Only apply formatting if markdown is enabled and we detect markdown patterns
-        if self.enable_markdown and self._contains_markdown(last_msg.base_text):
-            # Apply simple inline markdown formatting
-            last_msg.base_text = self._apply_simple_markdown(last_msg.base_text)
-            # Reformat with line wrapping (account for borders)
-            last_msg.reformat(self.max_width - 2)
-        
-        # No implicit render call here
+        """Finalize the last message after streaming is complete."""
+        # Note: Markdown rendering logic has been moved to legacy_markdown_rendering.py
+        pass
 
     def resize(self, new_width: int):
         """Resize the panel and reformat all messages.

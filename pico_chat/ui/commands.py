@@ -58,7 +58,12 @@ class StatusCommand(Command):
         color_code = "\x1b[32m" if is_online else "\x1b[31m"
         
         cur, max_ctx, perc = ui.agent.check_context() if hasattr(ui.agent, 'check_context') else ui.agent.estimate_context_usage()
-        model_name = getattr(ui.agent.config, 'model', 'unknown')
+        
+        # Query the model name dynamically if possible, fall back to config
+        if hasattr(ui.agent, 'get_model_name'):
+            model_name = await ui.agent.get_model_name()
+        else:
+            model_name = getattr(ui.agent.config, 'model', 'unknown')
         
         report = (
             f"LLM Connectivity : {color_code}{status_text}\x1b[0m\n"

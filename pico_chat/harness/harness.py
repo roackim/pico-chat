@@ -121,6 +121,18 @@ class Harness:
         except Exception:
             return False
 
+    async def get_model_name(self) -> str:
+        """Query the server for the active model name, falling back to config if unavailable."""
+        try:
+            # Try to get the models list from the server
+            models = await asyncio.wait_for(self.client.models.list(), timeout=2.0)
+            if models and models.data:
+                # Return the first model ID as the 'active' one (common for local servers like llama.cpp)
+                return models.data[0].id
+        except Exception:
+            pass
+        return getattr(self.config, 'model', 'unknown')
+
     async def chat(self, user_input: str) -> AsyncGenerator[str, None]:
         """
         Main chat loop, mimicking minichat.py's direct execution flow.

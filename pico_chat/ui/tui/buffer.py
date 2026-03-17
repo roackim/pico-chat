@@ -71,24 +71,26 @@ class Buffer:
                 if max_width is not None and count + char_width > max_width:
                     break
                 
-                # Write the character plus any accumulated ANSI sequences to a single cell
-                if 0 <= curr_x < self.width and 0 <= y < self.height:
-                    self.set(curr_x, y, pending_ansi + char, fg, bg, bold)
-                pending_ansi = ""
-                
                 # If this is a wide character (emoji), mark the next cell as continuation
-                if char_width == 2 and curr_x + 1 < self.width:
-                    self.cells[y][curr_x + 1] = Cell(
-                        char="", 
-                        fg=fg, 
-                        bg=bg, 
-                        bold=bold, 
-                        is_wide_char_continuation=True
-                    )
+                if char_width == 2:
+                    if 0 <= curr_x < self.width and 0 <= y < self.height:
+                        self.set(curr_x, y, pending_ansi + char, fg, bg, bold)
+                    
+                    if 0 <= curr_x + 1 < self.width and 0 <= y < self.height:
+                        self.cells[y][curr_x + 1] = Cell(
+                            char="", 
+                            fg=fg, 
+                            bg=bg, 
+                            bold=bold, 
+                            is_wide_char_continuation=True
+                        )
                     curr_x += 2  # Skip over both the character cell and continuation cell
                 else:
+                    if 0 <= curr_x < self.width and 0 <= y < self.height:
+                        self.set(curr_x, y, pending_ansi + char, fg, bg, bold)
                     curr_x += 1  # Single-width character
                 
+                pending_ansi = ""
                 i += 1
                 count += char_width
         
