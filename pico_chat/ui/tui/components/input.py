@@ -7,6 +7,8 @@ from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.terminal import MouseEvent, PasteEvent
 from pico_chat.ui.tui.layout_utils import display_width, wrap_text
 
+from pico_chat.ui.tui.colors import RGB, theme
+
 class InputComponent(Component):
     def __init__(self, prompt: str = "> ", id: Optional[str] = None, fg=None, bg=None):
         super().__init__(id)
@@ -25,13 +27,16 @@ class InputComponent(Component):
         self.command_menu: Optional[CommandMenu] = None
         self.context_menu: Optional[CommandMenu] = None
         self.get_context_items_callback: Optional[Callable[[], List[str]]] = None
+        
+        if fg is None: self.fg = theme.DEFAULT
+        if bg is None: self.bg = theme.BACKGROUND
 
     def setup_menus(self, commands: List[str], get_context_items: Optional[Callable[[], List[str]]] = None):
         """Initialize built-in menus."""
-        self.command_menu = CommandMenu(commands, fg=self.fg, bg=(0, 0, 0))
+        self.command_menu = CommandMenu(commands, fg=self.fg, bg=self.bg)
         self.command_menu.on_select = self._on_command_selected
         
-        self.context_menu = CommandMenu([], fg=self.fg, bg=(0, 0, 0), trigger="@")
+        self.context_menu = CommandMenu([], fg=self.fg, bg=self.bg, trigger="@")
         self.context_menu.on_select = self._on_context_selected
         self.get_context_items_callback = get_context_items
 
@@ -204,9 +209,8 @@ class InputComponent(Component):
             
             if 0 <= cx < buffer.width and 0 <= cy < buffer.height:
                 # Get settings from config or use defaults
-                cursor_char = self.config.ui_cursor_char if (self.config and hasattr(self.config, 'ui_cursor_char')) else "█"
                 freq = self.config.ui_cursor_frequency if (self.config and hasattr(self.config, 'ui_cursor_frequency')) else 0.0
-                cursor_color = self.config.ui_cursor_color if (self.config and hasattr(self.config, 'ui_cursor_color')) else (255, 255, 255)
+                cursor_color = theme.DEFAULT
 
                 # Pulsate visibility according to time and frequency
                 now = time.time()
@@ -228,7 +232,7 @@ class InputComponent(Component):
                     # Invert colors for block cursor appearance
                     # Use cursor_color as background, and original background as foreground
                     bg_color = cursor_color
-                    fg_color = self.bg if self.bg else (0, 0, 0)
+                    fg_color = self.bg
                     
                     buffer.set(cx, cy, char_to_show, fg=fg_color, bg=bg_color, bold=True)
 

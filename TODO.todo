@@ -3,7 +3,7 @@
     [x] /clear - clear the chat history
     [x] /exit - exit the application
     [x] /status - show infos about connection, model, context etc
-    [ ] /stop - stop the current generation
+    [x] /stop - stop the current generation
     [ ] /retry
 
 [ ] split command:
@@ -28,7 +28,7 @@
 
 [x] Input field: dynamic height when line wrapping
 [x] Input field: ergonomics (ctrl+w, cursor movement, home/end, ctrl+backspace etc)
-[!] Input field: @file = upward menu with fuzzy file seach current dir
+[x] Input field: @file = upward menu with fuzzy file seach current dir
 [ ] Input and History: support mouse selection and copy
 
 [x] Scroll with mouse wheel (either in history or input when focused (if long enough to scroll))
@@ -43,7 +43,10 @@
     [ ] Live markdown rendering (e.g. render code blocks as they are being generated, render headers, lists, etc)
     [ ] Add AsciiTable for interpreting markdown tables in the chat history
     [ ] Codeblock should not wrap lines or add continuation chars (way simpler)
-    
+
+[!] Sky Color plugging
+[!] Styles
+
 [ ] Add timestamps to messages
 [x] Add message thinking status (static)
 [ ] Add message thinking status (dynamic, animated)
@@ -52,6 +55,10 @@
     patch: Invalid patch format: Missing '<<<<<<< SEARCH' marker 
 
 BUGS:
+[!] CAN'T CRASH THE APP (app need to crash when errors happen)
+    [ ] cf bad cmd path pico_chat/ui/commands.py:120
+
+[ ] CTRL + V does not work anymore
 
 [x] /command doesn't work after space as first char
     - spaces as first chars were stored but not rendered

@@ -1,7 +1,11 @@
+from dataclasses import dataclass
 from typing import Optional, Any
 from pico_chat.ui.tui.components.base import Component
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.terminal import MouseEvent
+
+from pico_chat import pico_cfg
+from pico_chat.ui.tui.colors import theme
 
 class Box(Component):
     def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None):
@@ -11,6 +15,9 @@ class Box(Component):
         self.title = title
         self.bg = bg
         self.fg = fg
+        
+        if self.bg is None: self.bg = theme.BACKGROUND
+        if self.fg is None: self.fg = theme.DEFAULT
 
     @property
     def children(self):
@@ -31,56 +38,65 @@ class Box(Component):
         return 0
 
     def render(self, buffer: Buffer):
-        """
-        Renders a box with borders and an optional title.
-        Implements a 'painter's algorithm' approach to ensure visual integrity:
-        1. Top + Left borders are drawn first.
-        2. Background is filled (if provided).
-        3. Child content is rendered.
-        4. Bottom + Right borders are drawn LAST to overwrite any content overflow.
-        All drawing uses absolute coordinates.
-        """
+        fg, bg = self.fg, self.bg
+
         if self.width < 2 or self.height < 2:
             return
 
-        # 1. Top + Left borders
-        # Top border (excluding right corner)
-        buffer.set(self.x, self.y, "┌", fg=self.fg)
-        for i in range(1, self.width - 1):
-            buffer.set(self.x + i, self.y, "─", fg=self.fg)
-        
-        # Left border (excluding bottom corner)
-        for i in range(1, self.height - 1):
-            buffer.set(self.x, self.y + i, "│", fg=self.fg)
 
-        # 2. Background (optional)
+        
+        @dataclass(frozen=True)
+        class BorderStyle:
+            tl: str  # top-left
+            tr: str  # top-right
+            bl: str  # bottom-left
+            br: str  # bottom-right
+            h: str   # horizontal
+            v: str   # vertical
+            
+        STYLES = {
+            "single":  BorderStyle("┌", "┐", "└", "┘", "─", "│"),
+            "double":  BorderStyle("╔", "╗", "╚", "╝", "═", "║"),
+            "ascii":   BorderStyle("+", "+", "+", "+", "-", "|"),
+            "rounded": BorderStyle("╭", "╮", "╰", "╯", "─", "│"),
+        }
+
+        style = STYLES[pico_cfg.config.ui_box_style]
+
+        # 1. Top + Left borders
+        buffer.set(self.x, self.y, style.tl, fg=fg, bg=bg)
+
+        for i in range(1, self.width - 1):
+            buffer.set(self.x + i, self.y, style.h, fg=fg, bg=bg)
+
+        for i in range(1, self.height - 1):
+            buffer.set(self.x, self.y + i, style.v, fg=fg, bg=bg)
+
+        # 2. Background
         if self.bg:
             for iy in range(1, self.height - 1):
                 for ix in range(1, self.width - 1):
-                    buffer.set(self.x + ix, self.y + iy, " ", bg=self.bg)
+                    buffer.set(self.x + ix, self.y + iy, " ", bg=bg)
 
-        # 3. Content (child components)
-        # Content is rendered before right/bottom borders so borders can constrain it.
+        # 3. Content
         self.child.render(buffer)
 
-        # 4. Bottom + Right borders (overwrites any content overflow)
-        # Right border
+        # 4. Bottom + Right borders
         for i in range(1, self.height - 1):
-            buffer.set(self.x + self.width - 1, self.y + i, "│", fg=self.fg)
-        
-        # Bottom border
+            buffer.set(self.x + self.width - 1, self.y + i, style.v, fg=fg, bg=bg)
+
         for i in range(1, self.width - 1):
-            buffer.set(self.x + i, self.y + self.height - 1, "─", fg=self.fg)
+            buffer.set(self.x + i, self.y + self.height - 1, style.h, fg=fg, bg=bg)
 
         # Corners
-        buffer.set(self.x + self.width - 1, self.y, "┐", fg=self.fg)
-        buffer.set(self.x, self.y + self.height - 1, "└", fg=self.fg)
-        buffer.set(self.x + self.width - 1, self.y + self.height - 1, "┘", fg=self.fg)
+        buffer.set(self.x + self.width - 1, self.y, style.tr, fg=fg, bg=bg)
+        buffer.set(self.x, self.y + self.height - 1, style.bl, fg=fg, bg=bg)
+        buffer.set(self.x + self.width - 1, self.y + self.height - 1, style.br, fg=fg, bg=bg)
 
-        # Title (on top of top border)
+        # Title
         if self.title:
             title_str = f" {self.title[:self.width-4]} "
-            buffer.write_str(self.x + 2, self.y, title_str, fg=self.fg)
+            buffer.write_str(self.x + 2, self.y, title_str, fg=fg, bg=bg)
 
     def handle_input(self, event: Any) -> bool:
         """Pass input to child, but check mouse bounds for the box area."""

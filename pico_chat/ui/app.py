@@ -2,6 +2,7 @@
 
 import sys
 import asyncio
+from turtle import done
 from typing import Optional, Any
 
 from pico_chat.ui.tui.compositor import Compositor
@@ -11,9 +12,12 @@ from pico_chat.ui.chat_history_panel import ChatHistoryPanel
 from pico_chat.ui.commands import handle_command, get_command_list
 from pico_chat.ui.tui.container import Vsplit, Hsplit
 
+from pico_chat.ui.tui.colors import theme
 
-TARGET_FPS = 60
+from pico_chat import pico_cfg
 
+TARGET_FPS = 1 # TODO reset to 60 fps after debugging error handling
+# TARGET_FPS = pico_cfg.target_fps
 
 class chatTUI:
     """Terminal UI for the agent."""
@@ -25,19 +29,10 @@ class chatTUI:
         self._last_focus_id: Optional[str] = None
         
         # Get colors from config
-        self.user_color = agent.config.ui_user_color
-        self.assistant_color = agent.config.ui_assistant_color
-        
-        # Create ANSI color codes
-        self.user_color_code = self._rgb_to_ansi_fg(*self.user_color)
-        self.assistant_color_code = self._rgb_to_ansi_fg(*self.assistant_color)
-        self.reset_code = "\033[0m"
-        
         self.chat_history_panel = ChatHistoryPanel()
         
         # New: Direct InputComponent usage
-        self.input_component = InputComponent(" ", id="entry", fg=self.user_color)
-        self.input_component.config = agent.config
+        self.input_component = InputComponent(" ", id="entry", fg=theme.USER)
         self.input_component.on_submit = self.on_user_submit
         
         # Setup menus
@@ -58,7 +53,8 @@ class chatTUI:
     async def _process_generation(self, user_input: str):
         """Process a single generation request."""
         # Show thinking indicator
-        current_msg = self.chat_history_panel.add_pico_message("Thinking..", self.assistant_color)
+        chat = self.chat_history_panel
+        current_msg = chat.add_pico_message("Thinking..", frame_color=theme.PICO)
         
         # Process streaming response from Harness
         try:
@@ -79,26 +75,35 @@ class chatTUI:
 
                 # Yield to let the compositor render the update
                 await asyncio.sleep(0)
+                
         except asyncio.CancelledError:
-             # If cancelled, we want to stop and show that
-             current_msg.append("\n\033[90m[Generation stopped]\033[0m")
-             # Finalize and re-raise
-             self.chat_history_panel.finalize_last_message()
-             raise 
+            # If cancelled, we want to stop and show that
+            current_msg.append(f"\n{theme.MUTED}[Generation stopped]{theme.reset()}")
+            # Finalize and re-raise
+            raise 
+            
         except Exception as e:
-             # If we fail before getting any chunk, the "Thinking..." might still be there.
-             # We can append the error.
-             current_msg.append(f"\n\033[31m[Error]: {str(e)}\033[0m")
+            
+            chat.remove_last_message()  # Remove the "Thinking..." message
+            chat.add_system_message(
+                message=f"\n{theme.ERROR}Error: {str(e)}{theme.reset()}",
+                frame_color=theme.ERROR
+            )
+             
+            # If we fail before getting any chunk, the "Thinking..." might still be there.
+            # We can append the error.
+            # current_msg.append(f"\n\033[31m[Error]: {str(e)}\033[0m")
+            
+            
         
-        # Finalize the message to render markdown now that streaming is complete
-        self.chat_history_panel.finalize_last_message()
-
     async def agent_worker(self):
         """Background worker that processes harness requests."""
+        
+        # TODO: review this loop logic
         while self.compositor and self.compositor.running:
             try:
                 # Wait for a message with timeout
-                user_input = await asyncio.wait_for(self.message_queue.get(), timeout=0.1)
+                user_input = await asyncio.wait_for(self.message_queue.get(), timeout=0.5)
                 
                 # Create a task for generation so it can be cancelled
                 self.current_generation_task = asyncio.create_task(self._process_generation(user_input))
@@ -111,11 +116,12 @@ class chatTUI:
                 finally:
                     self.current_generation_task = None
                 
-            except asyncio.TimeoutError:
-                continue
+            except asyncio.TimeoutError as e:
+                continue  # No message, just loop and check compositor status
             except Exception as e:
-                self.chat_history_panel.new_message(
-                    f"\n\033[31m[Error]:\033[0m {str(e)}"
+                self.chat_history_panel.add_system_message(
+                    message=f"\n{theme.ERROR}Error:{theme.reset()} {str(e)}",
+                    frame_color=theme.ERROR
                 )
 
     def stop_generation(self):
@@ -148,7 +154,7 @@ class chatTUI:
             # Enable auto-scroll to show the new message
             self.chat_history_panel.auto_scroll = True
             # Add user message immediately with color and header
-            self.chat_history_panel.add_user_message(text, self.user_color)
+            self.chat_history_panel.add_user_message(text)
             # Add to processing queue for agent
             self.message_queue.put_nowait(text)
 
@@ -199,14 +205,14 @@ class chatTUI:
         if hasattr(self.agent, 'start'):
             self.agent.start()
             
-        # Right Column
-        right_col = Hsplit([
+        # Column
+        column = Hsplit([
             self.chat_history_panel.get_component(),
             self.input_box
         ], ["100%", 0]) # 0 means use preferred height
 
         # Main Layout
-        root = right_col
+        root = column
         self.root = root  # Store root for global handler
         self.compositor = Compositor(root, fps=TARGET_FPS)
         
@@ -219,19 +225,11 @@ class chatTUI:
 
         # Run all tasks
         try:
-            # Override compositor.render to use our render
-            self.compositor.render = self.render
-            
-            done, pending = await asyncio.wait(
-                [
-                    asyncio.create_task(self.compositor.run()),
-                    asyncio.create_task(self.agent_worker()),
-                ],
-                return_when=asyncio.FIRST_COMPLETED
-            )
-            
-            for task in pending:
-                task.cancel()
+            async with asyncio.TaskGroup() as tg:
+                tg.create_task(self.compositor.run())
+                tg.create_task(self.agent_worker())
+                    # except Exception as e:
+            # print(f"Error in main loop: {e}")
         finally:
             # Clean shutdown
             if hasattr(self.agent, 'stop'):

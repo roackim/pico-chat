@@ -9,16 +9,24 @@ from pico_chat.ui.tui.components import TextComponent, Box
 from pico_chat.ui.tui.container import Hsplit
 from pico_chat.ui.tui.terminal import MouseEvent
 
-# Simple markdown formatting with ANSI codes
+from pico_chat import pico_cfg
+from pico_chat.ui.tui.colors import theme, RGB
 
 
 WELCOME_MESSAGE = "Welcome to pico-chat!\n"
 
-
 class Message:    
     """Represents a message in the chat history with formatting support."""
     
-    def __init__(self, text: str, max_width: int = 80, padding_left: int = 1, padding_right: int = 1, title: str = "", frame_color: tuple[int, int, int] = None):
+    def __init__(self, 
+                 text: str, 
+                 max_width: int = 80, 
+                 padding_left: int = pico_cfg.config.ui_msg_h_padding, 
+                 padding_right: int = pico_cfg.config.ui_msg_h_padding, 
+                 title: str = "", 
+                 frame_color: RGB = None,
+                 content_color: RGB = None,
+):
         """Initialize a message.
         
         Args:
@@ -29,6 +37,9 @@ class Message:
             title: Title for the message box
             frame_color: RGB color for the box frame and title
         """
+        
+        if frame_color is None: frame_color = theme.DEFAULT
+        
         self.base_text = text
         self.max_width = max_width
         self.padding_left = padding_left
@@ -36,7 +47,7 @@ class Message:
         self.title = title
         self.frame_color = frame_color
         self.formatted_text = self._format_line_wrap()
-        self.component = TextComponent(self.formatted_text)
+        self.component = TextComponent(self.formatted_text, fg=content_color)
         self.box = Box(self.component, title=self.title, fg=self.frame_color)
     
     def _format_line_wrap(self) -> str:
@@ -98,28 +109,28 @@ class Message:
         self.reformat(self.max_width)
 
 
-class ChatHistoryTextComponent(TextComponent):
-    """A TextComponent that notifies the panel when its width changes."""
+# class ChatHistoryTextComponent(TextComponent):
+#     """A TextComponent that notifies the panel when its width changes."""
     
-    def __init__(self, text: str, panel, id: Optional[str] = None, **kwargs):
-        super().__init__(text, id, **kwargs)
-        self.panel = panel
-        self._last_width = 0
+#     def __init__(self, text: str, panel, id: Optional[str] = None, **kwargs):
+#         super().__init__(text, id, **kwargs)
+#         self.panel = panel
+#         self._last_width = 0
     
-    def set_layout(self, x: int, y: int, width: int, height: int):
-        """Override to detect width changes and trigger reformat."""
-        super().set_layout(x, y, width, height)
+#     def set_layout(self, x: int, y: int, width: int, height: int):
+#         """Override to detect width changes and trigger reformat."""
+#         super().set_layout(x, y, width, height)
         
-        # If width changed, notify the panel to reformat
-        if width != self._last_width and width > 0:
-            self._last_width = width
-            self.panel.on_width_change(width)
+#         # If width changed, notify the panel to reformat
+#         if width != self._last_width and width > 0:
+#             self._last_width = width
+#             self.panel.on_width_change(width)
         
 
 class ChatHistoryPanel(TextComponent):
     """Manages the chat history display panel with dynamic width support."""
 
-    def __init__(self, max_width: int = 80, padding_left: int = 1, padding_right: int = 1):
+    def __init__(self, max_width: int = 80):
         """Initialize the chat history panel.
         
         Args:
@@ -130,8 +141,8 @@ class ChatHistoryPanel(TextComponent):
         super().__init__("", id="history")
         self.messages = []
         self.max_width = max_width
-        self.padding_left = padding_left
-        self.padding_right = padding_right
+        self.padding_left = pico_cfg.config.ui_msg_h_padding
+        self.padding_right = pico_cfg.config.ui_msg_h_padding
         self.max_messages = 150  # Maximum number of messages to keep
         self.scroll_offset = 0   # How many rows to scroll up from the bottom
         self.auto_scroll = True
@@ -141,7 +152,6 @@ class ChatHistoryPanel(TextComponent):
         
         # Add welcome message
         self.add_message(WELCOME_MESSAGE.rstrip())
-        self.finalize_last_message()
         
         # Initial component - self is now the component
         self.compositor: Optional[object] = None
@@ -187,14 +197,18 @@ class ChatHistoryPanel(TextComponent):
         # Clear background first (to prevent artifacts from previous frames/scrolls)
         buffer.fill(self.x, self.y, self.width, self.height)
 
-        total_height = self._get_all_rows()
+        # number of messages
+        msg_nbr = len(self.messages)
+        gap = pico_cfg.config.ui_v_padding
+
+        total_height = self._get_all_rows() + (msg_nbr - 1) * pico_cfg.config.ui_v_padding
         
         # Base offset (how much we need to scroll to see the bottom)
-        max_scroll = max(0, total_height - self.height)
+        max_scroll = max(0, total_height - self.height + gap) # introduce a gap to prevent last message from sticking to the bottom edge
         
         # If auto-scroll is on, we always show the bottom
         if self.auto_scroll:
-            self.scroll_offset = 0
+            self.scroll_offset = -gap
             
         # Actual offset from the TOP of the content
         # scroll_offset 0 means we are at the bottom.
@@ -207,6 +221,8 @@ class ChatHistoryPanel(TextComponent):
             child_h = child.get_preferred_height(self.width)
             
             # Draw child if it is within or partially within the vertical bounds of the panel
+            curr_y += gap
+            
             child.set_layout(self.x, curr_y, self.width, child_h)
             child.render(buffer)
             
@@ -226,37 +242,31 @@ class ChatHistoryPanel(TextComponent):
                     self.scroll_offset = min(max_scroll, self.scroll_offset + 3)
                     self.auto_scroll = False # Scrolling up disables auto-scroll
                     return True
+                    
                 elif event.button == 65: # Scroll Down
                     self.scroll_offset = max(0, self.scroll_offset - 3)
                     if self.scroll_offset == 0:
                         self.auto_scroll = True # Back at bottom enables auto-scroll
                     return True
+                    
         return False
 
-    def _render_messages(self) -> str:
-        """DEPRECATED: No longer used with per-message boxes.
-        
-        Returns:
-            The formatted chat history string
-        """
-        if not self.messages:
-            return ""
-        
-        # We still keep this for internal logic if needed, but not for rendering
-        rendered_lines = [msg.get_formatted() for msg in self.messages]
-        return "\n".join(rendered_lines) + "\n"
 
-    def new_message(self, message: str, title: str = "", frame_color: tuple[int, int, int] = None) -> Message:
+    def new_message(self, message: str, *, title: str = "", frame_color: RGB = None, content_color: RGB = None) -> Message:
         """Create a new message and append it to the chat history.
         
         Args:
             message: The text to add
             title: Optional title for the message box
             frame_color: Optional RGB color for the box frame
+            content_color: Optional RGB color for the box content
             
         Returns:
             The created Message object.
         """
+        
+        if frame_color is None: frame_color = theme.DEFAULT
+        
         # If we are near the bottom (within a few pixels), stay at bottom
         if self.scroll_offset < 1 or self.auto_scroll:
             self.auto_scroll = True
@@ -268,7 +278,8 @@ class ChatHistoryPanel(TextComponent):
             padding_left=self.padding_left,
             padding_right=self.padding_right,
             title=title,
-            frame_color=frame_color
+            frame_color=frame_color,
+            content_color=content_color
         )
         self.messages.append(new_message)
         self.msg_container.children.append(new_message.get_component())
@@ -281,8 +292,15 @@ class ChatHistoryPanel(TextComponent):
             self.msg_container.sizes = ["auto"] * len(self.messages)
         
         return new_message
+    
+    def remove_last_message(self):
+        """Remove the last message from the chat history."""
+        if self.messages:
+            self.messages.pop()
+            self.msg_container.children.pop()
+            self.msg_container.sizes.pop()
 
-    def add_message(self, message: str, title: str = "", frame_color: tuple[int, int, int] = None) -> Message:
+    def add_message(self, message: str, title: str = "", frame_color: RGB = None, content_color: RGB = None) -> Message:
         """Add a message to chat history and update UI.
         
         Args:
@@ -293,19 +311,28 @@ class ChatHistoryPanel(TextComponent):
         Returns:
             The created Message object.
         """
-        return self.new_message(message, title, frame_color)
+        return self.new_message(message, title=title, frame_color=frame_color, content_color=content_color)
 
-    def add_user_message(self, message: str, color: tuple[int, int, int] = None, title: str = "user") -> Message:
+    def add_user_message(self, message: str, *, title: str = "user", frame_color: RGB = None, content_color: RGB = None) -> Message:
         """Add a user message with the appropriate header and formatting."""
-        return self.new_message(message, title=title, frame_color=color)
+        
+        if frame_color is None: frame_color = theme.USER
+        
+        return self.new_message(message, title=title, frame_color=frame_color, content_color=content_color)
 
-    def add_pico_message(self, message: str, color: tuple[int, int, int] = None, title: str = "pico") -> Message:
+    def add_pico_message(self, message: str, title: str = "pico", frame_color: RGB = None, content_color: RGB = None) -> Message:
         """Add a Pico assistant message with the appropriate header and formatting."""
-        return self.new_message(message, title=title, frame_color=color)
+        
+        if frame_color is None: frame_color = theme.PICO
+        
+        return self.new_message(message, title=title, frame_color=frame_color, content_color=content_color)
 
-    def add_system_message(self, message: str, color: tuple[int, int, int] = (100, 100, 100), title: str = "system") -> Message:
+    def add_system_message(self, message: str, title: str = "system", frame_color: RGB = None, content_color: RGB = None) -> Message:
         """Add a system or command result message."""
-        return self.new_message(message, title=title, frame_color=color)
+        
+        if frame_color is None: frame_color = theme.MUTED
+        
+        return self.new_message(message, title=title, frame_color=frame_color, content_color=content_color)
 
     def clear(self):
         """Clear the chat history UI."""
@@ -317,31 +344,21 @@ class ChatHistoryPanel(TextComponent):
         
         # Optionally re-add welcome message
         self.new_message(WELCOME_MESSAGE.rstrip())
-        self.finalize_last_message()
     
-    def finalize_last_message(self):
-        """Finalize the last message after streaming is complete."""
-        # Note: Markdown rendering logic has been moved to legacy_markdown_rendering.py
-        pass
-
-    def resize(self, new_width: int):
-        """Resize the panel and reformat all messages.
+    # def resize(self, new_width: int):
+    #     """Resize the panel and reformat all messages.
         
-        Args:
-            new_width: The new maximum width for message wrapping
-        """
-        self.max_width = new_width
-        inner_width = new_width - 2
+    #     Args:
+    #         new_width: The new maximum width for message wrapping
+    #     """
+    #     self.max_width = new_width
+    #     inner_width = new_width - 2
         
-        # Reformat all messages with the new width
-        for message in self.messages:
-            message.reformat(inner_width)
+    #     # Reformat all messages with the new width
+    #     for message in self.messages:
+    #         message.reformat(inner_width)
         
         # No implicit render call here
-
-    def get_history(self) -> str:
-        """Get the current chat history (deprecated)."""
-        return ""
 
     def get_messages(self) -> list:
         """Get the list of Message objects."""

@@ -1,6 +1,9 @@
 from typing import Any, Dict, List, Optional, Protocol
 import asyncio
 
+from pico_chat.ui.tui.colors import RGB, theme
+
+
 class ChatUIProtocol(Protocol):
     agent: Any
     chat_history_panel: Any
@@ -20,14 +23,17 @@ class HelpCommand(Command):
         super().__init__("help", "Show available commands")
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        # help_text = "\033[1mAvailable commands:\033[0m\n"
-        help_text = "\033[0m"
+        help_text = ""
         
         for cmd in sorted(COMMANDS.values(), key=lambda x: x.name):
             help_text += f"/{cmd.name.ljust(8)} - {cmd.description}\n"
         
-        ui.chat_history_panel.add_system_message(help_text.rstrip(), title="help")
-        ui.chat_history_panel.finalize_last_message()
+        ui.chat_history_panel.add_system_message(
+            help_text.rstrip(), title
+            ="help", 
+            frame_color=theme.MUTED, 
+            content_color=theme.MUTED
+        )
 
 class ClearCommand(Command):
     def __init__(self):
@@ -38,7 +44,6 @@ class ClearCommand(Command):
         if hasattr(ui.agent, 'clear_history'):
             ui.agent.clear_history()
         ui.chat_history_panel.add_system_message("Conversation cleared.")
-        ui.chat_history_panel.finalize_last_message()
 
 class ExitCommand(Command):
     def __init__(self):
@@ -62,7 +67,6 @@ class StopCommand(Command):
                  ui.chat_history_panel.add_system_message("No active generation to stop.")
         else:
              ui.chat_history_panel.add_system_message("Stop command not supported by this UI.")
-        ui.chat_history_panel.finalize_last_message()
 
 class StatusCommand(Command):
     def __init__(self):
@@ -82,20 +86,24 @@ class StatusCommand(Command):
             model_name = getattr(ui.agent.config, 'model', 'unknown')
         
         report = (
-            f"LLM Connectivity : {color_code}{status_text}\x1b[0m\n"
+            f"LLM Connectivity : {color_code}{status_text}\n"
             f"Active Model     : {model_name}\n"
             f"Context Pressure : {perc:.1f}% | {cur/1024:.1f}k / {max_ctx/1024:.1f}k"
         )
-        ui.chat_history_panel.add_system_message(report, title="status")
-        ui.chat_history_panel.finalize_last_message()
+        ui.chat_history_panel.add_system_message(
+            report, 
+            title="status",
+            frame_color=theme.MUTED,
+            content_color=theme.DEFAULT
+        )
 
 # Command Registry
 COMMANDS: Dict[str, Command] = {
-    "help": HelpCommand(),
-    "clear": ClearCommand(),
-    "exit": ExitCommand(),
-    "stop": StopCommand(),
-    "status": StatusCommand(),
+    "help":     HelpCommand(),
+    "clear":    ClearCommand(),
+    "exit":     ExitCommand(),
+    "stop":     StopCommand(),
+    "status":   StatusCommand(),
 }
 
 async def handle_command(ui: ChatUIProtocol, text: str):
@@ -109,8 +117,12 @@ async def handle_command(ui: ChatUIProtocol, text: str):
     if cmd_name in COMMANDS:
         await COMMANDS[cmd_name].execute(ui, args)
     else:
-        ui.chat_history_panel.add_system_message(f"Unknown command: /{cmd_name}", color=(255, 96, 96))
-        ui.chat_history_panel.finalize_last_message()
+        ui.chat_history_panel.add_system_message(
+            f"Unknown command: /{cmd_name}", 
+            frame_color=theme.ERROR,
+            content_color=theme.ERROR)
+        
+        1/0  # For testing error handling
 
 def get_command_list() -> List[str]:
     return list(COMMANDS.keys())

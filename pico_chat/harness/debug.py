@@ -3,14 +3,14 @@ import json
 from pathlib import Path
 from typing import Any
 
-from pico_chat.config import get_config
+from pico_chat import pico_cfg
 
 
 class DebugStream:
     """The Observability Layer (Debug Stream)."""
 
-    def __init__(self, config_path: str | None = None):
-        self.config = get_config(config_path)
+    def __init__(self):
+        self.config = pico_cfg.config
         self.log_path = Path("debug_stream.log")
         # Keep file open for performance
         self._file = open(self.log_path, "a", encoding="utf-8", buffering=1) # Line buffering
@@ -53,9 +53,9 @@ class DebugStream:
 _debug_stream: DebugStream | None = None
 
 
-def get_debug_stream(config_path: str | None = None) -> DebugStream:
+def get_debug_stream() -> DebugStream:
     """Get global debug stream instance."""
     global _debug_stream
     if _debug_stream is None:
-        _debug_stream = DebugStream(config_path)
+        _debug_stream = DebugStream()
     return _debug_stream

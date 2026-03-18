@@ -4,7 +4,7 @@ import logging
 from typing import AsyncGenerator, Any, Dict, List, Optional
 
 from openai import AsyncOpenAI
-from pico_chat.config import get_config
+from pico_chat import pico_cfg
 from pico_chat.harness.llm_status import AgentState
 from pico_chat.harness.debug import get_debug_stream
 from pico_chat.harness.context_builder import build_harness_context
@@ -20,13 +20,14 @@ from pico_chat.harness.tool_feedback import (
     format_batch_start
 )
 
+from pico_chat.ui.tui.colors import RGB, theme
+
 # Re-implementation based on minichat.py for maximum performance and simplicity
 # Discarding complex Gateway logic in favor of direct AsyncOpenAI usage.
 
 class Harness:
-    def __init__(self, config_path: str | None = None, workspace_path: str | None = None):
-        self.config = get_config(config_path)
-        self.debug_stream = get_debug_stream(config_path)
+    def __init__(self, workspace_path: str | None = None):
+        self.debug_stream = get_debug_stream()
         self.state = AgentState.IDLE
         self.history = []
         
@@ -51,10 +52,10 @@ class Harness:
         
         # Direct Client Initialization (No Polling, No Gateway)
         self.client = AsyncOpenAI(
-            base_url=self.config.base_url,
-            api_key=self.config.api_key,
+            base_url=pico_cfg.config.base_url,
+            api_key=pico_cfg.config.api_key,
         )
-        self.debug_stream.log("INIT", f"Connected to {self.config.base_url}")
+        self.debug_stream.log("INIT", f"Connected to {pico_cfg.config.base_url}")
 
     def set_user_response(self, text: str):
         """Called by the UI when a response to a tool's prompt is ready."""
@@ -123,7 +124,7 @@ class Harness:
         
         current_tokens = total_chars // 4
         # Get max context from config or default to 32k
-        max_tokens = getattr(self.config, 'max_context', 32768)
+        max_tokens = getattr(pico_cfg.config, 'max_context', 32768)
         
         percentage = (current_tokens / max_tokens) * 100 if max_tokens > 0 else 0
         return current_tokens, max_tokens, percentage
@@ -147,7 +148,7 @@ class Harness:
                 return models.data[0].id
         except Exception:
             pass
-        return getattr(self.config, 'model', 'unknown')
+        return getattr(config, 'model', 'unknown')
 
     async def chat(self, user_input: str) -> AsyncGenerator[str, None]:
         """
@@ -170,7 +171,7 @@ class Harness:
             
             try:
                 stream = await self.client.chat.completions.create(
-                    model=self.config.model,
+                    model=pico_cfg.config.model,
                     messages=messages,
                     tools=self.tool_schemas,
                     stream=True
@@ -193,8 +194,8 @@ class Harness:
                             self.state = AgentState.THINKING
                         
                         # Only yield if config enabled (or force it for debugging?)
-                        if self.config.render_thinking:
-                            yield f"\033[90m{reasoning}\033[0m"
+                        if pico_cfg.config.render_thinking:
+                            yield f"{theme.MUTED}{reasoning}{theme.reset()}"
                         continue
 
                     # 2. Handle Content
@@ -284,14 +285,14 @@ class Harness:
                                 if hasattr(func, "is_blocking") and func.is_blocking:
                                     # We signal the UI that we are waiting for user input
                                     prompt = args.get("prompt", "Please provide input:")
-                                    yield f"\n\033[94m[System: Waiting for user input: {prompt}]\033[0m\n"
+                                    yield f"\n{theme.INFO}[System: Waiting for user input: {prompt}]{theme.reset()}\n"
                                     
                                     # Blocking actually happens here
                                     user_resp = await self._wait_for_user_input(prompt)
                                     result = f"User responded with: {user_resp}"
                                 else:
                                     # Execute normally (sync or async if we support both)
-                                    if asyncio.iscoroutinefunction(func.execute):
+                                    if asyncio.iscoroutinefunction(func.execute): # TODO check deprecation
                                         result = await func.execute(**args)
                                     else:
                                         result = func.execute(**args)
@@ -337,7 +338,7 @@ class Harness:
                             self.history.append(tool_msg)
                             messages.append(tool_msg)
                         
-                        yield f"\n\033[31m[System Error]: {str(e)}\033[0m\n"
+                        yield f"\n{theme.ERROR}[System Error]: {str(e)}{theme.reset()}\n"
 
             except Exception as e:
                 yield f"\nError: {str(e)}"

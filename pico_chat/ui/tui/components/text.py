@@ -2,6 +2,8 @@ from typing import Optional
 from pico_chat.ui.tui.components.base import Component
 from pico_chat.ui.tui.buffer import Buffer
 
+from pico_chat.ui.tui.colors import theme
+
 class TextComponent(Component):
     def __init__(self, text: str, id: Optional[str] = None, fg=None, bg=None, auto_scroll_bottom: bool = False):
         super().__init__(id)
@@ -9,6 +11,9 @@ class TextComponent(Component):
         self.fg = fg
         self.bg = bg
         self.auto_scroll_bottom = auto_scroll_bottom
+        
+        if self.fg is None: self.fg = theme.DEFAULT
+        if self.bg is None: self.bg = theme.BACKGROUND
 
     def render(self, buffer: Buffer):
         """

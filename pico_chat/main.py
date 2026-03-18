@@ -20,11 +20,8 @@ def main():
     harness = get_harness()
     print() 
     
-    try:
-        tui = chatTUI(harness)
-        asyncio.run(tui.run())
-    except KeyboardInterrupt:
-        pass
+    tui = chatTUI(harness)
+    asyncio.run(tui.run())
     return 0
 
 

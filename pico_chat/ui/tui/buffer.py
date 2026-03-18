@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from typing import Optional
 from wcwidth import wcwidth
 
+from pico_chat.ui.tui.colors import RGB
+
 @dataclass
 class Cell:
     char: str = " "
@@ -128,7 +130,7 @@ class Buffer:
             terminal_col = 0  # Track actual terminal column position
             
             for x in range(self.width):
-                cell = self.cells[y][x]
+                cell: RGB = self.cells[y][x]
                 
                 # Skip continuation cells (they're covered by the wide char before them)
                 if cell.is_wide_char_continuation:
@@ -158,14 +160,14 @@ class Buffer:
                     
                     if cell.fg != curr_state["fg"]:
                         if cell.fg:
-                            res.append(ANSI.color_rgb_fg(*cell.fg))
+                            res.append(cell.fg.ansi_fg())
                         else:
                             res.append("\033[39m")
                         curr_state["fg"] = cell.fg
 
                     if cell.bg != curr_state["bg"]:
                         if cell.bg:
-                            res.append(ANSI.color_rgb_bg(*cell.bg))
+                            res.append(cell.bg.ansi_bg())
                         else:
                             res.append("\033[49m")
                         curr_state["bg"] = cell.bg
