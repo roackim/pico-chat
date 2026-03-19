@@ -120,7 +120,8 @@ async def handle_command(ui: ChatUIProtocol, text: str):
         ui.chat_history_panel.add_system_message(
             f"Unknown command: /{cmd_name}", 
             frame_color=theme.ERROR,
-            content_color=theme.ERROR)
+            content_color=theme.ERROR
+        )
         
         1/0  # For testing error handling
 

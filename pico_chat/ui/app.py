@@ -5,6 +5,9 @@ import asyncio
 from turtle import done
 from typing import Optional, Any
 
+from openai import chat
+import openai
+
 from pico_chat.ui.tui.compositor import Compositor
 from pico_chat.ui.tui.terminal import MouseEvent
 from pico_chat.ui.tui.components import TextComponent, Box, InputComponent
@@ -83,16 +86,7 @@ class chatTUI:
             raise 
             
         except Exception as e:
-            
-            chat.remove_last_message()  # Remove the "Thinking..." message
-            chat.add_system_message(
-                message=f"\n{theme.ERROR}Error: {str(e)}{theme.reset()}",
-                frame_color=theme.ERROR
-            )
-             
-            # If we fail before getting any chunk, the "Thinking..." might still be there.
-            # We can append the error.
-            # current_msg.append(f"\n\033[31m[Error]: {str(e)}\033[0m")
+            raise e
             
             
         
@@ -118,11 +112,21 @@ class chatTUI:
                 
             except asyncio.TimeoutError as e:
                 continue  # No message, just loop and check compositor status
-            except Exception as e:
-                self.chat_history_panel.add_system_message(
-                    message=f"\n{theme.ERROR}Error:{theme.reset()} {str(e)}",
-                    frame_color=theme.ERROR
-                )
+            
+            except Exception as e: # Errors during generation or processing
+   
+                recoverable_exceptions = [openai.APIConnectionError]
+                
+                if type(e) in recoverable_exceptions:
+                    self.chat_history_panel.remove_last_message()  # Remove the pico message
+                    self.chat_history_panel.add_system_message(
+                        message=f"Error: {str(e)}",
+                        frame_color=theme.ERROR,
+                        content_color=theme.ERROR,
+                    )
+                    
+                else: # raise for non-recoverable errors
+                    raise e
 
     def stop_generation(self):
         """Stop the current generation task if active."""
@@ -134,8 +138,18 @@ class chatTUI:
 
     def on_command_submit(self, text: str):
         """Handle execution of commands."""
-        # Use the command module to handle the command
-        asyncio.create_task(handle_command(self, text))
+        
+        task = asyncio.create_task(handle_command(self, text))
+
+        def crash_on_error(t: asyncio.Task):
+            exc = t.exception()
+            if exc:
+                raise exc  # propagate → crash
+
+        task.add_done_callback(crash_on_error)
+        
+        
+
 
     def on_user_submit(self, text: str):
         """Handle user input submission."""
@@ -157,6 +171,7 @@ class chatTUI:
             self.chat_history_panel.add_user_message(text)
             # Add to processing queue for agent
             self.message_queue.put_nowait(text)
+
 
     def handle_global_input(self, event: Any) -> bool:
         """Handle focus logging and input dispatch."""
@@ -186,6 +201,7 @@ class chatTUI:
         # Call the original method to avoid infinite recursion
         return self._original_handle_input(event)
 
+
     def render(self, force_full=False):
         if not self.compositor or self.compositor.width == 0 or self.compositor.height == 0:
             return
@@ -198,6 +214,7 @@ class chatTUI:
         output = self.compositor.buffer.render()
         sys.stdout.write(output)
         sys.stdout.flush()
+
 
     async def run(self):
         """Run the TUI application."""
@@ -228,8 +245,6 @@ class chatTUI:
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(self.compositor.run())
                 tg.create_task(self.agent_worker())
-                    # except Exception as e:
-            # print(f"Error in main loop: {e}")
         finally:
             # Clean shutdown
             if hasattr(self.agent, 'stop'):

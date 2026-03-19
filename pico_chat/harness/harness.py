@@ -57,9 +57,9 @@ class Harness:
         )
         self.debug_stream.log("INIT", f"Connected to {pico_cfg.config.base_url}")
 
-    def set_user_response(self, text: str):
-        """Called by the UI when a response to a tool's prompt is ready."""
-        self._user_response_queue.put_nowait(text)
+    # def set_user_response(self, text: str):
+        # """Called by the UI when a response to a tool's prompt is ready."""
+        # self._user_response_queue.put_nowait(text)
 
     async def _wait_for_user_input(self, prompt: str) -> str:
         """Wait for the user to provide text via the UI."""
@@ -83,13 +83,6 @@ class Harness:
         # The chat loop will detect this and handle it appropriately
         return False
 
-    def start(self):
-        """No-op: No background tasks needed."""
-        pass
-
-    def stop(self):
-        """No-op: No background tasks to cancel."""
-        pass
 
     def get_state(self) -> AgentState:
         return self.state
@@ -135,25 +128,34 @@ class Harness:
             # Try a very lightweight request (models list)
             await asyncio.wait_for(self.client.models.list(), timeout=2.0)
             return True
-        except Exception:
+        
+        except TimeoutError:
             return False
+        
+        except Exception as e:
+            raise e 
 
     async def get_model_name(self) -> str:
-        """Query the server for the active model name, falling back to config if unavailable."""
+        """
+        Query the server for the active model name, falling back to config if unavailable.
+        TODO: improve this, feels hacky
+        """
         try:
             # Try to get the models list from the server
             models = await asyncio.wait_for(self.client.models.list(), timeout=2.0)
             if models and models.data:
                 # Return the first model ID as the 'active' one (common for local servers like llama.cpp)
                 return models.data[0].id
-        except Exception:
-            pass
-        return getattr(config, 'model', 'unknown')
+        except Exception as e:
+            raise e
 
     async def chat(self, user_input: str) -> AsyncGenerator[str, None]:
         """
         Main chat loop, mimicking minichat.py's direct execution flow.
         Handles: User Input -> LLM -> [Tool Calls -> Tool Execution -> LLM]* -> Final Answer
+        
+        TODO: Refactor this method into smaller pieces for better readability and maintainability.
+        TODO: Should resurface more infos about inter message thinking etc
         """
         # Add user message to history
         self.history.append({"role": "user", "content": user_input})
@@ -341,12 +343,9 @@ class Harness:
                         yield f"\n{theme.ERROR}[System Error]: {str(e)}{theme.reset()}\n"
 
             except Exception as e:
-                yield f"\nError: {str(e)}"
-                self.debug_stream.log("ERROR", str(e))
-                break
-        
+                raise e
+            
         self.state = AgentState.IDLE
-
 
 _harness = None
 
