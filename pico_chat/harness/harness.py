@@ -129,11 +129,9 @@ class Harness:
             await asyncio.wait_for(self.client.models.list(), timeout=2.0)
             return True
         
-        except TimeoutError:
-            return False
-        
-        except Exception as e:
-            raise e 
+        except Exception:
+            # Any connection error means offline
+            return False 
 
     async def get_model_name(self) -> str:
         """
@@ -149,198 +147,224 @@ class Harness:
         except Exception as e:
             raise e
 
-    async def chat(self, user_input: str) -> AsyncGenerator[str, None]:
-        """
-        Main chat loop, mimicking minichat.py's direct execution flow.
-        Handles: User Input -> LLM -> [Tool Calls -> Tool Execution -> LLM]* -> Final Answer
-        
-        TODO: Refactor this method into smaller pieces for better readability and maintainability.
-        TODO: Should resurface more infos about inter message thinking etc
-        """
+    def _build_messages(self, user_input: str) -> List[Dict[str, Any]]:
+        """Build message list with system prompt and conversation history."""
         # Add user message to history
         self.history.append({"role": "user", "content": user_input})
         
         # Build System Prompt with Context
-        # Refresh context here if we want dynamic updates, for now we use the one built at init
         system_msg = get_system_message(self.project_context)
         
-        messages = [system_msg] + self.history
+        return [system_msg] + self.history
+
+    async def _stream_llm_response(self, messages: List[Dict[str, Any]]) -> AsyncGenerator[str, None]:
+        """
+        Stream LLM response and collect content/tool calls.
+        
+        Yields: Content chunks and reasoning (if enabled)
+        
+        Sets instance variables:
+        - self._last_full_content: Complete response content
+        - self._last_tool_calls: Tool calls from the response
+        """
+        self.state = AgentState.THINKING
+        self.debug_stream.log("REQUEST", messages)
+        
+        stream = await self.client.chat.completions.create(
+            model=pico_cfg.config.model,
+            messages=messages,
+            tools=self.tool_schemas,
+            stream=True
+        )
+        
+        full_content = ""
+        tool_calls_buffer: Dict[int, Dict[str, Any]] = {}
+        
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+                
+            delta = chunk.choices[0].delta
+            
+            # 1. Handle Reasoning (DeepSeek/R1 style)
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning:
+                if self.state != AgentState.THINKING:
+                    self.state = AgentState.THINKING
+                
+                # Only yield if config enabled
+                if pico_cfg.config.render_thinking:
+                    yield f"{theme.MUTED}{reasoning}{theme.reset()}"
+                continue
+
+            # 2. Handle Content
+            content = delta.content
+            if content:
+                if self.state != AgentState.ANSWERING:
+                    self.state = AgentState.ANSWERING
+                full_content += content
+                yield content
+                
+            # 3. Handle Tool Calls
+            if delta.tool_calls:
+                for tc in delta.tool_calls:
+                    idx = tc.index
+                    if idx not in tool_calls_buffer:
+                        tool_calls_buffer[idx] = {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {"name": "", "arguments": ""}
+                        }
+                    if tc.function.name:
+                        tool_calls_buffer[idx]["function"]["name"] += tc.function.name
+                    if tc.function.arguments:
+                        tool_calls_buffer[idx]["function"]["arguments"] += tc.function.arguments
+
+        # Reconstruct tool calls list
+        tool_calls_list = []
+        if tool_calls_buffer:
+            for idx in sorted(tool_calls_buffer.keys()):
+                tc_data = tool_calls_buffer[idx]
+                tool_calls_list.append({
+                    "id": tc_data["id"],
+                    "type": "function",
+                    "function": {
+                        "name": tc_data["function"]["name"],
+                        "arguments": tc_data["function"]["arguments"]
+                    }
+                })
+        
+        # Log results
+        if full_content and not tool_calls_list:
+            self.debug_stream.log("RESPONSE", full_content)
+        if tool_calls_list:
+            self.debug_stream.log("TOOL_CALLS", tool_calls_list)
+        
+        # Store results in instance variables for caller to access
+        self._last_full_content = full_content
+        self._last_tool_calls = tool_calls_list
+
+    async def _execute_tool_calls(
+        self, 
+        tool_calls_list: List[Dict[str, Any]], 
+        messages: List[Dict[str, Any]]
+    ) -> AsyncGenerator[str, None]:
+        """
+        Execute all tool calls and update history.
+        
+        Yields: Tool execution feedback for UI
+        """
+        self.state = AgentState.THINKING
+        yield format_batch_start(len(tool_calls_list))
+        
+        for tc in tool_calls_list:
+            func_name = tc["function"]["name"]
+            args_str = tc["function"]["arguments"]
+            call_id = tc["id"]
+            
+            result = ""
+            try:
+                self.debug_stream.log("TOOL_EXEC", {"name": func_name, "args": args_str})
+                
+                # Show which tool is being called
+                yield format_tool_call_start(func_name, args_str)
+                
+                if func_name in self.tools_map:
+                    try:
+                        # Parse args
+                        args = json.loads(args_str)
+                        
+                        func = self.tools_map[func_name]
+                        
+                        if hasattr(func, "is_blocking") and func.is_blocking:
+                            # Handle blocking tools (e.g. user input)
+                            prompt = args.get("prompt", "Please provide input:")
+                            yield f"\n{theme.INFO}[System: Waiting for user input: {prompt}]{theme.reset()}\n"
+                            
+                            user_resp = await self._wait_for_user_input(prompt)
+                            result = f"User responded with: {user_resp}"
+                        else:
+                            # Execute normally (sync or async)
+                            if asyncio.iscoroutinefunction(func.execute):
+                                result = await func.execute(**args)
+                            else:
+                                result = func.execute(**args)
+                        
+                        if not isinstance(result, str):
+                            result = str(result)
+
+                    except json.JSONDecodeError:
+                        result = f"Error: Invalid JSON arguments: {args_str}"
+                    except Exception as e:
+                        result = f"Error executing {func_name}: {str(e)}"
+                else:
+                    result = f"Error: Tool '{func_name}' not found"
+                
+                # Log tool result
+                self.debug_stream.log("TOOL_RESULT", {"call_id": call_id, "result": result})
+                    
+                # Append tool result to history
+                tool_msg = {
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "content": result
+                }
+                self.history.append(tool_msg)
+                messages.append(tool_msg)
+                
+                # Show completion feedback
+                yield format_tool_call_complete(func_name, result)
+
+            except Exception as e:
+                # Fallback for system errors during tool processing
+                err_msg = f"System Error processing tool call: {str(e)}"
+                self.debug_stream.log("TOOL_SYSTEM_ERROR", {"call_id": call_id, "error": err_msg})
+                
+                # Ensure we append SOMETHING to history so LLM doesn't hang
+                if not self.history or self.history[-1].get("tool_call_id") != call_id:
+                    tool_msg = {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": err_msg
+                    }
+                    self.history.append(tool_msg)
+                    messages.append(tool_msg)
+                
+                yield f"\n{theme.ERROR}[System Error]: {str(e)}{theme.reset()}\n"
+
+    async def chat(self, user_input: str) -> AsyncGenerator[str, None]:
+        """
+        Main chat loop orchestrator.
+        Handles: User Input -> LLM -> [Tool Calls -> Tool Execution -> LLM]* -> Final Answer
+        """
+        messages = self._build_messages(user_input)
 
         # Agent Loop (Handle Multi-step Tool Calls)
         while True:
-            self.state = AgentState.THINKING
-            self.debug_stream.log("REQUEST", messages)
-            
             try:
-                stream = await self.client.chat.completions.create(
-                    model=pico_cfg.config.model,
-                    messages=messages,
-                    tools=self.tool_schemas,
-                    stream=True
-                )
+                # Stream LLM response
+                async for chunk in self._stream_llm_response(messages):
+                    yield chunk
                 
-                full_content = ""
-                tool_calls_buffer: Dict[int, Dict[str, Any]] = {}
+                # Collect results from instance variables
+                full_content = self._last_full_content
+                tool_calls_list = self._last_tool_calls
                 
-                async for chunk in stream:
-                    if not chunk.choices:
-                        continue
-                        
-                    delta = chunk.choices[0].delta
-                    
-                    # 1. Handle Reasoning (DeepSeek/R1 style)
-                    # minichat.py doesn't show this but user requested it based on minichat_debug.txt
-                    reasoning = getattr(delta, "reasoning_content", None)
-                    if reasoning:
-                        if self.state != AgentState.THINKING:
-                            self.state = AgentState.THINKING
-                        
-                        # Only yield if config enabled (or force it for debugging?)
-                        if pico_cfg.config.render_thinking:
-                            yield f"{theme.MUTED}{reasoning}{theme.reset()}"
-                        continue
-
-                    # 2. Handle Content
-                    content = delta.content
-                    if content:
-                        if self.state != AgentState.ANSWERING:
-                             self.state = AgentState.ANSWERING
-                        full_content += content
-                        yield content
-                        
-                    # 3. Handle Tool Calls
-                    if delta.tool_calls:
-                        for tc in delta.tool_calls:
-                            idx = tc.index
-                            if idx not in tool_calls_buffer:
-                                tool_calls_buffer[idx] = {
-                                    "id": tc.id,
-                                    "type": "function",
-                                    "function": {"name": "", "arguments": ""}
-                                }
-                            if tc.function.name:
-                                tool_calls_buffer[idx]["function"]["name"] += tc.function.name
-                            if tc.function.arguments:
-                                tool_calls_buffer[idx]["function"]["arguments"] += tc.function.arguments
-
-                # End of stream for this turn
-                
-                # Append assistant message to history
+                # Build assistant message for history
                 assistant_msg = {"role": "assistant", "content": full_content if full_content else None}
-                
-                # Log final answer if not a tool call
-                if full_content and not tool_calls_buffer:
-                    self.debug_stream.log("RESPONSE", full_content)
-                
-                # Reconstruct tool calls for history
-                tool_calls_list = []
-                if tool_calls_buffer:
-                    for idx in sorted(tool_calls_buffer.keys()):
-                        tc_data = tool_calls_buffer[idx]
-                        tool_calls_list.append({
-                            "id": tc_data["id"],
-                            "type": "function",
-                            "function": {
-                                "name": tc_data["function"]["name"],
-                                "arguments": tc_data["function"]["arguments"]
-                            }
-                        })
+                if tool_calls_list:
                     assistant_msg["tool_calls"] = tool_calls_list
                 
-                # Log tool calls from LLM
-                if tool_calls_list:
-                    self.debug_stream.log("TOOL_CALLS", tool_calls_list)
-                
                 self.history.append(assistant_msg)
-                messages.append(assistant_msg) # Keep in sync for next loop iteration
+                messages.append(assistant_msg)
                 
-                # If no tools, we are done
-                if not tool_calls_buffer:
+                # If no tools, we're done
+                if not tool_calls_list:
                     break
                     
-                # Execute Tools (Inner Loop)
-                self.state = AgentState.THINKING
-                yield format_batch_start(len(tool_calls_list))
-                
-                for tc in tool_calls_list:
-                    func_name = tc["function"]["name"]
-                    args_str = tc["function"]["arguments"]
-                    call_id = tc["id"]
-                    
-                    result = ""
-                    try:
-                        self.debug_stream.log("TOOL_EXEC", {"name": func_name, "args": args_str})
-                        
-                        # Show which tool is being called
-                        yield format_tool_call_start(func_name, args_str)
-                        
-                        if func_name in self.tools_map:
-                            try:
-                                # Parse args
-                                args = json.loads(args_str)
-                                
-                                # Check for user input required (e.g. 'ask' command in CLI)
-                                # Or if the tool itself is marked as 'suspending' 
-                                # If func is async, we await it
-                                func = self.tools_map[func_name]
-                                
-                                if hasattr(func, "is_blocking") and func.is_blocking:
-                                    # We signal the UI that we are waiting for user input
-                                    prompt = args.get("prompt", "Please provide input:")
-                                    yield f"\n{theme.INFO}[System: Waiting for user input: {prompt}]{theme.reset()}\n"
-                                    
-                                    # Blocking actually happens here
-                                    user_resp = await self._wait_for_user_input(prompt)
-                                    result = f"User responded with: {user_resp}"
-                                else:
-                                    # Execute normally (sync or async if we support both)
-                                    if asyncio.iscoroutinefunction(func.execute): # TODO check deprecation
-                                        result = await func.execute(**args)
-                                    else:
-                                        result = func.execute(**args)
-                                
-                                if not isinstance(result, str):
-                                    result = str(result)
-
-                            except json.JSONDecodeError:
-                                result = f"Error: Invalid JSON arguments: {args_str}"
-                            except Exception as e:
-                                result = f"Error executing {func_name}: {str(e)}"
-                        else:
-                            result = f"Error: Tool '{func_name}' not found"
-                        
-                        # Log tool result
-                        self.debug_stream.log("TOOL_RESULT", {"call_id": call_id, "result": result})
-                            
-                        # Append tool result to history
-                        tool_msg = {
-                            "role": "tool",
-                            "tool_call_id": call_id,
-                            "content": result
-                        }
-                        self.history.append(tool_msg)
-                        messages.append(tool_msg)
-                        
-                        # Show completion feedback
-                        yield format_tool_call_complete(func_name, result)
-
-                    except Exception as e:
-                        # Fallback for system errors during tool processing logic
-                        err_msg = f"System Error processing tool call: {str(e)}"
-                        self.debug_stream.log("TOOL_SYSTEM_ERROR", {"call_id": call_id, "error": err_msg})
-                        
-                        # Ensure we append SOMETHING to history so LLM doesn't hang
-                        # Check if we already appended (basic check)
-                        if not self.history or self.history[-1].get("tool_call_id") != call_id:
-                            tool_msg = {
-                                "role": "tool",
-                                "tool_call_id": call_id,
-                                "content": err_msg
-                            }
-                            self.history.append(tool_msg)
-                            messages.append(tool_msg)
-                        
-                        yield f"\n{theme.ERROR}[System Error]: {str(e)}{theme.reset()}\n"
+                # Execute tools and yield feedback
+                async for feedback in self._execute_tool_calls(tool_calls_list, messages):
+                    yield feedback
 
             except Exception as e:
                 raise e

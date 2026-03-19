@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional, Protocol
 import asyncio
 
 from pico_chat.ui.tui.colors import RGB, theme
-
+from pico_chat import pico_cfg
 
 class ChatUIProtocol(Protocol):
     agent: Any
@@ -81,9 +81,12 @@ class StatusCommand(Command):
         
         # Query the model name dynamically if possible, fall back to config
         if hasattr(ui.agent, 'get_model_name'):
-            model_name = await ui.agent.get_model_name()
+            try:
+                model_name = await ui.agent.get_model_name()
+            except Exception:
+                model_name = getattr(pico_cfg.config, 'model', 'unknown')
         else:
-            model_name = getattr(ui.agent.config, 'model', 'unknown')
+            model_name = getattr(pico_cfg.config, 'model', 'unknown')
         
         report = (
             f"LLM Connectivity : {color_code}{status_text}\n"
@@ -122,6 +125,7 @@ async def handle_command(ui: ChatUIProtocol, text: str):
             frame_color=theme.ERROR,
             content_color=theme.ERROR
         )
+        
 
 def get_command_list() -> List[str]:
     return list(COMMANDS.keys())
