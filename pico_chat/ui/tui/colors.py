@@ -3,10 +3,20 @@ from dataclasses import dataclass
 
 
 class RGB:
-    def __init__(self, r, g, b):
+    def __init__(self, r, g=None, b=None):
         self.r = r
         self.g = g
         self.b = b
+        
+        if type(r) == str:
+            # Parse from hex string
+            hex_str = r.lstrip('#')
+            if len(hex_str) == 6:
+                self.r = int(hex_str[0:2], 16)
+                self.g = int(hex_str[2:4], 16)
+                self.b = int(hex_str[4:6], 16)
+            else:
+                raise ValueError(f"Invalid hex color string: {r}")
     
     def ansi_fg(self): 
         """ coinvert to ANSI foreground color code """
@@ -37,14 +47,14 @@ class _theme:
 
 default = _theme(
     name="default",
-    BACKGROUND  = RGB(0, 0, 0),       # Black
-    DEFAULT     = RGB(255, 255, 255), # White
-    SKY         = RGB(135, 206, 235), # Color for the non UI elements
-    MUTED       = RGB(125, 125, 125), # Muted gray
-    ERROR       = RGB(255, 96, 96),   # Red
-    WARNING     = RGB(255, 160, 96),  # Orange
-    USER        = RGB(96, 160, 255),  # Blue
-    PICO        = RGB(96, 255, 160),  # Green
+    BACKGROUND  = RGB("#000000"),       # Black
+    DEFAULT     = RGB("#F7F4EA"),   # White
+    SKY         = RGB("#87CEEB"), # Color for the non UI elements
+    MUTED       = RGB("#7D7D7D"), # Muted gray
+    ERROR       = RGB("#FF6060"),   # Red
+    WARNING     = RGB("#FFC760"),  # Orange
+    USER        = RGB("#7ADA92"),  # Blue
+    PICO        = RGB("#F4CE66"),  # Green
 )
 
 theme: _theme = default
