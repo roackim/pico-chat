@@ -67,16 +67,24 @@ class InputComponent(Component):
         if pos == 0:
             return 0, prompt_width
 
-        # Split by actual newlines in the text
+        # Split FULL text by newlines to get paragraphs
+        full_paragraphs = self.text.split('\n')
         text_before_cursor = self.text[:pos]
-        paragraphs = text_before_cursor.split('\n')
+        cursor_paragraphs = text_before_cursor.split('\n')
+        
+        # Which paragraph is the cursor in?
+        cursor_para_idx = len(cursor_paragraphs) - 1
+        # How many chars into that paragraph?
+        chars_in_para = len(cursor_paragraphs[-1])
         
         row = 0
         
-        for para_idx, para in enumerate(paragraphs):
+        # Process all paragraphs up to and including the cursor's paragraph
+        for para_idx in range(cursor_para_idx + 1):
+            para = full_paragraphs[para_idx] if para_idx < len(full_paragraphs) else ""
             is_first_para = (para_idx == 0)
             
-            # Wrap this paragraph the same way _get_lines does
+            # Wrap the FULL paragraph the same way _get_lines does
             if is_first_para:
                 wrapped = wrap_text(para, available_width, padding_width=prompt_width, first_line_padding=False)
             else:
@@ -84,20 +92,49 @@ class InputComponent(Component):
             
             para_lines = wrapped.split('\n') if wrapped else [""]
             
-            if para_idx < len(paragraphs) - 1:
-                # This paragraph was terminated by a newline, count all its display lines
+            if para_idx < cursor_para_idx:
+                # This paragraph is before cursor paragraph, count all its lines
                 row += len(para_lines)
             else:
-                # This is the last paragraph (cursor is here)
-                last_line = para_lines[-1] if para_lines else ""
+                # This is the cursor's paragraph - find which wrapped line contains the cursor
+                char_count = 0
+                for line_idx, line in enumerate(para_lines):
+                    # Strip padding to get actual text length
+                    if is_first_para and line_idx == 0:
+                        line_text = line  # First line of first para has no padding
+                    else:
+                        line_text = line.lstrip()  # Other lines have padding
+                    
+                    line_len = len(line_text)
+                    
+                    if char_count + line_len >= chars_in_para:
+                        # Cursor is on this wrapped line
+                        row += line_idx
+                        chars_in_line = chars_in_para - char_count
+                        
+                        # Calculate column based on display width
+                        col = display_width(line_text[:chars_in_line])
+                        
+                        # Add prompt width if on first display line
+                        if para_idx == 0 and line_idx == 0:
+                            col += prompt_width
+                        elif line_idx > 0 or para_idx > 0:
+                            # Add padding width for continuation lines
+                            col += prompt_width
+                        
+                        return row, col
+                    
+                    char_count += line_len
+                
+                # If we got here, cursor is at end of paragraph
                 row += len(para_lines) - 1
+                last_line = para_lines[-1] if para_lines else ""
+                col = display_width(last_line.lstrip() if (para_idx > 0 or len(para_lines) > 1) else last_line)
                 
-                # Column is the display width of the last line
-                col = display_width(last_line)
-                
-                # Add prompt width if we're on the first displayed row
                 if para_idx == 0 and len(para_lines) == 1:
                     col += prompt_width
+                else:
+                    col += prompt_width  # Continuation line padding
                 
                 return row, col
         
@@ -259,7 +296,7 @@ class InputComponent(Component):
             self.context_menu.render(buffer)
 
     def handle_input(self, event: Any) -> bool:
-        """Handle mouse wheel, keyboard input, and menus."""
+        """Handle mouse wheel, keyboard input, paste events, and menus."""
         # 1. Menu handling (intercept navigation keys)
         if self.command_menu and self.command_menu.is_visible:
             if self.command_menu.handle_input(event):
@@ -268,9 +305,64 @@ class InputComponent(Component):
             if self.context_menu.handle_input(event):
                 return True
 
-        # 2. Mouse handling
+        # 2. Paste event handling
+        if isinstance(event, PasteEvent):
+            # Normalize line endings (handle \r\n, \r, \n)
+            paste_text = event.text.replace('\r\n', '\n').replace('\r', '\n')
+            
+            # Insert pasted text at cursor position
+            self.text = self.text[:self.cursor_pos] + paste_text + self.text[self.cursor_pos:]
+            self.cursor_pos += len(paste_text)
+            
+            # Ensure cursor position is valid
+            self.cursor_pos = min(self.cursor_pos, len(self.text))
+            
+            self._last_input_time = time.time()
+            
+            # Auto-scroll to show cursor after paste
+            try:
+                lines = self._get_lines()
+                cursor_r, cursor_c = self._get_cursor_coords(self.cursor_pos)
+                
+                # If all content fits in viewport, scroll to top
+                if len(lines) <= self.height:
+                    self.scroll_y = 0
+                else:
+                    # Otherwise, position cursor at bottom of viewport to show max context
+                    # But don't scroll past the end of content
+                    target_scroll = cursor_r - self.height + 1
+                    max_scroll = max(0, len(lines) - self.height)
+                    self.scroll_y = max(0, min(target_scroll, max_scroll))
+            except Exception:
+                # If cursor coords fail, reset scroll to show end
+                lines = self._get_lines()
+                self.scroll_y = max(0, len(lines) - self.height)
+            
+            # Update menus after paste
+            clean_text = self.text.lstrip()
+            if self.command_menu:
+                if clean_text.startswith('/') and ' ' not in clean_text:
+                    self.command_menu.filter(clean_text)
+                else:
+                    self.command_menu.is_visible = False
+            
+            if self.context_menu:
+                last_at = self.text.rfind('@')
+                if last_at != -1:
+                    after_at = self.text[last_at+1:]
+                    if ' ' not in after_at:
+                        if not self.context_menu.all_items and self.get_context_items_callback:
+                            self.context_menu.all_items = self.get_context_items_callback()
+                        self.context_menu.filter(self.text)
+                    else:
+                        self.context_menu.is_visible = False
+                else:
+                    self.context_menu.is_visible = False
+            
+            return True
+
+        # 3. Mouse handling
         if isinstance(event, MouseEvent):
-            # ... existing mouse scroll logic ...
             # Use parent (Box) boundaries if available for a larger hit-box
             target = self.parent if self.parent else self
             if target.x <= event.x < target.x + target.width and \
@@ -288,7 +380,7 @@ class InputComponent(Component):
                         self.scroll_y += 1
                     return True
         
-        """Handle keyboard input for the text field."""
+        # 4. Keyboard input handling
         if isinstance(event, str):
             self._last_input_time = time.time()
             # LOG INPUT FOR DEBUGGING
@@ -302,7 +394,7 @@ class InputComponent(Component):
             KEY_BACKSPACE = '\x7f'
             KEY_ESC = '\x1b'
             
-            # 0. IGNORE NAKED ESCAPE (might be start of Alt+Enter or just noise)
+            # 4.0. IGNORE NAKED ESCAPE (might be start of Alt+Enter or just noise)
             if event == KEY_ESC:
                 return True
 
@@ -329,7 +421,7 @@ class InputComponent(Component):
                     else:
                         self.context_menu.is_visible = False
 
-            # 1. SPECIAL COMBINATIONS
+            # 4.1. SPECIAL COMBINATIONS
             
             # Ctrl+Left (Word back)
             if event == '\x1b[1;5D':
@@ -377,7 +469,7 @@ class InputComponent(Component):
                     _update_menus(self.text)
                 return True
             
-            # 2. STANDARD KEYS
+            # 4.2. STANDARD KEYS
             
             if event == KEY_BACKSPACE:
                 if self.cursor_pos > 0:
@@ -388,10 +480,25 @@ class InputComponent(Component):
             
             # Arrow Keys
             if event == '\x1b[D': # Left
-                self.cursor_pos = max(0, self.cursor_pos - 1)
+                if self.cursor_pos > 0:
+                    self.cursor_pos -= 1
+                    # Auto-scroll to keep cursor visible
+                    cursor_r, cursor_c = self._get_cursor_coords(self.cursor_pos)
+                    if cursor_r < self.scroll_y:
+                        self.scroll_y = cursor_r
+                    elif cursor_r >= self.scroll_y + self.height:
+                        self.scroll_y = max(0, cursor_r - self.height + 1)
                 return True
+                
             if event == '\x1b[C': # Right
-                self.cursor_pos = min(len(self.text), self.cursor_pos + 1)
+                if self.cursor_pos < len(self.text):
+                    self.cursor_pos += 1
+                    # Auto-scroll to keep cursor visible
+                    cursor_r, cursor_c = self._get_cursor_coords(self.cursor_pos)
+                    if cursor_r < self.scroll_y:
+                        self.scroll_y = cursor_r
+                    elif cursor_r >= self.scroll_y + self.height:
+                        self.scroll_y = max(0, cursor_r - self.height + 1)
                 return True
             
             if event == '\x1b[A': # Up
@@ -399,11 +506,19 @@ class InputComponent(Component):
                 if curr_r > 0:
                     # Try to maintain the same column index if possible
                     self.cursor_pos = self._get_pos_from_coords(curr_r - 1, curr_c)
+                    # Auto-scroll to keep cursor visible
+                    new_r, new_c = self._get_cursor_coords(self.cursor_pos)
+                    if new_r < self.scroll_y:
+                        self.scroll_y = new_r
                 return True
                 
             if event == '\x1b[B': # Down
                 curr_r, curr_c = self._get_cursor_coords(self.cursor_pos)
                 self.cursor_pos = self._get_pos_from_coords(curr_r + 1, curr_c)
+                # Auto-scroll to keep cursor visible
+                new_r, new_c = self._get_cursor_coords(self.cursor_pos)
+                if new_r >= self.scroll_y + self.height:
+                    self.scroll_y = max(0, new_r - self.height + 1)
                 return True
             
             # Default: insert character

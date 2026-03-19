@@ -116,7 +116,7 @@ class Terminal:
                 # Potential escape sequence
                 seq = char
                 start_time = time.time()
-                while time.time() - start_time < 0.05:
+                while time.time() - start_time < 0.1:  # Increased timeout for paste detection
                     try:
                         c = sys.stdin.read(1)
                         if c:
@@ -149,43 +149,31 @@ class Terminal:
             fcntl.fcntl(self.fd, fcntl.F_SETFL, flags)
 
     def _read_bracketed_paste(self) -> PasteEvent:
-        """Read content until end marker in a blocking-like manner."""
-        # Note: We are already in non-blocking mode from get_input's finally context?
-        # No, finally block of get_input restores flags ONLY when get_input returns/exits.
-        # But we are calling this FROM inside get_input, so flags are still set to NONBLOCK.
+        """Read paste content until end marker. Temporarily uses blocking mode."""
+        # Switch to blocking mode for reliable paste reading
+        flags = fcntl.fcntl(self.fd, fcntl.F_GETFL)
+        fcntl.fcntl(self.fd, fcntl.F_SETFL, flags & ~os.O_NONBLOCK)
         
-        content = ""
-        buffer = ""
-        start_time = time.time()
-        
-        # We allow a generous timeout for paste to complete (e.g. 1 second)
-        # Large pastes might take time, but chunks arrive fast.
-        last_char_time = time.time()
-        
-        while True:
-            # Safety timeout
-            if time.time() - last_char_time > 0.5:
-                # Timed out waiting for end marker
-                return PasteEvent(content + buffer)
-
-            try:
-                c = sys.stdin.read(1)
-                if not c:
-                    time.sleep(0.001)
-                    continue
+        try:
+            content = ""
+            end_marker = '\x1b[201~'
+            
+            # Read character by character - simple and works for any size
+            while True:
+                char = sys.stdin.read(1)
+                content += char
                 
-                last_char_time = time.time()
-                buffer += c
+                # Check for end marker (only check last 6 chars for efficiency)
+                if len(content) >= 6 and content[-6:] == end_marker:
+                    return PasteEvent(content[:-6])
                 
-                if buffer.endswith('\x1b[201~'):
-                    content += buffer[:-6]
+                # Safety limit
+                if len(content) > 1_000_000:
                     return PasteEvent(content)
-                
-                if len(buffer) > 6:
-                    content += buffer[:-6]
-                    buffer = buffer[-6:]
-            except:
-                time.sleep(0.001)
+                    
+        finally:
+            # Restore non-blocking mode
+            fcntl.fcntl(self.fd, fcntl.F_SETFL, flags)
 
     def _parse_mouse(self, seq: str) -> Optional[MouseEvent]:
         # \033[<Cb;Cx;CyM/m
