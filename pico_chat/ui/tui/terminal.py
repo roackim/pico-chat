@@ -58,25 +58,43 @@ class Terminal:
         signal.signal(signal.SIGWINCH, self._handle_resize)
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Restore terminal state and ensure cursor visibility."""
-        # 1. First reset any colors and show the cursor immediately
-        sys.stdout.write(ANSI.RESET + ANSI.SHOW_CURSOR + ANSI.DISABLE_MOUSE + ANSI.DISABLE_BRACKETED_PASTE + ANSI.MOVE_HOME + ANSI.CLEAR_SCREEN)
+    def cleanup(self, clear_screen: bool = True):
+        """Cleanup terminal state. Safe to call multiple times.
+        
+        Args:
+            clear_screen: If False, skip clearing screen (useful for preserving error messages)
+        """
+        # 1. Reset colors, show cursor, disable mouse/paste
+        # But conditionally clear the screen
+        if clear_screen:
+            sys.stdout.write(ANSI.RESET + ANSI.SHOW_CURSOR + ANSI.DISABLE_MOUSE + ANSI.DISABLE_BRACKETED_PASTE + ANSI.MOVE_HOME + ANSI.CLEAR_SCREEN)
+        else:
+            # Don't clear screen - preserve any error messages
+            sys.stdout.write("\n" + ANSI.RESET + ANSI.SHOW_CURSOR + ANSI.DISABLE_MOUSE + ANSI.DISABLE_BRACKETED_PASTE)
         sys.stdout.flush()
         
         # 2. Restore signal handlers
-        signal.signal(signal.SIGWINCH, signal.SIG_DFL)
+        try:
+            signal.signal(signal.SIGWINCH, signal.SIG_DFL)
+        except Exception:
+            pass
         
         # 3. Restore serial TTY settings (this effectively exits raw mode)
         if self.old_settings:
             try:
                 termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old_settings)
+                self.old_settings = None  # Mark as cleaned up
             except Exception:
                 pass
         
-        # 4. Final flush to ensure everything is sent before the program terminates
-        sys.stdout.write(ANSI.RESET + ANSI.SHOW_CURSOR)
+        # 4. Final flush
+        sys.stdout.write(ANSI.SHOW_CURSOR)
         sys.stdout.flush()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Restore terminal state and ensure cursor visibility."""
+        # Only clear screen if exiting normally (no exception)
+        self.cleanup(clear_screen=(exc_type is None))
 
     def _handle_resize(self, signum, frame):
         self.resized = True

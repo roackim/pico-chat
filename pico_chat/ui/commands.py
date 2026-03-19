@@ -122,8 +122,6 @@ async def handle_command(ui: ChatUIProtocol, text: str):
             frame_color=theme.ERROR,
             content_color=theme.ERROR
         )
-        
-        1/0  # For testing error handling
 
 def get_command_list() -> List[str]:
     return list(COMMANDS.keys())

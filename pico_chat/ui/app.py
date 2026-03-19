@@ -2,6 +2,7 @@
 
 import sys
 import asyncio
+import atexit
 from turtle import done
 from typing import Optional, Any
 
@@ -48,6 +49,21 @@ class chatTUI:
         # Track the current generation task
         self.current_generation_task: Optional[asyncio.Task] = None
         
+        # Command queue for structured execution
+        self.command_queue = asyncio.Queue()
+        
+        # Register cleanup handler for abnormal exits
+        atexit.register(self._emergency_cleanup)
+        
+    def _emergency_cleanup(self):
+        """Emergency cleanup handler called by atexit."""
+        if self.compositor and self.compositor.terminal:
+            try:
+                # Don't clear screen in emergency cleanup to preserve errors
+                self.compositor.terminal.cleanup(clear_screen=False)
+            except Exception:
+                pass  # Silently fail in atexit handler
+    
     @staticmethod
     def _rgb_to_ansi_fg(r: int, g: int, b: int) -> str:
         """Convert RGB to ANSI foreground color code."""
@@ -93,25 +109,42 @@ class chatTUI:
     async def agent_worker(self):
         """Background worker that processes harness requests."""
         
-        # TODO: review this loop logic
         while self.compositor and self.compositor.running:
             try:
-                # Wait for a message with timeout
-                user_input = await asyncio.wait_for(self.message_queue.get(), timeout=0.5)
-                
-                # Create a task for generation so it can be cancelled
-                self.current_generation_task = asyncio.create_task(self._process_generation(user_input))
-                
-                try:
-                    await self.current_generation_task
-                except asyncio.CancelledError:
-                    # Task was cancelled (by /stop), continue to next message
-                    pass
-                finally:
-                    self.current_generation_task = None
-                
-            except asyncio.TimeoutError as e:
-                continue  # No message, just loop and check compositor status
+                msg_task = asyncio.create_task(self.message_queue.get())
+                cmd_task = asyncio.create_task(self.command_queue.get())
+
+                done, pending = await asyncio.wait(
+                    [msg_task, cmd_task],
+                    return_when=asyncio.FIRST_COMPLETED
+                )
+
+                # cancel the task that didn't complete
+                for p in pending:
+                    p.cancel()
+
+                completed = done.pop()
+
+                # distinguish source
+                if completed is cmd_task:
+                    command = completed.result()
+                    await handle_command(self, command)  # exceptions propagate → crash
+                else:
+                    user_input = completed.result()
+
+                    self.current_generation_task = asyncio.create_task(
+                        self._process_generation(user_input)
+                    )
+
+                    try:
+                        await self.current_generation_task
+                    except asyncio.CancelledError:
+                        pass
+                    finally:
+                        self.current_generation_task = None
+
+            except asyncio.TimeoutError:
+                continue
             
             except Exception as e: # Errors during generation or processing
    
@@ -138,15 +171,7 @@ class chatTUI:
 
     def on_command_submit(self, text: str):
         """Handle execution of commands."""
-        
-        task = asyncio.create_task(handle_command(self, text))
-
-        def crash_on_error(t: asyncio.Task):
-            exc = t.exception()
-            if exc:
-                raise exc  # propagate → crash
-
-        task.add_done_callback(crash_on_error)
+        self.command_queue.put_nowait(text)
         
         
 
@@ -245,7 +270,22 @@ class chatTUI:
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(self.compositor.run())
                 tg.create_task(self.agent_worker())
+        except Exception:
+            # On exception, cleanup without clearing screen to preserve traceback
+            if self.compositor and self.compositor.terminal:
+                self.compositor.terminal.cleanup(clear_screen=False)
+            
+            # Clean shutdown
+            if hasattr(self.agent, 'stop'):
+                self.agent.stop()
+            
+            # Re-raise to display traceback
+            raise
         finally:
+            # Normal exit cleanup (clear screen OK)
+            if self.compositor and self.compositor.terminal:
+                self.compositor.terminal.cleanup(clear_screen=True)
+            
             # Clean shutdown
             if hasattr(self.agent, 'stop'):
                 self.agent.stop()
