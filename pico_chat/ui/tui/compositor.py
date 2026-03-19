@@ -7,7 +7,7 @@ from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.components import Component
 
 class Compositor:
-    def __init__(self, root: Component, fps: int = 30):
+    def __init__(self, root: Component, fps: int = 30, shutdown_event: Optional[Any] = None):
         self.root = root
         self.fps = fps
         self.terminal = Terminal()
@@ -16,6 +16,7 @@ class Compositor:
         self.components_by_id: Dict[str, Component] = {}
         self._collect_ids(self.root)
         self.running = False
+        self.shutdown_event = shutdown_event
 
     def _collect_ids(self, component: Component):
         if component.id:
@@ -58,6 +59,8 @@ class Compositor:
                 if event:
                     if event == '\x03': # Ctrl-C
                         self.running = False
+                        if self.shutdown_event:
+                            self.shutdown_event.set()
                         break
                     self.root.handle_input(event)
                     # Force immediate render on input

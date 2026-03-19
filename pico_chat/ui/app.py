@@ -20,7 +20,7 @@ from pico_chat.ui.tui.colors import theme
 
 from pico_chat import pico_cfg
 
-TARGET_FPS = 1 # TODO reset to 60 fps after debugging error handling
+TARGET_FPS = 60
 # TARGET_FPS = pico_cfg.target_fps
 
 class chatTUI:
@@ -51,6 +51,9 @@ class chatTUI:
         
         # Command queue for structured execution
         self.command_queue = asyncio.Queue()
+        
+        # Shutdown event for coordinated exit
+        self.shutdown_event = asyncio.Event()
         
         # Register cleanup handler for abnormal exits
         atexit.register(self._emergency_cleanup)
@@ -109,19 +112,27 @@ class chatTUI:
     async def agent_worker(self):
         """Background worker that processes harness requests."""
         
-        while self.compositor and self.compositor.running:
+        while not self.shutdown_event.is_set():
             try:
                 msg_task = asyncio.create_task(self.message_queue.get())
                 cmd_task = asyncio.create_task(self.command_queue.get())
+                shutdown_task = asyncio.create_task(self.shutdown_event.wait())
 
                 done, pending = await asyncio.wait(
-                    [msg_task, cmd_task],
+                    [msg_task, cmd_task, shutdown_task],
                     return_when=asyncio.FIRST_COMPLETED
                 )
 
-                # cancel the task that didn't complete
+                # cancel the tasks that didn't complete
                 for p in pending:
                     p.cancel()
+
+                # If shutdown was triggered, exit immediately
+                if shutdown_task in done:
+                    # Cancel any active generation
+                    if self.current_generation_task and not self.current_generation_task.done():
+                        self.current_generation_task.cancel()
+                    break
 
                 completed = done.pop()
 
@@ -256,7 +267,7 @@ class chatTUI:
         # Main Layout
         root = column
         self.root = root  # Store root for global handler
-        self.compositor = Compositor(root, fps=TARGET_FPS)
+        self.compositor = Compositor(root, fps=TARGET_FPS, shutdown_event=self.shutdown_event)
         
         # Store the original handle_input method before overriding
         self._original_handle_input = root.handle_input
