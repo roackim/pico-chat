@@ -24,7 +24,7 @@ class _theme:
     SKY: RGB
     MUTED: RGB
     ERROR: RGB
-    WARN: RGB
+    WARNING: RGB
     USER: RGB
     PICO: RGB
     
@@ -42,7 +42,7 @@ default = _theme(
     SKY         = RGB(135, 206, 235), # Color for the non UI elements
     MUTED       = RGB(125, 125, 125), # Muted gray
     ERROR       = RGB(255, 96, 96),   # Red
-    WARN        = RGB(255, 160, 96),  # Orange
+    WARNING     = RGB(255, 160, 96),  # Orange
     USER        = RGB(96, 160, 255),  # Blue
     PICO        = RGB(96, 255, 160),  # Green
 )

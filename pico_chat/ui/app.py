@@ -20,6 +20,9 @@ from pico_chat.ui.tui.colors import theme
 
 from pico_chat import pico_cfg
 
+# Import chunks module for type checking
+from pico_chat.harness import chunks
+
 TARGET_FPS = 60
 # TARGET_FPS = pico_cfg.target_fps
 
@@ -76,22 +79,74 @@ class chatTUI:
         """Process a single generation request."""
         # Show thinking indicator
         chat = self.chat_history_panel
-        current_msg = chat.add_pico_message("Thinking..", frame_color=theme.PICO)
+        current_msg = chat.add_system_message("Sending request...",
+            frame_color=theme.WARNING,
+            content_color=theme.MUTED
+        )
+        
+        mode = "connecting"
+        current_msg = None
         
         # Process streaming response from Harness
         try:
-            is_first_chunk = True
             async for chunk in self.agent.chat(user_input):
-                if is_first_chunk:
-                    # Replace "Thinking..." with the first real chunk
-                    current_msg.base_text = chunk
-                    current_msg.reformat(self.chat_history_panel.max_width - 2)
-                    is_first_chunk = False
-                else:
-                    current_msg.append(chunk)
+                
+                if mode == "connecting":
+                    chat.remove_last_message()
+                    current_msg = None
+                    
+                    mode = "connected"
+                
+                if isinstance(chunk, chunks.Thinking): # Special chunk type for "thinking" content
+                    
+                    if current_msg is None and mode != "thinking":
+                        # Start a new message for thinking content
+                        current_msg = chat.add_pico_message("", title="thinking", 
+                            frame_color=theme.MUTED, 
+                            content_color=theme.MUTED
+                        )
+                        mode = "thinking"
+                    
+                    current_msg.append(chunk.content)
+                
+                elif isinstance(chunk, chunks.Content): # Regular content chunk
+                    
+                    text = chunk.content
+                    if mode == "thinking":
+                        current_msg.set_title("thoughts") # Update title for thinking content
+                        current_msg = chat.add_pico_message("", 
+                            frame_color=theme.PICO, 
+                            # content_color=theme.MUTED
+                        )
+                        mode = "answering"
+                    
+                    # Render regular content
+                    current_msg.append(text)
+                
+                elif isinstance(chunk, chunks.ToolBatchStart):
+                    # Show tool execution started
+                    current_msg.append(f"\n{theme.MUTED}[Executing {chunk.count} tool(s)...]{theme.reset()}\n")
+                
+                elif isinstance(chunk, chunks.ToolStart):
+                    # Show which tool is being called
+                    current_msg.append(f"{theme.INFO}🔧 {chunk.name}{theme.reset()} ")
+                
+                elif isinstance(chunk, chunks.ToolComplete):
+                    # Show tool completion (truncate long results)
+                    result = chunk.result
+                    if len(result) > 100:
+                        result = result[:100] + "..."
+                    current_msg.append(f"{theme.SUCCESS}✓{theme.reset()}\n")
+                
+                elif isinstance(chunk, chunks.ToolWaitInput):
+                    # Show waiting for user input
+                    current_msg.append(f"\n{theme.INFO}[Waiting for input: {chunk.prompt}]{theme.reset()}\n")
+                
+                elif isinstance(chunk, chunks.ToolError):
+                    # Show tool error
+                    current_msg.append(f"\n{theme.ERROR}[Error in {chunk.name}: {chunk.error}]{theme.reset()}\n")
 
-                # Ensure we scroll to bottom if needed (handled by panel logic ideally, 
-                # but we can poke it)
+                # Ensure we scroll to bottom if needed
                 if self.chat_history_panel.auto_scroll:
                     self.chat_history_panel.scroll_offset = 0
 

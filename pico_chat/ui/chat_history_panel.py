@@ -50,6 +50,11 @@ class Message:
         self.component = TextComponent(self.formatted_text, fg=content_color)
         self.box = Box(self.component, title=self.title, fg=self.frame_color)
     
+    def set_title(self, title: str):
+        """Update the title of the message box."""
+        self.title = title
+        self.box.title = title
+    
     def _format_line_wrap(self) -> str:
         """Format the message text with smart word wrapping and padding.
         

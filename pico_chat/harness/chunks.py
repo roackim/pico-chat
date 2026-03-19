@@ -1,0 +1,54 @@
+"""Stream chunks for harness-to-UI communication."""
+
+from dataclasses import dataclass
+
+
+@dataclass
+class Chunk:
+    """Base class for all stream chunks from harness."""
+    pass
+
+
+@dataclass
+class Thinking(Chunk):
+    """LLM reasoning content (e.g., DeepSeek R1 chain-of-thought)."""
+    content: str
+
+
+@dataclass
+class Content(Chunk):
+    """Regular response content from LLM."""
+    content: str
+
+
+@dataclass
+class ToolBatchStart(Chunk):
+    """Indicates the start of tool execution batch."""
+    count: int
+
+
+@dataclass
+class ToolStart(Chunk):
+    """A tool execution is starting."""
+    name: str
+    args: str
+
+
+@dataclass
+class ToolComplete(Chunk):
+    """A tool execution completed successfully."""
+    name: str
+    result: str
+
+
+@dataclass
+class ToolWaitInput(Chunk):
+    """Tool is waiting for user input."""
+    prompt: str
+
+
+@dataclass
+class ToolError(Chunk):
+    """A tool execution failed."""
+    name: str
+    error: str

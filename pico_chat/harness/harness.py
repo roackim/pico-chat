@@ -9,18 +9,10 @@ from pico_chat.harness.llm_status import AgentState
 from pico_chat.harness.debug import get_debug_stream
 from pico_chat.harness.context_builder import build_harness_context
 from pico_chat.harness.system_prompt import get_system_message
+from pico_chat.harness import chunks
 
 # Import the minimal toolset
 from pico_chat.harness.tool_wrappers import create_minimal_tools
-
-# Import tool feedback formatting
-from pico_chat.harness.tool_feedback import (
-    format_tool_call_start,
-    format_tool_call_complete,
-    format_batch_start
-)
-
-from pico_chat.ui.tui.colors import RGB, theme
 
 # Re-implementation based on minichat.py for maximum performance and simplicity
 # Discarding complex Gateway logic in favor of direct AsyncOpenAI usage.
@@ -157,11 +149,13 @@ class Harness:
         
         return [system_msg] + self.history
 
-    async def _stream_llm_response(self, messages: List[Dict[str, Any]]) -> AsyncGenerator[str, None]:
+    async def _stream_llm_response(self, messages: List[Dict[str, Any]]) -> AsyncGenerator[chunks.Chunk, None]:
         """
         Stream LLM response and collect content/tool calls.
         
-        Yields: Content chunks and reasoning (if enabled)
+        Yields: chunks.Chunk subclasses:
+            - chunks.Thinking: Reasoning content
+            - chunks.Content: Regular response content
         
         Sets instance variables:
         - self._last_full_content: Complete response content
@@ -192,9 +186,8 @@ class Harness:
                 if self.state != AgentState.THINKING:
                     self.state = AgentState.THINKING
                 
-                # Only yield if config enabled
-                if pico_cfg.config.render_thinking:
-                    yield f"{theme.MUTED}{reasoning}{theme.reset()}"
+                # Yield structured thinking chunk
+                yield chunks.Thinking(content=reasoning)
                 continue
 
             # 2. Handle Content
@@ -203,7 +196,7 @@ class Harness:
                 if self.state != AgentState.ANSWERING:
                     self.state = AgentState.ANSWERING
                 full_content += content
-                yield content
+                yield chunks.Content(content=content)
                 
             # 3. Handle Tool Calls
             if delta.tool_calls:
@@ -248,14 +241,19 @@ class Harness:
         self, 
         tool_calls_list: List[Dict[str, Any]], 
         messages: List[Dict[str, Any]]
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[chunks.Chunk, None]:
         """
         Execute all tool calls and update history.
         
-        Yields: Tool execution feedback for UI
+        Yields: chunks.Chunk subclasses:
+            - chunks.ToolBatchStart: Starting batch of tools
+            - chunks.ToolStart: Individual tool execution begins
+            - chunks.ToolComplete: Tool finished successfully
+            - chunks.ToolWaitInput: Waiting for user input
+            - chunks.ToolError: Tool execution failed
         """
         self.state = AgentState.THINKING
-        yield format_batch_start(len(tool_calls_list))
+        yield chunks.ToolBatchStart(count=len(tool_calls_list))
         
         for tc in tool_calls_list:
             func_name = tc["function"]["name"]
@@ -266,8 +264,8 @@ class Harness:
             try:
                 self.debug_stream.log("TOOL_EXEC", {"name": func_name, "args": args_str})
                 
-                # Show which tool is being called
-                yield format_tool_call_start(func_name, args_str)
+                # Yield tool start chunk
+                yield chunks.ToolStart(name=func_name, args=args_str)
                 
                 if func_name in self.tools_map:
                     try:
@@ -279,7 +277,7 @@ class Harness:
                         if hasattr(func, "is_blocking") and func.is_blocking:
                             # Handle blocking tools (e.g. user input)
                             prompt = args.get("prompt", "Please provide input:")
-                            yield f"\n{theme.INFO}[System: Waiting for user input: {prompt}]{theme.reset()}\n"
+                            yield chunks.ToolWaitInput(prompt=prompt)
                             
                             user_resp = await self._wait_for_user_input(prompt)
                             result = f"User responded with: {user_resp}"
@@ -312,8 +310,8 @@ class Harness:
                 self.history.append(tool_msg)
                 messages.append(tool_msg)
                 
-                # Show completion feedback
-                yield format_tool_call_complete(func_name, result)
+                # Yield tool complete chunk
+                yield chunks.ToolComplete(name=func_name, result=result)
 
             except Exception as e:
                 # Fallback for system errors during tool processing
@@ -330,12 +328,14 @@ class Harness:
                     self.history.append(tool_msg)
                     messages.append(tool_msg)
                 
-                yield f"\n{theme.ERROR}[System Error]: {str(e)}{theme.reset()}\n"
+                yield chunks.ToolError(name=func_name, error=str(e))
 
-    async def chat(self, user_input: str) -> AsyncGenerator[str, None]:
+    async def chat(self, user_input: str) -> AsyncGenerator[chunks.Chunk, None]:
         """
         Main chat loop orchestrator.
         Handles: User Input -> LLM -> [Tool Calls -> Tool Execution -> LLM]* -> Final Answer
+        
+        Yields: chunks.Chunk objects - see chunks.py for all chunk types.
         """
         messages = self._build_messages(user_input)
 
