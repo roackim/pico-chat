@@ -1,13 +1,13 @@
 from typing import Optional, Any, List, Callable
 from pico_chat.ui.tui.components.base import Component
-from pico_chat.ui.tui.components.text_buffer import TextBuffer
-from pico_chat.ui.tui.components.coordinate_mapper import CoordinateMapper
-from pico_chat.ui.tui.components.input_handlers import (
+from .text_buffer import TextBuffer
+from .coordinate_mapper import CoordinateMapper
+from .input_handlers import (
     InputHandler, InputContext, KeyboardHandler, MouseHandler, PasteHandler
 )
-from pico_chat.ui.tui.components.menu_manager import MenuManager
-from pico_chat.ui.tui.components.scroll_manager import ScrollManager
-from pico_chat.ui.tui.components.cursor_renderer import CursorRenderer
+from .menu_manager import MenuManager
+from .scroll_manager import ScrollManager
+from .cursor_renderer import CursorRenderer
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.terminal import MouseEvent
 from pico_chat.ui.tui.layout_utils import display_width

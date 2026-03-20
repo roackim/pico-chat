@@ -45,9 +45,10 @@ class Config:
         self.max_search_results: int = 50
         self.command_timeout: int = 30
         
-        # UI colors (RGB tuples)
+        # UI settings
         self.ui_cursor_frequency: float = 1.0  # Hz (flashes per second)
         self.ui_cursor_pulse_delay: float = 0.75  # Seconds before pulsating starts
+        self.ui_max_input_height: int = 10  # Maximum height of input field in lines
         
         
         # TODO investigate deadcode around these padding settings and remove if not used

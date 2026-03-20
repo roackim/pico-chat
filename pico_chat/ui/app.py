@@ -40,6 +40,7 @@ class chatTUI:
         
         # New: Direct InputComponent usage
         self.input_component = InputComponent(" ", id="entry", fg=theme.USER)
+        self.input_component.config = pico_cfg.config  # Pass config for max height, cursor settings, etc.
         self.input_component.on_submit = self.on_user_submit
         
         # Setup menus
