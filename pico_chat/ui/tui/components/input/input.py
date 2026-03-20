@@ -21,7 +21,7 @@ class InputComponent(Component):
         super().__init__(id)
         self.prompt = prompt
         self.fg = fg if fg is not None else theme.DEFAULT
-        self.bg = bg if bg is not None else theme.BACKGROUND
+        self.bg = bg if bg is not None else theme.get_bg()
         self.config = None  # Config object passed during initialization
         
         # Core components

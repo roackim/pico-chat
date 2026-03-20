@@ -17,7 +17,17 @@ class Buffer:
     def __init__(self, width: int, height: int):
         self.width = width
         self.height = height
-        self.cells = [[Cell() for _ in range(width)] for _ in range(height)]
+        # Import theme and config to get default background color for empty cells
+        from pico_chat.ui.tui.colors import theme
+        from pico_chat import pico_cfg
+        
+        # Only use theme background if config allows it
+        if pico_cfg.config.ui_use_bg_color:
+            self.default_bg = (theme.BACKGROUND.r, theme.BACKGROUND.g, theme.BACKGROUND.b)
+        else:
+            self.default_bg = None  # Use terminal default background
+        
+        self.cells = [[Cell(bg=self.default_bg) for _ in range(width)] for _ in range(height)]
         self.cursor_pos: Optional[tuple[int, int]] = None  # (x, y)
 
     def set_cursor(self, x: int, y: int):
@@ -25,6 +35,11 @@ class Buffer:
 
     def set(self, x: int, y: int, char: str, fg=None, bg=None, bold=False, reverse=False):
         if 0 <= x < self.width and 0 <= y < self.height:
+            # Convert RGB objects to tuples
+            if fg is not None and hasattr(fg, 'r'):
+                fg = (fg.r, fg.g, fg.b)
+            if bg is not None and hasattr(bg, 'r'):
+                bg = (bg.r, bg.g, bg.b)
             # Important: Always create a fresh Cell instance to avoid sharing
             self.cells[y][x] = Cell(char, fg, bg, bold, reverse)
 
@@ -81,10 +96,13 @@ class Buffer:
                         self.set(curr_x, y, pending_ansi + char, fg, bg, bold)
                     
                     if 0 <= curr_x + 1 < self.width and 0 <= y < self.height:
+                        # Convert RGB to tuple if needed
+                        fg_tuple = (fg.r, fg.g, fg.b) if fg is not None and hasattr(fg, 'r') else fg
+                        bg_tuple = (bg.r, bg.g, bg.b) if bg is not None and hasattr(bg, 'r') else bg
                         self.cells[y][curr_x + 1] = Cell(
                             char="", 
-                            fg=fg, 
-                            bg=bg, 
+                            fg=fg_tuple, 
+                            bg=bg_tuple, 
                             bold=bold, 
                             is_wide_char_continuation=True
                         )
@@ -111,7 +129,7 @@ class Buffer:
     def clear(self):
         for y in range(self.height):
             for x in range(self.width):
-                self.cells[y][x] = Cell()
+                self.cells[y][x] = Cell(bg=self.default_bg)
 
     def render(self) -> str:
         """
@@ -122,7 +140,17 @@ class Buffer:
         from pico_chat.ui.tui.terminal import ANSI
         
         res = [ANSI.MOVE_HOME]
-        curr_state = {"fg": None, "bg": None, "bold": False, "reverse": False}
+        
+        # Initialize background based on whether we're using theme colors
+        if self.default_bg is None:
+            # Reset to terminal default background
+            res.append("\033[49m")
+        else:
+            # Set theme background color
+            res.append(f"\033[48;2;{self.default_bg[0]};{self.default_bg[1]};{self.default_bg[2]}m")
+        
+        # Use a sentinel value to force first cell to emit colors
+        curr_state = {"fg": object(), "bg": object(), "bold": False, "reverse": False}
         
         for y in range(self.height):
             # Move to start of line
@@ -160,14 +188,20 @@ class Buffer:
                     
                     if cell.fg != curr_state["fg"]:
                         if cell.fg:
-                            res.append(cell.fg.ansi_fg())
+                            if isinstance(cell.fg, tuple):
+                                res.append(f"\033[38;2;{cell.fg[0]};{cell.fg[1]};{cell.fg[2]}m")
+                            else:
+                                res.append(cell.fg.ansi_fg())
                         else:
                             res.append("\033[39m")
                         curr_state["fg"] = cell.fg
 
                     if cell.bg != curr_state["bg"]:
                         if cell.bg:
-                            res.append(cell.bg.ansi_bg())
+                            if isinstance(cell.bg, tuple):
+                                res.append(f"\033[48;2;{cell.bg[0]};{cell.bg[1]};{cell.bg[2]}m")
+                            else:
+                                res.append(cell.bg.ansi_bg())
                         else:
                             res.append("\033[49m")
                         curr_state["bg"] = cell.bg

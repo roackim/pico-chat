@@ -42,12 +42,19 @@ class _theme:
         """reset to theme bg + fg colors"""
         return self.BACKGROUND.ansi_bg() + self.DEFAULT.ansi_fg()
     
+    def get_bg(self):
+        """Get background color respecting ui_use_bg_color config setting."""
+        from pico_chat import pico_cfg
+        if pico_cfg.config.ui_use_bg_color:
+            return self.BACKGROUND
+        return None
+    
 # TODO: refactor to load colors from theme instead of hardcoding in config
 # NOTE: regex to find them: [\[\(]\s*\d+\s*,\s*\d+\s*,\s*\d+\s*[\]\)]   
 
 default = _theme(
     name="default",
-    BACKGROUND  = RGB("#000000"),       # Black
+    BACKGROUND  = RGB("#B21ECF"),       # Black
     DEFAULT     = RGB("#F7F4EA"),   # White
     SKY         = RGB("#87CEEB"), # Color for the non UI elements
     MUTED       = RGB("#7D7D7D"), # Muted gray

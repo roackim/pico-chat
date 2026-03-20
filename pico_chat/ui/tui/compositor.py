@@ -17,6 +17,7 @@ class Compositor:
         self._collect_ids(self.root)
         self.running = False
         self.shutdown_event = shutdown_event
+        self.padding = 0  # Global app padding
 
     def _collect_ids(self, component: Component):
         if component.id:
@@ -83,7 +84,11 @@ class Compositor:
             return
 
         self.buffer.clear()
-        self.root.set_layout(0, 0, self.width, self.height)
+        # Apply global padding to root component layout
+        pad = self.padding
+        inner_width = max(0, self.width - 2 * pad)
+        inner_height = max(0, self.height - 2 * pad)
+        self.root.set_layout(pad, pad, inner_width, inner_height)
         self.root.render(self.buffer)
         
         # Use Buffer's built-in render method

@@ -13,7 +13,7 @@ class TextComponent(Component):
         self.auto_scroll_bottom = auto_scroll_bottom
         
         if self.fg is None: self.fg = theme.DEFAULT
-        if self.bg is None: self.bg = theme.BACKGROUND
+        if self.bg is None: self.bg = theme.get_bg()
 
     def render(self, buffer: Buffer):
         """

@@ -200,7 +200,7 @@ class ChatHistoryPanel(TextComponent):
     def render(self, buffer: Buffer):
         """Custom render to handle scrolling/clipping of messages."""
         # Clear background first (to prevent artifacts from previous frames/scrolls)
-        buffer.fill(self.x, self.y, self.width, self.height)
+        buffer.fill(self.x, self.y, self.width, self.height, " ", bg=theme.get_bg())
 
         # number of messages
         msg_nbr = len(self.messages)

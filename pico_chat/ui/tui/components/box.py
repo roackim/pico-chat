@@ -16,7 +16,7 @@ class Box(Component):
         self.bg = bg
         self.fg = fg
         
-        if self.bg is None: self.bg = theme.BACKGROUND
+        if self.bg is None: self.bg = theme.get_bg()
         if self.fg is None: self.fg = theme.DEFAULT
 
     @property
