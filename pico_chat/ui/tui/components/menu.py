@@ -70,18 +70,18 @@ class CommandMenu(Component):
         # Ensure it doesn't exceed parent width
         menu_width = min(menu_width, self.width)
         
-        # Draw the box
-        buffer.set(self.x, self.y, "┌", fg=self.fg)
+        # Draw the box with background
+        buffer.set(self.x, self.y, "┌", fg=self.fg, bg=self.bg)
         for i in range(1, menu_width - 1):
-            buffer.set(self.x + i, self.y, "─", fg=self.fg)
-        buffer.set(self.x + menu_width - 1, self.y, "┐", fg=self.fg)
+            buffer.set(self.x + i, self.y, "─", fg=self.fg, bg=self.bg)
+        buffer.set(self.x + menu_width - 1, self.y, "┐", fg=self.fg, bg=self.bg)
         
         # Only render items that fit in the menu height (minus borders)
         visible_count = min(len(self.filtered_items), menu_height - 2)
         for i in range(visible_count):
             item = self.filtered_items[i]
             curr_y = self.y + 1 + i
-            buffer.set(self.x, curr_y, "│", fg=self.fg)
+            buffer.set(self.x, curr_y, "│", fg=self.fg, bg=self.bg)
             
             display_text = f"{self.trigger}{item}"
             is_selected = (i == self.selected_index)
@@ -91,20 +91,21 @@ class CommandMenu(Component):
             padded_text = f"{display_text}".ljust(highlight_width)
             
             if is_selected:
-                buffer.set(self.x + 1, curr_y, " ", bg=self.bg)
-                buffer.write_str(self.x + 2, curr_y, padded_text, fg=self.bg, bg=self.fg)
-                buffer.set(self.x + 1 + highlight_width + 1, curr_y, " ", bg=self.bg)
+                # Use reverse video for highlighting - works with any terminal background
+                buffer.set(self.x + 1, curr_y, " ", bg=self.bg, reverse=True)
+                buffer.write_str(self.x + 2, curr_y, padded_text, fg=self.fg, bg=self.bg, reverse=True)
+                buffer.set(self.x + 1 + highlight_width + 1, curr_y, " ", bg=self.bg, reverse=True)
             else:
                 buffer.set(self.x + 1, curr_y, " ", bg=self.bg)
                 buffer.write_str(self.x + 2, curr_y, padded_text, fg=self.fg, bg=self.bg)
                 buffer.set(self.x + 1 + highlight_width + 1, curr_y, " ", bg=self.bg)
                 
-            buffer.set(self.x + menu_width - 1, curr_y, "│", fg=self.fg)
+            buffer.set(self.x + menu_width - 1, curr_y, "│", fg=self.fg, bg=self.bg)
             
-        buffer.set(self.x, self.y + menu_height - 1, "└", fg=self.fg)
+        buffer.set(self.x, self.y + menu_height - 1, "└", fg=self.fg, bg=self.bg)
         for i in range(1, menu_width - 1):
-            buffer.set(self.x + i, self.y + menu_height - 1, "─", fg=self.fg)
-        buffer.set(self.x + menu_width - 1, self.y + menu_height - 1, "┘", fg=self.fg)
+            buffer.set(self.x + i, self.y + menu_height - 1, "─", fg=self.fg, bg=self.bg)
+        buffer.set(self.x + menu_width - 1, self.y + menu_height - 1, "┘", fg=self.fg, bg=self.bg)
 
     def handle_input(self, event: Any) -> bool:
         if not self.is_visible:

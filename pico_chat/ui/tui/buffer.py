@@ -64,7 +64,7 @@ class Buffer:
             for ix in range(x, x + width):
                 self.set(ix, iy, char, fg=fg, bg=bg)
 
-    def write_str(self, x: int, y: int, s: str, fg=None, bg=None, bold=False, max_width: Optional[int] = None):
+    def write_str(self, x: int, y: int, s: str, fg=None, bg=None, bold=False, reverse=False, max_width: Optional[int] = None):
         """
         Writes a string to the buffer starting at (x, y).
         This method is ANSI-aware: escape sequences are stored alongside the next
@@ -108,7 +108,7 @@ class Buffer:
                 # If this is a wide character (emoji), mark the next cell as continuation
                 if char_width == 2:
                     if 0 <= curr_x < self.width and 0 <= y < self.height:
-                        self.set(curr_x, y, pending_ansi + char, fg, bg, bold)
+                        self.set(curr_x, y, pending_ansi + char, fg, bg, bold, reverse)
                     
                     if 0 <= curr_x + 1 < self.width and 0 <= y < self.height:
                         if self._is_in_clip(curr_x + 1, y):
@@ -120,12 +120,13 @@ class Buffer:
                                 fg=fg_tuple,
                                 bg=bg_tuple,
                                 bold=bold,
+                                reverse=reverse,
                                 is_wide_char_continuation=True
                             )
                     curr_x += 2  # Skip over both the character cell and continuation cell
                 else:
                     if 0 <= curr_x < self.width and 0 <= y < self.height:
-                        self.set(curr_x, y, pending_ansi + char, fg, bg, bold)
+                        self.set(curr_x, y, pending_ansi + char, fg, bg, bold, reverse)
                     curr_x += 1  # Single-width character
                 
                 pending_ansi = ""
@@ -140,7 +141,7 @@ class Buffer:
                 prev_cell.char += pending_ansi
             elif 0 <= curr_x < self.width and 0 <= y < self.height:
                 # If no characters were written, put ANSI in an empty cell
-                self.set(curr_x, y, pending_ansi + " ", fg, bg, bold)
+                self.set(curr_x, y, pending_ansi + " ", fg, bg, bold, reverse)
 
     def clear(self):
         for y in range(self.height):
