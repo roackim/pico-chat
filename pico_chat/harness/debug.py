@@ -1,5 +1,6 @@
 import datetime
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -14,9 +15,11 @@ class DebugStream:
         self.log_path = Path("debug_stream.log")
         # Keep file open for performance
         self._file = open(self.log_path, "a", encoding="utf-8", buffering=1) # Line buffering
+        # Also get Python logger for TUI integration
+        self._logger = logging.getLogger("harness")
 
     def log(self, direction: str, payload: str | dict[str, Any] | list[Any]):
-        """Log payload to the debug stream file."""
+        """Log payload to the debug stream file and Python logging."""
         timestamp = datetime.datetime.now().isoformat()
         
         if isinstance(payload, (dict, list)):
@@ -39,6 +42,14 @@ class DebugStream:
             # Let's trust the OS buffering unless debugging.
         except Exception:
             pass # Don't crash on logging error
+        
+        # Also send to Python logging for TUI debug panel
+        try:
+            # Format as: [DIRECTION] payload
+            log_message = f"[{direction}] {payload_str}"
+            self._logger.debug(log_message)
+        except Exception:
+            pass  # Don't crash on logging error
 
     def __del__(self):
         """Cleanup file handle on destruction."""

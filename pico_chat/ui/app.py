@@ -75,7 +75,14 @@ class chatTUI:
         self.log_handler.setLevel(logging.DEBUG)
         formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
         self.log_handler.setFormatter(formatter)
-        logging.getLogger().addHandler(self.log_handler)
+        
+        # Configure root logger to accept all levels
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.DEBUG)
+        root_logger.addHandler(self.log_handler)
+        
+        # Test log message
+        logging.info("[TUI] Debug panel initialized")
         
         # Track the current generation task
         self.current_generation_task: Optional[asyncio.Task] = None
@@ -105,6 +112,10 @@ class chatTUI:
 
     async def _process_generation(self, user_input: str):
         """Process a single generation request."""
+        import logging
+        logger = logging.getLogger("tui")
+        logger.info(f"Starting generation for user input: {user_input[:50]}...")
+        
         # Show thinking indicator
         chat = self.chat_history_panel
         current_msg = chat.add_message("Sending request...", msg_type=SysMsg())
@@ -213,9 +224,15 @@ class chatTUI:
                 # distinguish source
                 if completed is cmd_task:
                     command = completed.result()
+                    import logging
+                    logger = logging.getLogger("tui")
+                    logger.debug(f"Processing command: {command}")
                     await handle_command(self, command)  # exceptions propagate → crash
                 else:
                     user_input = completed.result()
+                    import logging
+                    logger = logging.getLogger("tui")
+                    logger.debug(f"Agent worker received user input")
 
                     self.current_generation_task = asyncio.create_task(
                         self._process_generation(user_input)
@@ -232,10 +249,13 @@ class chatTUI:
                 continue
             
             except Exception as e: # Errors during generation or processing
+                import logging
+                logger = logging.getLogger("tui")
    
                 recoverable_exceptions = [openai.APIConnectionError]
                 
                 if type(e) in recoverable_exceptions:
+                    logger.warning(f"Recoverable error: {type(e).__name__}: {str(e)}")
                     self.chat_history_panel.remove_last_message()  # Remove the pico message
                     self.chat_history_panel.add_message(
                         message=f"{str(e)}",
@@ -243,6 +263,7 @@ class chatTUI:
                     )
                     
                 else: # raise for non-recoverable errors
+                    logger.error(f"Non-recoverable error: {type(e).__name__}: {str(e)}", exc_info=True)
                     raise e
 
     def stop_generation(self):
@@ -255,11 +276,17 @@ class chatTUI:
 
     def on_command_submit(self, text: str):
         """Handle execution of commands."""
+        import logging
+        logger = logging.getLogger("tui")
+        logger.info(f"Command submitted: {text}")
         self.command_queue.put_nowait(text)
         
     def toggle_debug_console(self):
         """Toggle the visibility of the debug console."""
+        import logging
         self.show_debug = not self.show_debug
+        logger = logging.getLogger("tui")
+        logger.info(f"Debug console toggled: {'visible' if self.show_debug else 'hidden'}")
         
         children = [
             self.chat_history_panel.get_component(),
@@ -294,6 +321,10 @@ class chatTUI:
             if self.compositor:
                 self.compositor.running = False
         else:
+            import logging
+            logger = logging.getLogger("tui")
+            logger.info(f"User submitted: {text[:50]}...")
+            
             # Enable auto-scroll to show the new message
             self.chat_history_panel.auto_scroll = True
             # Add user message immediately with color and header
@@ -347,9 +378,14 @@ class chatTUI:
 
     async def run(self):
         """Run the TUI application."""
+        import logging
+        logger = logging.getLogger("tui")
+        logger.info("Starting Pico-Chat TUI application")
+        
         # Start the harness services if available
         if hasattr(self.agent, 'start'):
             self.agent.start()
+            logger.info("Agent started")
             
         # Column
         children = [
