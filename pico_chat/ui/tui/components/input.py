@@ -17,23 +17,24 @@ from pico_chat.ui.tui.colors import theme
 class InputComponent(Component):
     """Multi-line text input component with menus, scrolling, and cursor animation."""
     
-    def __init__(self, prompt: str = "> ", id: Optional[str] = None, fg=None, bg=None):
+    def __init__(self, prompt: str = "> ", id: Optional[str] = None, frame_color=None, content_color=None):
         super().__init__(id)
         self.prompt = prompt
-        self.fg = fg if fg is not None else theme.DEFAULT
-        self.bg = bg if bg is not None else theme.get_bg()
+        self.frame_color = frame_color if frame_color is not None else theme.DEFAULT
+        self.content_color = content_color if content_color is not None else theme.DEFAULT
+        self.bg = theme.get_bg()  # Use global background
         self.config = None  # Config object passed during initialization
         
         # Core components
         self.buffer = TextBuffer()
         self.coord_mapper = CoordinateMapper(prompt, self.width)
-        self.menu_manager = MenuManager(self.fg, self.bg)
+        self.menu_manager = MenuManager(self.content_color)
         self.scroll_manager = ScrollManager(
             self.buffer,
             self.coord_mapper,
             lambda: self.height
         )
-        self.cursor_renderer = CursorRenderer(lambda: self.config, self.bg)
+        self.cursor_renderer = CursorRenderer(lambda: self.config)
         
         # Input handlers
         self.keyboard_handler = KeyboardHandler()
@@ -151,7 +152,7 @@ class InputComponent(Component):
                 # Continuation lines already have proper padding
                 display_line = line
             
-            buffer.write_str(self.x, self.y + line_idx, display_line, fg=self.fg, bg=self.bg, max_width=self.width)
+            buffer.write_str(self.x, self.y + line_idx, display_line, fg=self.content_color, bg=self.bg, max_width=self.width)
         
         # Render cursor
         self.cursor_renderer.render(

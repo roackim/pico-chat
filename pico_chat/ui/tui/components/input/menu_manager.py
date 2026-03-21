@@ -8,19 +8,18 @@ from pico_chat.ui.tui.buffer import Buffer
 class MenuManager:
     """Manages command and context menus for the input component."""
     
-    def __init__(self, fg, bg):
+    def __init__(self, content_color):
         self.command_menu: Optional[CommandMenu] = None
         self.context_menu: Optional[CommandMenu] = None
         self.get_context_items_callback: Optional[Callable[[], List[str]]] = None
-        self.fg = fg
-        self.bg = bg
+        self.content_color = content_color
     
     def setup_menus(self, commands: List[str], get_context_items: Optional[Callable[[], List[str]]] = None):
         """Initialize built-in menus."""
-        self.command_menu = CommandMenu(commands, fg=self.fg, bg=self.bg)
+        self.command_menu = CommandMenu(commands, frame_color=self.content_color, content_color=self.content_color)
         self.command_menu.on_select = self._on_command_selected
         
-        self.context_menu = CommandMenu([], fg=self.fg, bg=self.bg, trigger="@")
+        self.context_menu = CommandMenu([], frame_color=self.content_color, content_color=self.content_color, trigger="@")
         self.context_menu.on_select = self._on_context_selected
         self.get_context_items_callback = get_context_items
         
@@ -89,7 +88,9 @@ class MenuManager:
     def render(self, buffer: Buffer, x: int, y: int, width: int):
         """Render visible menus."""
         if self.command_menu and self.command_menu.is_visible:
-            menu_height = len(self.command_menu.filtered_items) + 2
+            # Menu calculates its own height based on filtered_items and max_height
+            visible_count = min(len(self.command_menu.filtered_items), self.command_menu.max_height - 2)
+            menu_height = visible_count + 2  # +2 for borders
             self.command_menu.set_layout(
                 x - 1,
                 y - menu_height - 1,
@@ -99,7 +100,9 @@ class MenuManager:
             self.command_menu.render(buffer)
         
         if self.context_menu and self.context_menu.is_visible:
-            menu_height = min(len(self.context_menu.filtered_items) + 2, 12)
+            # Menu calculates its own height based on filtered_items and max_height
+            visible_count = min(len(self.context_menu.filtered_items), self.context_menu.max_height - 2)
+            menu_height = visible_count + 2  # +2 for borders
             self.context_menu.set_layout(
                 x - 1,
                 y - menu_height - 1,

@@ -4,17 +4,30 @@ from typing import List, Optional, Any, Callable
 from pico_chat.ui.tui.components.base import Component
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.fuzzy import fuzzy_search
+from pico_chat.ui.tui.colors import RGB, theme
 
 class CommandMenu(Component):
     """A floating menu component for command autocomplete/suggestions."""
     
-    def __init__(self, items: List[str], id: Optional[str] = None, fg=None, bg=None, trigger: str = "/"):
+    def __init__(self, 
+                 items: List[str], 
+                 id: Optional[str] = None, 
+                 frame_color: RGB = None,
+                 content_color: RGB = None,
+                 left_pad: int = 1,
+                 right_pad: int = 1,
+                 max_height: int = 12,
+                 trigger: str = "/"):
         super().__init__(id)
         self.all_items = items
         self.filtered_items: List[str] = []
         self.selected_index = 0
-        self.fg = fg
-        self.bg = bg
+        self.frame_color = frame_color if frame_color is not None else theme.DEFAULT
+        self.content_color = content_color if content_color is not None else self.frame_color
+        self.bg = theme.get_bg()  # Use global background
+        self.left_pad = left_pad
+        self.right_pad = right_pad
+        self.max_height = max_height
         self.is_visible = False
         self.on_select: Optional[Callable[[str], None]] = None
         self.trigger = trigger
@@ -60,52 +73,65 @@ class CommandMenu(Component):
         if not self.is_visible or not self.filtered_items:
             return
 
-        menu_height = self.height
-        
-        # Calculate width including trigger
+        # Calculate menu dimensions
         max_raw_len = max(len(item) for item in self.filtered_items)
-        menu_width = max_raw_len + len(self.trigger) + 4
+        content_width = max_raw_len + len(self.trigger)
+        menu_width = content_width + self.left_pad + self.right_pad + 2  # +2 for borders
         menu_width = max(menu_width, 15)
+        menu_width = min(menu_width, self.width)  # Respect parent width
         
-        # Ensure it doesn't exceed parent width
-        menu_width = min(menu_width, self.width)
+        # Use max_height to limit visible items
+        visible_count = min(len(self.filtered_items), self.max_height - 2)  # -2 for borders
+        menu_height = visible_count + 2  # +2 for top and bottom borders
         
         # Draw the box with background
-        buffer.set(self.x, self.y, "┌", fg=self.fg, bg=self.bg)
+        buffer.set(self.x, self.y, "┌", fg=self.frame_color, bg=self.bg)
         for i in range(1, menu_width - 1):
-            buffer.set(self.x + i, self.y, "─", fg=self.fg, bg=self.bg)
-        buffer.set(self.x + menu_width - 1, self.y, "┐", fg=self.fg, bg=self.bg)
+            buffer.set(self.x + i, self.y, "─", fg=self.frame_color, bg=self.bg)
+        buffer.set(self.x + menu_width - 1, self.y, "┐", fg=self.frame_color, bg=self.bg)
         
-        # Only render items that fit in the menu height (minus borders)
-        visible_count = min(len(self.filtered_items), menu_height - 2)
+        # Render items
         for i in range(visible_count):
             item = self.filtered_items[i]
             curr_y = self.y + 1 + i
-            buffer.set(self.x, curr_y, "│", fg=self.fg, bg=self.bg)
+            
+            # Draw left border
+            buffer.set(self.x, curr_y, "│", fg=self.frame_color, bg=self.bg)
             
             display_text = f"{self.trigger}{item}"
             is_selected = (i == self.selected_index)
             
-            inner_width = menu_width - 2
-            highlight_width = inner_width - 2
-            padded_text = f"{display_text}".ljust(highlight_width)
+            # Calculate available width for content
+            inner_width = menu_width - 2  # Minus borders
+            content_area = inner_width - self.left_pad - self.right_pad
+            padded_text = display_text.ljust(content_area)[:content_area]  # Pad and clip
             
+            # Render left padding
+            for p in range(self.left_pad):
+                buffer.set(self.x + 1 + p, curr_y, " ", bg=self.bg, reverse=is_selected)
+            
+            # Render content
             if is_selected:
                 # Use reverse video for highlighting - works with any terminal background
-                buffer.set(self.x + 1, curr_y, " ", bg=self.bg, reverse=True)
-                buffer.write_str(self.x + 2, curr_y, padded_text, fg=self.fg, bg=self.bg, reverse=True)
-                buffer.set(self.x + 1 + highlight_width + 1, curr_y, " ", bg=self.bg, reverse=True)
+                buffer.write_str(self.x + 1 + self.left_pad, curr_y, padded_text, 
+                               fg=self.content_color, bg=self.bg, reverse=True)
             else:
-                buffer.set(self.x + 1, curr_y, " ", bg=self.bg)
-                buffer.write_str(self.x + 2, curr_y, padded_text, fg=self.fg, bg=self.bg)
-                buffer.set(self.x + 1 + highlight_width + 1, curr_y, " ", bg=self.bg)
-                
-            buffer.set(self.x + menu_width - 1, curr_y, "│", fg=self.fg, bg=self.bg)
+                buffer.write_str(self.x + 1 + self.left_pad, curr_y, padded_text, 
+                               fg=self.content_color, bg=self.bg)
             
-        buffer.set(self.x, self.y + menu_height - 1, "└", fg=self.fg, bg=self.bg)
+            # Render right padding
+            for p in range(self.right_pad):
+                buffer.set(self.x + 1 + self.left_pad + content_area + p, curr_y, " ", 
+                         bg=self.bg, reverse=is_selected)
+            
+            # Draw right border
+            buffer.set(self.x + menu_width - 1, curr_y, "│", fg=self.frame_color, bg=self.bg)
+        
+        # Draw bottom border
+        buffer.set(self.x, self.y + menu_height - 1, "└", fg=self.frame_color, bg=self.bg)
         for i in range(1, menu_width - 1):
-            buffer.set(self.x + i, self.y + menu_height - 1, "─", fg=self.fg, bg=self.bg)
-        buffer.set(self.x + menu_width - 1, self.y + menu_height - 1, "┘", fg=self.fg, bg=self.bg)
+            buffer.set(self.x + i, self.y + menu_height - 1, "─", fg=self.frame_color, bg=self.bg)
+        buffer.set(self.x + menu_width - 1, self.y + menu_height - 1, "┘", fg=self.frame_color, bg=self.bg)
 
     def handle_input(self, event: Any) -> bool:
         if not self.is_visible:

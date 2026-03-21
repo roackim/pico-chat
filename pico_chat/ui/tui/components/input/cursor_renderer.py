@@ -9,9 +9,8 @@ from pico_chat.ui.tui.colors import theme
 class CursorRenderer:
     """Handles cursor rendering with pulsating animation."""
     
-    def __init__(self, config_getter, bg_color):
+    def __init__(self, config_getter):
         self.get_config = config_getter  # Callable that returns config
-        self.bg_color = bg_color
         self.last_input_time = 0.0
     
     def mark_input(self):
@@ -55,4 +54,4 @@ class CursorRenderer:
             char_to_show = curr_cell.char or " "
             
             # Use reverse video for cursor - works with any terminal background
-            buffer.set(cx, cy, char_to_show, fg=cursor_color, bg=self.bg_color, bold=True, reverse=True)
+            buffer.set(cx, cy, char_to_show, fg=cursor_color, bg=theme.get_bg(), bold=True, reverse=True)

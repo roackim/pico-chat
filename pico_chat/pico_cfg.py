@@ -31,8 +31,8 @@ class Config:
         self.ui_debug_console_height: int = 10 # Height of the debug console in lines
         
         self.ui_use_bg_color: bool = False  # Whether to use theme background color (False uses terminal default)
-        self.ui_app_global_padding: int = 1  # Global padding inside the entire app (in characters)
-        self.ui_msg_h_padding: int = 2 # Horizontal padding for text in UI components 
+        self.ui_app_global_padding: int = 0  # Global padding inside the entire app (in characters)
+        self.ui_msg_h_padding: int = 1 # Horizontal padding for text in UI components 
         self.ui_msg_v_margin: int = 0 # Vertical padding between messages in ChatHistoryPanel
         
         self.ui_box_style: str = "single" # Box border style: ("single", "double", "rounded")

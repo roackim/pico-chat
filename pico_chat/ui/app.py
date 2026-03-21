@@ -41,7 +41,7 @@ class chatTUI:
         self.chat_history_panel = ChatHistoryPanel()
         
         # New: Direct InputComponent usage
-        self.input_component = InputComponent(" ", id="entry", fg=theme.USER)
+        self.input_component = InputComponent(" ", id="entry", frame_color=theme.USER,)
         self.input_component.config = pico_cfg.config  # Pass config for max height, cursor settings, etc.
         self.input_component.on_submit = self.on_user_submit
         
@@ -50,7 +50,7 @@ class chatTUI:
         get_context = lambda: agent.list_files_and_folders() if hasattr(agent, 'list_files_and_folders') else []
         self.input_component.setup_menus(commands, get_context_items=get_context)
         
-        self.input_box = Box(self.input_component, title="message")
+        self.input_box = Box(self.input_component, title="message", fg=self.input_component.frame_color)
 
         # Debug console
         self.debug_panel = DebugLogPanel(max_lines=1000)
