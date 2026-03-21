@@ -81,7 +81,7 @@ class chatTUI:
         # Show thinking indicator
         chat = self.chat_history_panel
         current_msg = chat.add_system_message("Sending request...",
-            frame_color=theme.WARNING,
+            frame_color=theme.MUTED,
             content_color=theme.MUTED
         )
         
