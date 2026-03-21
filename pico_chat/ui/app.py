@@ -17,6 +17,8 @@ from pico_chat.ui.chat_history_panel import ChatHistoryPanel
 from pico_chat.ui.commands import handle_command, get_command_list
 from pico_chat.ui.tui.container import Vsplit, Hsplit
 
+        # Setup logging to debug panel
+import logging
 from pico_chat.ui.tui.colors import theme
 from pico_chat.ui.tui.msg_types import PicoMsg, ThinkingMsg, UserMsg, SysMsg, SysMsgError
 
@@ -41,7 +43,7 @@ class chatTUI:
         self.chat_history_panel = ChatHistoryPanel()
         
         # New: Direct InputComponent usage
-        self.input_component = InputComponent(" ", id="entry", frame_color=theme.USER,)
+        self.input_component = InputComponent(" ", id="entry", frame_color=theme.USER)
         self.input_component.config = pico_cfg.config  # Pass config for max height, cursor settings, etc.
         self.input_component.on_submit = self.on_user_submit
         
@@ -53,12 +55,16 @@ class chatTUI:
         self.input_box = Box(self.input_component, title="message", fg=self.input_component.frame_color)
 
         # Debug console
-        self.debug_panel = DebugLogPanel(max_lines=1000)
-        self.debug_box = Box(self.debug_panel, title="debug console")
+        self.debug_panel = DebugLogPanel(
+            max_lines=1000,
+            frame_color=theme.ERROR,
+            content_color=theme.MUTED,
+            left_pad=1,
+            right_pad=0
+        )
+        self.debug_box = Box(self.debug_panel, title="debug console", fg=self.debug_panel.frame_color)
         self.show_debug = False
         
-        # Setup logging to debug panel
-        import logging
         class TuiLogHandler(logging.Handler):
             def __init__(self, panel):
                 super().__init__()
@@ -71,9 +77,24 @@ class chatTUI:
                 except Exception:
                     self.handleError(record)
         
+        # Custom formatter that adds orange color to timestamp
+        class ColoredFormatter(logging.Formatter):
+            def format(self, record):
+                # Format the record normally
+                result = super().format(record)
+                # Split to separate timestamp from rest
+                parts = result.split(' ', 1)
+                if len(parts) == 2:
+                    # Add orange color to timestamp
+                    timestamp = parts[0]
+                    rest = parts[1]
+                    colored_timestamp = f"{theme.WARNING.ansi_fg()}{timestamp}\033[0m"
+                    return f"{colored_timestamp} {rest}"
+                return result
+        
         self.log_handler = TuiLogHandler(self.debug_panel)
         self.log_handler.setLevel(logging.DEBUG)
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        formatter = ColoredFormatter('%(asctime)s [%(name)s] %(message)s', datefmt='%H:%M:%S')
         self.log_handler.setFormatter(formatter)
         
         # Configure root logger to accept all levels

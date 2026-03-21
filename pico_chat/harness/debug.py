@@ -20,7 +20,7 @@ class DebugStream:
 
     def log(self, direction: str, payload: str | dict[str, Any] | list[Any]):
         """Log payload to the debug stream file and Python logging."""
-        timestamp = datetime.datetime.now().isoformat()
+        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
         
         if isinstance(payload, (dict, list)):
             try:
