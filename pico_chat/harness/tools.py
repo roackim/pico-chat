@@ -13,6 +13,7 @@ from typing import Callable, Optional
 
 from pico_chat.harness.patch_parser import parse_patch, apply_patch, PatchParseError
 from pico_chat.harness.security import SecurityChecker
+from pico_chat.harness.tool_permissions import ToolPermissionsProfile, permissions as default_permissions
 
 
 class ToolError(Exception):
@@ -23,35 +24,59 @@ class ToolError(Exception):
 class FileTools:
     """File operation tools (read, write, patch)"""
     
-    def __init__(self, workspace_path: str | Path):
+    def __init__(
+        self,
+        workspace_path: str | Path,
+        permissions: Optional[ToolPermissionsProfile] = None
+    ):
         """
         Args:
             workspace_path: Root directory for file operations
+            permissions: Tool permissions profile (uses default if not provided)
         """
         self.workspace = Path(workspace_path).resolve()
-        
-    def _validate_path(self, path: str) -> Path:
+        self.permissions = permissions or default_permissions
+    
+    def _is_inside_repo(self, target: Path) -> bool:
         """
-        Validate and resolve path within workspace.
+        Check if a path is inside the workspace/repo.
         
         Args:
-            path: File path (relative to workspace)
+            target: Resolved absolute path
             
         Returns:
-            Absolute resolved path
+            True if path is inside workspace, False otherwise
+        """
+        try:
+            target.relative_to(self.workspace)
+            return True
+        except ValueError:
+            return False
+    
+    def _validate_path(self, path: str) -> tuple[Path, bool]:
+        """
+        Validate and resolve path.
+        
+        Args:
+            path: File path (relative to workspace or absolute)
+            
+        Returns:
+            Tuple of (absolute resolved path, is_inside_repo)
             
         Raises:
-            ToolError: If path is invalid or outside workspace
+            ToolError: If path is invalid
         """
         try:
             # Convert to Path and resolve
-            target = (self.workspace / path).resolve()
+            if Path(path).is_absolute():
+                target = Path(path).resolve()
+            else:
+                target = (self.workspace / path).resolve()
             
-            # Ensure it's within workspace
-            if not str(target).startswith(str(self.workspace)):
-                raise ToolError(f"Path '{path}' is outside workspace")
+            # Check if inside repo
+            is_inside = self._is_inside_repo(target)
             
-            return target
+            return target, is_inside
         except Exception as e:
             raise ToolError(f"Invalid path '{path}': {e}")
     
@@ -60,16 +85,28 @@ class FileTools:
         Read file content.
         
         Args:
-            path: File path relative to workspace
+            path: File path relative to workspace or absolute
             
         Returns:
             File content as string
+            
+        Raises:
+            ToolError: If permission denied or file cannot be read
             
         Example:
             >>> tools.read("config.py")
             'import os\\n...'
         """
-        target = self._validate_path(path)
+        target, is_inside = self._validate_path(path)
+        
+        # Check permissions
+        permission = self.permissions.get_read_permission(is_inside)
+        if permission == "deny":
+            location = "inside repo" if is_inside else "outside repo"
+            raise ToolError(f"Permission denied: read {location} is not allowed")
+        elif permission == "ask":
+            # TODO: Implement user confirmation callback
+            raise ToolError(f"Permission required: read {path} requires user confirmation (not yet implemented)")
         
         if not target.exists():
             raise ToolError(f"File not found: {path}")
@@ -89,17 +126,29 @@ class FileTools:
         Write file content (creates or overwrites).
         
         Args:
-            path: File path relative to workspace
+            path: File path relative to workspace or absolute
             content: Content to write
             
         Returns:
             Success message
             
+        Raises:
+            ToolError: If permission denied or file cannot be written
+            
         Example:
             >>> tools.write("script.py", "print('hello')")
             '[OK] Wrote 14 bytes to script.py'
         """
-        target = self._validate_path(path)
+        target, is_inside = self._validate_path(path)
+        
+        # Check permissions
+        permission = self.permissions.get_write_permission(is_inside)
+        if permission == "deny":
+            location = "inside repo" if is_inside else "outside repo"
+            raise ToolError(f"Permission denied: write {location} is not allowed")
+        elif permission == "ask":
+            # TODO: Implement user confirmation callback
+            raise ToolError(f"Permission required: write {path} requires user confirmation (not yet implemented)")
         
         # Create parent directories if needed
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -121,6 +170,9 @@ class FileTools:
         Returns:
             Success or error message
             
+        Raises:
+            ToolError: If permission denied or patch cannot be applied
+            
         Example:
             >>> tools.patch('''app.py
             ... <<<<<<< SEARCH
@@ -136,6 +188,16 @@ class FileTools:
             patch = parse_patch(patch_content)
         except PatchParseError as e:
             raise ToolError(f"Invalid patch format: {e}")
+        
+        # Check permissions before reading
+        target, is_inside = self._validate_path(patch.filename)
+        permission = self.permissions.get_patch_permission(is_inside)
+        if permission == "deny":
+            location = "inside repo" if is_inside else "outside repo"
+            raise ToolError(f"Permission denied: patch {location} is not allowed")
+        elif permission == "ask":
+            # TODO: Implement user confirmation callback
+            raise ToolError(f"Permission required: patch {patch.filename} requires user confirmation (not yet implemented)")
         
         # Read current file
         try:
@@ -159,15 +221,18 @@ class ShellTool:
     def __init__(
         self,
         workspace_path: str | Path,
-        security_checker: Optional[SecurityChecker] = None
+        security_checker: Optional[SecurityChecker] = None,
+        permissions: Optional[ToolPermissionsProfile] = None
     ):
         """
         Args:
             workspace_path: Working directory for command execution
             security_checker: Security checker for command validation
+            permissions: Tool permissions profile (uses default if not provided)
         """
         self.workspace = Path(workspace_path).resolve()
         self.security_checker = security_checker or SecurityChecker()
+        self.permissions = permissions or default_permissions
     
     def run(self, command: str, timeout: int = 30) -> str:
         """
@@ -180,14 +245,29 @@ class ShellTool:
         Returns:
             Command output (stdout/stderr combined) with metadata
             
+        Raises:
+            ToolError: If permission denied or command execution fails
+            
         Example:
             >>> tool.run("ls -la")
             '[stdout]\\nfile.txt\\n[exit:0 | 0.1ms]'
         """
+        # Check permissions
+        permission = self.permissions.get_run_permission()
+        if permission == "deny":
+            raise ToolError("Permission denied: run command is not allowed")
+        elif permission == "ask":
+            # Security check handles ask permission via confirmation callback
+            pass
+        
         # Security check
         allowed, message = self.security_checker.check_chain(command)
         if not allowed:
             raise ToolError(message)
+        
+        # TODO: Implement containerization when use_container is enabled
+        # if self.permissions.run.use_container:
+        #     command = self._containerize_command(command)
         
         # Execute command
         try:
@@ -224,25 +304,30 @@ class MinimalToolset:
     """
     Complete minimal toolset for LLM agents.
     
-    Provides read, write, patch, and run tools.
+    Provides read, write, patch, and run tools with configurable permissions.
     """
     
     def __init__(
         self,
         workspace_path: str | Path,
-        confirmation_callback: Optional[Callable[[str], bool]] = None
+        confirmation_callback: Optional[Callable[[str], bool]] = None,
+        permissions: Optional[ToolPermissionsProfile] = None
     ):
         """
         Args:
             workspace_path: Root directory for all operations
             confirmation_callback: Function to prompt user for command confirmation
+            permissions: Tool permissions profile (uses default if not provided)
         """
         workspace = Path(workspace_path).resolve()
+        perms = permissions or default_permissions
         
-        self.file_tools = FileTools(workspace)
+        self.file_tools = FileTools(workspace, permissions=perms)
         
         security_checker = SecurityChecker(confirmation_callback)
-        self.shell_tool = ShellTool(workspace, security_checker)
+        self.shell_tool = ShellTool(workspace, security_checker, permissions=perms)
+        
+        self.permissions = perms
     
     def read(self, path: str) -> str:
         """Read file content"""
