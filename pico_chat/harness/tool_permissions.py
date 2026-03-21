@@ -77,6 +77,14 @@ strict = ToolPermissionsProfile(
     run=RunPermissions(enabled="ask", use_container=False),
 )
 
+safe = ToolPermissionsProfile(
+    name="safe",
+    read=FilePermissions(inside_repo="allow", outside_repo="deny"),
+    write=FilePermissions(inside_repo="allow", outside_repo="deny"),
+    patch=FilePermissions(inside_repo="allow", outside_repo="deny"),
+    run=RunPermissions(enabled="ask", use_container=True),
+)
+
 # Permissive profile: allow operations inside repo, ask for outside/commands
 permissive = ToolPermissionsProfile(
     name="permissive",
