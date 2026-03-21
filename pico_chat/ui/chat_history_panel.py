@@ -28,6 +28,8 @@ class Message:
                  title: str = None,
                  frame_color: RGB = None,
                  content_color: RGB = None,
+                 left_pad: int = 0,
+                 right_pad: int = 0,
 ):
         """Initialize a message.
         
@@ -40,6 +42,8 @@ class Message:
             title: Optional override for the message box title
             frame_color: Optional override for the box frame color
             content_color: Optional override for the content text color
+            left_pad: Number of spaces to pad the left side of the box
+            right_pad: Number of spaces to pad the right side of the box
         """
         
         self.type = msg_type or MsgType()
@@ -62,6 +66,8 @@ class Message:
         self.padding_right = padding_right
         self.title = title
         self.frame_color = frame_color
+        self.left_pad = left_pad
+        self.right_pad = right_pad
         self.formatted_text = self._format_line_wrap()
         self.component = TextComponent(self.formatted_text, fg=content_color)
         self.box = Box(self.component, title=self.title, fg=self.frame_color)
@@ -203,18 +209,26 @@ class ChatHistoryPanel(TextComponent):
             inner_width = 1
             
         for message in self.messages:
-            message.reformat(inner_width)
+            # Account for box padding
+            msg_inner_width = inner_width - message.left_pad - message.right_pad
+            if msg_inner_width < 1:
+                msg_inner_width = 1
+            message.reformat(msg_inner_width)
 
     def _get_all_rows(self) -> int:
         """Calculate total number of rows across all message boxes."""
         total = 0
         for msg in self.messages:
-            # Each box's height
-            total += msg.get_component().get_preferred_height(self.max_width)
+            # Each box's height, accounting for its specific padding
+            total += msg.get_component().get_preferred_height(self.max_width - msg.left_pad - msg.right_pad)
         return total
 
     def render(self, buffer: Buffer):
         """Custom render to handle scrolling/clipping of messages."""
+        # Set clipping region to this panel's bounds
+        if hasattr(buffer, 'set_clip'):
+            buffer.set_clip(self.x, self.y, self.width, self.height)
+
         # Clear background first (to prevent artifacts from previous frames/scrolls)
         buffer.fill(self.x, self.y, self.width, self.height, " ", bg=theme.get_bg())
 
@@ -238,16 +252,22 @@ class ChatHistoryPanel(TextComponent):
         
         # Reset any previous layout of the container children to prevent stale rendering
         curr_y = self.y - start_y
-        for i, child in enumerate(self.msg_container.children):
-            child_h = child.get_preferred_height(self.width)
+        for i, msg in enumerate(self.messages):
+            child = msg.get_component()
+            child_w = self.width - msg.left_pad - msg.right_pad
+            child_h = child.get_preferred_height(child_w)
             
             # Draw child if it is within or partially within the vertical bounds of the panel
             curr_y += gap
             
-            child.set_layout(self.x, curr_y, self.width, child_h)
+            child.set_layout(self.x + msg.left_pad, curr_y, child_w, child_h)
             child.render(buffer)
             
             curr_y += child_h
+            
+        # Clear clipping region
+        if hasattr(buffer, 'clear_clip'):
+            buffer.clear_clip()
 
     def handle_input(self, event: Any) -> bool:
         """Handle mouse wheel for scrolling."""
@@ -273,7 +293,7 @@ class ChatHistoryPanel(TextComponent):
         return False
 
 
-    def new_message(self, message: str, *, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None) -> Message:
+    def new_message(self, message: str, *, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None, left_pad: int = 0, right_pad: int = 0) -> Message:
         """Create a new message and append it to the chat history.
         
         Args:
@@ -282,6 +302,8 @@ class ChatHistoryPanel(TextComponent):
             title: Optional override for the message box title
             frame_color: Optional override for the box frame color
             content_color: Optional override for the box content color
+            left_pad: Optional override for the box left padding
+            right_pad: Optional override for the box right padding
             
         Returns:
             The created Message object.
@@ -292,15 +314,22 @@ class ChatHistoryPanel(TextComponent):
             self.auto_scroll = True
             
         # Create a new message
+        # Account for box padding in initial max_width
+        initial_max_width = self.max_width - 2 - left_pad - right_pad
+        if initial_max_width < 1:
+            initial_max_width = 1
+
         new_message = Message(
             message,
             msg_type=msg_type,
-            max_width=self.max_width - 2,
+            max_width=initial_max_width,
             padding_left=self.padding_left,
             padding_right=self.padding_right,
             title=title,
             frame_color=frame_color,
-            content_color=content_color
+            content_color=content_color,
+            left_pad=left_pad,
+            right_pad=right_pad
         )
         self.messages.append(new_message)
         self.msg_container.children.append(new_message.get_component())
@@ -321,7 +350,7 @@ class ChatHistoryPanel(TextComponent):
             self.msg_container.children.pop()
             self.msg_container.sizes.pop()
 
-    def add_message(self, message: str, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None) -> Message:
+    def add_message(self, message: str, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None, left_pad: int = 0, right_pad: int = 0) -> Message:
         """Add a message to chat history and update UI.
         
         Args:
@@ -329,11 +358,13 @@ class ChatHistoryPanel(TextComponent):
             msg_type: The type of message
             title: Optional override for the message box title
             frame_color: Optional override for the box frame color
+            left_pad: Optional override for the box left padding
+            right_pad: Optional override for the box right padding
         
         Returns:
             The created Message object.
         """
-        return self.new_message(message, msg_type=msg_type, title=title, frame_color=frame_color, content_color=content_color)
+        return self.new_message(message, msg_type=msg_type, title=title, frame_color=frame_color, content_color=content_color, left_pad=left_pad, right_pad=right_pad)
 
 
     def clear(self):

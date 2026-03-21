@@ -29,12 +29,27 @@ class Buffer:
         
         self.cells = [[Cell(bg=self.default_bg) for _ in range(width)] for _ in range(height)]
         self.cursor_pos: Optional[tuple[int, int]] = None  # (x, y)
+        self.clip_rect: Optional[tuple[int, int, int, int]] = None # x, y, w, h
+
+    def set_clip(self, x: int, y: int, w: int, h: int):
+        self.clip_rect = (x, y, w, h)
+
+    def clear_clip(self):
+        self.clip_rect = None
+
+    def _is_in_clip(self, x: int, y: int) -> bool:
+        if self.clip_rect is None:
+            return True
+        cx, cy, cw, ch = self.clip_rect
+        return cx <= x < cx + cw and cy <= y < cy + ch
 
     def set_cursor(self, x: int, y: int):
         self.cursor_pos = (x, y)
 
     def set(self, x: int, y: int, char: str, fg=None, bg=None, bold=False, reverse=False):
         if 0 <= x < self.width and 0 <= y < self.height:
+            if not self._is_in_clip(x, y):
+                return
             # Convert RGB objects to tuples
             if fg is not None and hasattr(fg, 'r'):
                 fg = (fg.r, fg.g, fg.b)
@@ -96,16 +111,17 @@ class Buffer:
                         self.set(curr_x, y, pending_ansi + char, fg, bg, bold)
                     
                     if 0 <= curr_x + 1 < self.width and 0 <= y < self.height:
-                        # Convert RGB to tuple if needed
-                        fg_tuple = (fg.r, fg.g, fg.b) if fg is not None and hasattr(fg, 'r') else fg
-                        bg_tuple = (bg.r, bg.g, bg.b) if bg is not None and hasattr(bg, 'r') else bg
-                        self.cells[y][curr_x + 1] = Cell(
-                            char="", 
-                            fg=fg_tuple, 
-                            bg=bg_tuple, 
-                            bold=bold, 
-                            is_wide_char_continuation=True
-                        )
+                        if self._is_in_clip(curr_x + 1, y):
+                            # Convert RGB to tuple if needed
+                            fg_tuple = (fg.r, fg.g, fg.b) if fg is not None and hasattr(fg, 'r') else fg
+                            bg_tuple = (bg.r, bg.g, bg.b) if bg is not None and hasattr(bg, 'r') else bg
+                            self.cells[y][curr_x + 1] = Cell(
+                                char="",
+                                fg=fg_tuple,
+                                bg=bg_tuple,
+                                bold=bold,
+                                is_wide_char_continuation=True
+                            )
                     curr_x += 2  # Skip over both the character cell and continuation cell
                 else:
                     if 0 <= curr_x < self.width and 0 <= y < self.height:

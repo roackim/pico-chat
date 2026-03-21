@@ -12,6 +12,7 @@ import openai
 from pico_chat.ui.tui.compositor import Compositor
 from pico_chat.ui.tui.terminal import MouseEvent
 from pico_chat.ui.tui.components import TextComponent, Box, InputComponent
+from pico_chat.ui.tui.components.debug_panel import DebugLogPanel
 from pico_chat.ui.chat_history_panel import ChatHistoryPanel
 from pico_chat.ui.commands import handle_command, get_command_list
 from pico_chat.ui.tui.container import Vsplit, Hsplit
@@ -50,6 +51,31 @@ class chatTUI:
         self.input_component.setup_menus(commands, get_context_items=get_context)
         
         self.input_box = Box(self.input_component, title="message")
+
+        # Debug console
+        self.debug_panel = DebugLogPanel(max_lines=1000)
+        self.debug_box = Box(self.debug_panel, title="debug console")
+        self.show_debug = False
+        
+        # Setup logging to debug panel
+        import logging
+        class TuiLogHandler(logging.Handler):
+            def __init__(self, panel):
+                super().__init__()
+                self.panel = panel
+            
+            def emit(self, record):
+                try:
+                    msg = self.format(record)
+                    self.panel.log(msg)
+                except Exception:
+                    self.handleError(record)
+        
+        self.log_handler = TuiLogHandler(self.debug_panel)
+        self.log_handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        self.log_handler.setFormatter(formatter)
+        logging.getLogger().addHandler(self.log_handler)
         
         # Track the current generation task
         self.current_generation_task: Optional[asyncio.Task] = None
@@ -231,7 +257,27 @@ class chatTUI:
         """Handle execution of commands."""
         self.command_queue.put_nowait(text)
         
+    def toggle_debug_console(self):
+        """Toggle the visibility of the debug console."""
+        self.show_debug = not self.show_debug
         
+        children = [
+            self.chat_history_panel.get_component(),
+            self.input_box
+        ]
+        sizes = ["100%", 0]
+        
+        if self.show_debug:
+            children.insert(0, self.debug_box)
+            sizes.insert(0, pico_cfg.config.ui_debug_console_height)
+            
+        # Update the root container (Hsplit)
+        if isinstance(self.root, Hsplit):
+            self.root.children = children
+            self.root.sizes = sizes
+            # Update parent references
+            for child in children:
+                child.parent = self.root
 
 
     def on_user_submit(self, text: str):
@@ -306,10 +352,17 @@ class chatTUI:
             self.agent.start()
             
         # Column
-        column = Hsplit([
+        children = [
             self.chat_history_panel.get_component(),
             self.input_box
-        ], ["100%", 0]) # 0 means use preferred height
+        ]
+        sizes = ["100%", 0]
+        
+        if self.show_debug:
+            children.insert(0, self.debug_box)
+            sizes.insert(0, pico_cfg.config.ui_debug_console_height)
+            
+        column = Hsplit(children, sizes) # 0 means use preferred height
 
         # Main Layout
         root = column

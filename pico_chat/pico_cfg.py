@@ -27,6 +27,7 @@ class Config:
         self.ui_cursor_frequency: float = 1.0  # Hz (flashes per second)
         self.ui_cursor_pulse_delay: float = 0.75  # Seconds before pulsating starts
         self.ui_max_input_height: int = 10  # Maximum height of input field in lines
+        self.ui_debug_console_height: int = 10 # Height of the debug console in lines
         self.ui_global_padding: int = 0  # Global padding around the entire app (in characters)
         self.ui_use_bg_color: bool = False  # Whether to use theme background color (False uses terminal default)
         

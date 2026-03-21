@@ -27,6 +27,8 @@ class HelpCommand(Command):
         help_text = ""
         
         for cmd in sorted(COMMANDS.values(), key=lambda x: x.name):
+            if cmd.name.startswith("_"):
+                continue
             help_text += f"/{cmd.name.ljust(8)} - {cmd.description}\n"
         
         ui.chat_history_panel.add_message(
@@ -98,6 +100,16 @@ class StatusCommand(Command):
             content_color=theme.DEFAULT
         )
 
+class DebugCommand(Command):
+    def __init__(self):
+        super().__init__("_debug", "Toggle debug console")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if hasattr(ui, 'toggle_debug_console'):
+            ui.toggle_debug_console()
+        else:
+            ui.chat_history_panel.add_message("Debug console not supported.", msg_type=SysMsg())
+
 # Command Registry
 COMMANDS: Dict[str, Command] = {
     "help":     HelpCommand(),
@@ -105,6 +117,7 @@ COMMANDS: Dict[str, Command] = {
     "exit":     ExitCommand(),
     "stop":     StopCommand(),
     "status":   StatusCommand(),
+    "_debug":   DebugCommand(),
 }
 
 async def handle_command(ui: ChatUIProtocol, text: str):
@@ -125,4 +138,4 @@ async def handle_command(ui: ChatUIProtocol, text: str):
         
 
 def get_command_list() -> List[str]:
-    return list(COMMANDS.keys())
+    return [cmd for cmd in COMMANDS.keys() if not cmd.startswith("_")]
