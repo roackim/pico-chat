@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional, Protocol
 import asyncio
 
 from pico_chat.ui.tui.colors import RGB, theme
+from pico_chat.ui.tui.msg_types import SysMsg, SysMsgError
 from pico_chat import pico_cfg
 
 class ChatUIProtocol(Protocol):
@@ -28,11 +29,8 @@ class HelpCommand(Command):
         for cmd in sorted(COMMANDS.values(), key=lambda x: x.name):
             help_text += f"/{cmd.name.ljust(8)} - {cmd.description}\n"
         
-        ui.chat_history_panel.add_system_message(
-            help_text.rstrip(), title
-            ="help", 
-            frame_color=theme.MUTED, 
-            content_color=theme.MUTED
+        ui.chat_history_panel.add_message(
+            help_text.rstrip(), msg_type=SysMsg(), title="help"
         )
 
 class ClearCommand(Command):
@@ -43,7 +41,7 @@ class ClearCommand(Command):
         ui.chat_history_panel.clear()
         if hasattr(ui.agent, 'clear_history'):
             ui.agent.clear_history()
-        ui.chat_history_panel.add_system_message("Conversation cleared.")
+        ui.chat_history_panel.add_message("Conversation cleared.", msg_type=SysMsg())
 
 class ExitCommand(Command):
     def __init__(self):
@@ -64,9 +62,9 @@ class StopCommand(Command):
                 # Message is already appended by the cancelled task handler
                 pass
             else:
-                 ui.chat_history_panel.add_system_message("No active generation to stop.")
+                ui.chat_history_panel.add_message("No active generation to stop.", msg_type=SysMsg())
         else:
-             ui.chat_history_panel.add_system_message("Stop command not supported by this UI.")
+            ui.chat_history_panel.add_message("Stop command not supported by this UI.", msg_type=SysMsg())
 
 class StatusCommand(Command):
     def __init__(self):
@@ -93,10 +91,10 @@ class StatusCommand(Command):
             f"Active Model     : {model_name}\n"
             f"Context Pressure : {perc:.1f}% | {cur/1024:.1f}k / {max_ctx/1024:.1f}k"
         )
-        ui.chat_history_panel.add_system_message(
-            report, 
+        ui.chat_history_panel.add_message(
+            report,
+            msg_type=SysMsg(),
             title="status",
-            frame_color=theme.MUTED,
             content_color=theme.DEFAULT
         )
 
@@ -120,10 +118,9 @@ async def handle_command(ui: ChatUIProtocol, text: str):
     if cmd_name in COMMANDS:
         await COMMANDS[cmd_name].execute(ui, args)
     else:
-        ui.chat_history_panel.add_system_message(
-            f"Unknown command: /{cmd_name}", 
-            frame_color=theme.ERROR,
-            content_color=theme.ERROR
+        ui.chat_history_panel.add_message(
+            f"Unknown command: /{cmd_name}",
+            msg_type=SysMsgError()
         )
         
 

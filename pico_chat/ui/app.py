@@ -17,6 +17,7 @@ from pico_chat.ui.commands import handle_command, get_command_list
 from pico_chat.ui.tui.container import Vsplit, Hsplit
 
 from pico_chat.ui.tui.colors import theme
+from pico_chat.ui.tui.msg_types import PicoMsg, ThinkingMsg, UserMsg, SysMsg, SysMsgError
 
 from pico_chat import pico_cfg
 
@@ -80,10 +81,7 @@ class chatTUI:
         """Process a single generation request."""
         # Show thinking indicator
         chat = self.chat_history_panel
-        current_msg = chat.add_system_message("Sending request...",
-            frame_color=theme.MUTED,
-            content_color=theme.MUTED
-        )
+        current_msg = chat.add_message("Sending request...", msg_type=SysMsg())
         
         mode = "connecting"
         current_msg = None
@@ -102,10 +100,7 @@ class chatTUI:
                     
                     if current_msg is None and mode != "thinking":
                         # Start a new message for thinking content
-                        current_msg = chat.add_pico_message("", title="thinking", 
-                            frame_color=theme.MUTED, 
-                            content_color=theme.MUTED
-                        )
+                        current_msg = chat.add_message("", msg_type=ThinkingMsg())
                         mode = "thinking"
                     
                     current_msg.append(chunk.content)
@@ -115,10 +110,7 @@ class chatTUI:
                     text = chunk.content
                     if mode == "thinking":
                         current_msg.set_title("thoughts") # Update title for thinking content
-                        current_msg = chat.add_pico_message("", 
-                            frame_color=theme.PICO, 
-                            # content_color=theme.MUTED
-                        )
+                        current_msg = chat.add_message("", msg_type=PicoMsg())
                         mode = "answering"
                     
                     # Render regular content
@@ -219,10 +211,9 @@ class chatTUI:
                 
                 if type(e) in recoverable_exceptions:
                     self.chat_history_panel.remove_last_message()  # Remove the pico message
-                    self.chat_history_panel.add_system_message(
-                        message=f"Error: {str(e)}",
-                        frame_color=theme.ERROR,
-                        content_color=theme.ERROR,
+                    self.chat_history_panel.add_message(
+                        message=f"{str(e)}",
+                        msg_type=SysMsgError()
                     )
                     
                 else: # raise for non-recoverable errors
@@ -260,7 +251,7 @@ class chatTUI:
             # Enable auto-scroll to show the new message
             self.chat_history_panel.auto_scroll = True
             # Add user message immediately with color and header
-            self.chat_history_panel.add_user_message(text)
+            self.chat_history_panel.add_message(text, msg_type=UserMsg())
             # Add to processing queue for agent
             self.message_queue.put_nowait(text)
 

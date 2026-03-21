@@ -11,19 +11,21 @@ from pico_chat.ui.tui.terminal import MouseEvent
 
 from pico_chat import pico_cfg
 from pico_chat.ui.tui.colors import theme, RGB
+from pico_chat.ui.tui.msg_types import MsgType, UserMsg, PicoMsg, SysMsg, SysMsgError, SysMsgWarning
 
 
 WELCOME_MESSAGE = "Welcome to pico-chat!\n"
 
-class Message:    
+class Message:
     """Represents a message in the chat history with formatting support."""
     
-    def __init__(self, 
-                 text: str, 
-                 max_width: int = 80, 
-                 padding_left: int = pico_cfg.config.ui_msg_h_padding, 
-                 padding_right: int = pico_cfg.config.ui_msg_h_padding, 
-                 title: str = "", 
+    def __init__(self,
+                 text: str,
+                 msg_type: MsgType = None,
+                 max_width: int = 80,
+                 padding_left: int = pico_cfg.config.ui_msg_h_padding,
+                 padding_right: int = pico_cfg.config.ui_msg_h_padding,
+                 title: str = None,
                  frame_color: RGB = None,
                  content_color: RGB = None,
 ):
@@ -31,14 +33,28 @@ class Message:
         
         Args:
             text: The raw message text
+            msg_type: The type of message (determines default formatting)
             max_width: Maximum width for line wrapping
             padding_left: Number of spaces to pad the left side
             padding_right: Number of spaces to pad the right side
-            title: Title for the message box
-            frame_color: RGB color for the box frame and title
+            title: Optional override for the message box title
+            frame_color: Optional override for the box frame color
+            content_color: Optional override for the content text color
         """
         
-        if frame_color is None: frame_color = theme.DEFAULT
+        self.type = msg_type or MsgType()
+        
+        # Resolve defaults from msg_type if not provided
+        if title is None:
+            title = self.type.title
+        
+        if frame_color is None:
+            color_name = self.type.frame_color
+            frame_color = getattr(theme, color_name, theme.DEFAULT)
+            
+        if content_color is None and self.type.content_color:
+            color_name = self.type.content_color
+            content_color = getattr(theme, color_name, None)
         
         self.base_text = text
         self.max_width = max_width
@@ -257,20 +273,19 @@ class ChatHistoryPanel(TextComponent):
         return False
 
 
-    def new_message(self, message: str, *, title: str = "", frame_color: RGB = None, content_color: RGB = None) -> Message:
+    def new_message(self, message: str, *, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None) -> Message:
         """Create a new message and append it to the chat history.
         
         Args:
             message: The text to add
-            title: Optional title for the message box
-            frame_color: Optional RGB color for the box frame
-            content_color: Optional RGB color for the box content
+            msg_type: The type of message
+            title: Optional override for the message box title
+            frame_color: Optional override for the box frame color
+            content_color: Optional override for the box content color
             
         Returns:
             The created Message object.
         """
-        
-        if frame_color is None: frame_color = theme.DEFAULT
         
         # If we are near the bottom (within a few pixels), stay at bottom
         if self.scroll_offset < 1 or self.auto_scroll:
@@ -278,8 +293,9 @@ class ChatHistoryPanel(TextComponent):
             
         # Create a new message
         new_message = Message(
-            message, 
-            max_width=self.max_width - 2, 
+            message,
+            msg_type=msg_type,
+            max_width=self.max_width - 2,
             padding_left=self.padding_left,
             padding_right=self.padding_right,
             title=title,
@@ -305,39 +321,20 @@ class ChatHistoryPanel(TextComponent):
             self.msg_container.children.pop()
             self.msg_container.sizes.pop()
 
-    def add_message(self, message: str, title: str = "", frame_color: RGB = None, content_color: RGB = None) -> Message:
+    def add_message(self, message: str, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None) -> Message:
         """Add a message to chat history and update UI.
         
         Args:
             message: The text to add
-            title: Optional title for the message box
-            frame_color: Optional RGB color for the box frame
+            msg_type: The type of message
+            title: Optional override for the message box title
+            frame_color: Optional override for the box frame color
         
         Returns:
             The created Message object.
         """
-        return self.new_message(message, title=title, frame_color=frame_color, content_color=content_color)
+        return self.new_message(message, msg_type=msg_type, title=title, frame_color=frame_color, content_color=content_color)
 
-    def add_user_message(self, message: str, *, title: str = "user", frame_color: RGB = None, content_color: RGB = None) -> Message:
-        """Add a user message with the appropriate header and formatting."""
-        
-        if frame_color is None: frame_color = theme.USER
-        
-        return self.new_message(message, title=title, frame_color=frame_color, content_color=content_color)
-
-    def add_pico_message(self, message: str, title: str = "pico", frame_color: RGB = None, content_color: RGB = None) -> Message:
-        """Add a Pico assistant message with the appropriate header and formatting."""
-        
-        if frame_color is None: frame_color = theme.PICO
-        
-        return self.new_message(message, title=title, frame_color=frame_color, content_color=content_color)
-
-    def add_system_message(self, message: str, title: str = "system", frame_color: RGB = None, content_color: RGB = None) -> Message:
-        """Add a system or command result message."""
-        
-        if frame_color is None: frame_color = theme.MUTED
-        
-        return self.new_message(message, title=title, frame_color=frame_color, content_color=content_color)
 
     def clear(self):
         """Clear the chat history UI."""
@@ -372,3 +369,4 @@ class ChatHistoryPanel(TextComponent):
     def get_component(self):
         """Get the component for layout."""
         return self
+
