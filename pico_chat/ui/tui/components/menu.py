@@ -126,14 +126,14 @@ class CommandMenu(Component):
                 self.on_select(completion)
                 self.is_visible = False
                 return True
-        elif event == '\r' or event == '\n': # Enter
+        elif event == '\r' or event == '\n': # Enter -> Complete and submit
             if self.filtered_items and self.on_select:
                 completion = self.filtered_items[self.selected_index]
                 if self.trigger == "/":
                     completion = self.trigger + completion
                 self.on_select(completion)
                 self.is_visible = False
-                return False 
+                return False  # Let Enter pass through to trigger submission
             self.is_visible = False
             return False
         elif event == '\x1b' or event == ' ': # Escape or Space -> Disable menu

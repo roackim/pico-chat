@@ -83,8 +83,17 @@ class InputComponent(Component):
         """Initialize built-in menus."""
         self.menu_manager.setup_menus(commands, get_context_items)
         
+        # Override command selection to directly update buffer
+        def command_select_wrapper(command: str):
+            self.buffer.text = command
+            self.buffer.cursor_pos = len(command)
+            if self.menu_manager.command_menu:
+                self.menu_manager.command_menu.is_visible = False
+        
+        if self.menu_manager.command_menu:
+            self.menu_manager.command_menu.on_select = command_select_wrapper
+        
         # Override context selection to handle @ replacement properly
-        original_on_select = self.menu_manager.context_menu.on_select
         def context_select_wrapper(item: str):
             new_text, new_cursor = self.menu_manager.handle_context_selection(self.buffer.text, item)
             self.buffer.text = new_text
