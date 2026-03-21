@@ -368,7 +368,7 @@ class chatTUI:
         root = column
         self.root = root  # Store root for global handler
         self.compositor = Compositor(root, fps=TARGET_FPS, shutdown_event=self.shutdown_event)
-        self.compositor.padding = pico_cfg.config.ui_global_padding  # Apply global padding from config
+        self.compositor.padding = pico_cfg.config.ui_app_global_padding  # Apply global padding from config
         
         # Store the original handle_input method before overriding
         self._original_handle_input = root.handle_input

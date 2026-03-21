@@ -23,13 +23,13 @@ class Message:
                  text: str,
                  msg_type: MsgType = None,
                  max_width: int = 80,
-                 padding_left: int = pico_cfg.config.ui_msg_h_padding,
-                 padding_right: int = pico_cfg.config.ui_msg_h_padding,
+                 left_pad: int = pico_cfg.config.ui_msg_h_padding,
+                 right_pad: int = pico_cfg.config.ui_msg_h_padding,
                  title: str = None,
                  frame_color: RGB = None,
                  content_color: RGB = None,
-                 left_pad: int = 0,
-                 right_pad: int = 0,
+                 left_margin: int = 0,
+                 right_margin: int = 0,
 ):
         """Initialize a message.
         
@@ -37,13 +37,13 @@ class Message:
             text: The raw message text
             msg_type: The type of message (determines default formatting)
             max_width: Maximum width for line wrapping
-            padding_left: Number of spaces to pad the left side
-            padding_right: Number of spaces to pad the right side
+            left_pad: Number of spaces to pad the left side
+            right_pad: Number of spaces to pad the right side
             title: Optional override for the message box title
             frame_color: Optional override for the box frame color
             content_color: Optional override for the content text color
-            left_pad: Number of spaces to pad the left side of the box
-            right_pad: Number of spaces to pad the right side of the box
+            left_margin: Number of spaces to pad the left side of the box
+            right_margin: Number of spaces to pad the right side of the box
         """
         
         self.type = msg_type or MsgType()
@@ -62,12 +62,12 @@ class Message:
         
         self.base_text = text
         self.max_width = max_width
-        self.padding_left = padding_left
-        self.padding_right = padding_right
-        self.title = title
-        self.frame_color = frame_color
         self.left_pad = left_pad
         self.right_pad = right_pad
+        self.title = title
+        self.frame_color = frame_color
+        self.left_margin = left_margin
+        self.right_margin = right_margin
         self.formatted_text = self._format_line_wrap()
         self.component = TextComponent(self.formatted_text, fg=content_color)
         self.box = Box(self.component, title=self.title, fg=self.frame_color)
@@ -76,6 +76,15 @@ class Message:
         """Update the title of the message box."""
         self.title = title
         self.box.title = title
+
+    def set_frame_color(self, color: RGB):
+        """Update the frame color of the message box."""
+        self.frame_color = color
+        self.box.fg = color
+
+    def set_content_color(self, color: RGB):
+        """Update the content color of the message."""
+        self.component.fg = color
     
     def _format_line_wrap(self) -> str:
         """Format the message text with smart word wrapping and padding.
@@ -86,7 +95,7 @@ class Message:
             return self.base_text
         
         # Calculate available width for content after padding
-        content_width = self.max_width - self.padding_left - self.padding_right
+        content_width = self.max_width - self.left_pad - self.right_pad
         if content_width < 1:
             content_width = 1
         
@@ -104,7 +113,7 @@ class Message:
             wrapped = wrap_text(line, content_width, padding_width=0, first_line_padding=False)
             for w_line in wrapped.split('\n'):
                 # Apply left padding
-                lines.append(" " * self.padding_left + w_line)
+                lines.append(" " * self.left_pad + w_line)
         
         return "\n".join(lines)
     
@@ -130,28 +139,15 @@ class Message:
         """Get the TUI component for this message."""
         return self.box
 
+    def set_text(self, new_text: str):
+        """Set new text for the message and reformat."""
+        self.base_text = new_text
+        self.reformat(self.max_width)
+
     def append(self, text: str):
         """Append text to the message and reformat."""
         self.base_text += text
         self.reformat(self.max_width)
-
-
-# class ChatHistoryTextComponent(TextComponent):
-#     """A TextComponent that notifies the panel when its width changes."""
-    
-#     def __init__(self, text: str, panel, id: Optional[str] = None, **kwargs):
-#         super().__init__(text, id, **kwargs)
-#         self.panel = panel
-#         self._last_width = 0
-    
-#     def set_layout(self, x: int, y: int, width: int, height: int):
-#         """Override to detect width changes and trigger reformat."""
-#         super().set_layout(x, y, width, height)
-        
-#         # If width changed, notify the panel to reformat
-#         if width != self._last_width and width > 0:
-#             self._last_width = width
-#             self.panel.on_width_change(width)
         
 
 class ChatHistoryPanel(TextComponent):
@@ -162,14 +158,12 @@ class ChatHistoryPanel(TextComponent):
         
         Args:
             max_width: Initial maximum width for message line wrapping
-            padding_left: Default number of spaces to pad the left side
-            padding_right: Default number of spaces to pad the right side
         """
         super().__init__("", id="history")
         self.messages = []
         self.max_width = max_width
-        self.padding_left = pico_cfg.config.ui_msg_h_padding
-        self.padding_right = pico_cfg.config.ui_msg_h_padding
+        self.left_pad = pico_cfg.config.ui_msg_h_padding
+        self.right_pad = pico_cfg.config.ui_msg_h_padding
         self.max_messages = 150  # Maximum number of messages to keep
         self.scroll_offset = 0   # How many rows to scroll up from the bottom
         self.auto_scroll = True
@@ -219,8 +213,8 @@ class ChatHistoryPanel(TextComponent):
         """Calculate total number of rows across all message boxes."""
         total = 0
         for msg in self.messages:
-            # Each box's height, accounting for its specific padding
-            total += msg.get_component().get_preferred_height(self.max_width - msg.left_pad - msg.right_pad)
+            # Each box's height, accounting for its specific margin
+            total += msg.get_component().get_preferred_height(self.max_width - msg.left_margin - msg.right_margin)
         return total
 
     def render(self, buffer: Buffer):
@@ -234,9 +228,9 @@ class ChatHistoryPanel(TextComponent):
 
         # number of messages
         msg_nbr = len(self.messages)
-        gap = pico_cfg.config.ui_v_padding
+        gap = pico_cfg.config.ui_msg_v_margin
 
-        total_height = self._get_all_rows() + (msg_nbr - 1) * pico_cfg.config.ui_v_padding
+        total_height = self._get_all_rows() + (msg_nbr - 1) * pico_cfg.config.ui_msg_v_margin
         
         # Base offset (how much we need to scroll to see the bottom)
         max_scroll = max(0, total_height - self.height + gap) # introduce a gap to prevent last message from sticking to the bottom edge
@@ -254,13 +248,13 @@ class ChatHistoryPanel(TextComponent):
         curr_y = self.y - start_y
         for i, msg in enumerate(self.messages):
             child = msg.get_component()
-            child_w = self.width - msg.left_pad - msg.right_pad
+            child_w = self.width - msg.left_margin - msg.right_margin
             child_h = child.get_preferred_height(child_w)
             
             # Draw child if it is within or partially within the vertical bounds of the panel
             curr_y += gap
             
-            child.set_layout(self.x + msg.left_pad, curr_y, child_w, child_h)
+            child.set_layout(self.x + msg.left_margin, curr_y, child_w, child_h)
             child.render(buffer)
             
             curr_y += child_h
@@ -293,7 +287,7 @@ class ChatHistoryPanel(TextComponent):
         return False
 
 
-    def new_message(self, message: str, *, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None, left_pad: int = 0, right_pad: int = 0) -> Message:
+    def new_message(self, message: str, *, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None, left_margin: int = 0, right_margin: int = 0) -> Message:
         """Create a new message and append it to the chat history.
         
         Args:
@@ -302,8 +296,8 @@ class ChatHistoryPanel(TextComponent):
             title: Optional override for the message box title
             frame_color: Optional override for the box frame color
             content_color: Optional override for the box content color
-            left_pad: Optional override for the box left padding
-            right_pad: Optional override for the box right padding
+            left_margin: Optional override for the box left margin
+            right_margin: Optional override for the box right margin
             
         Returns:
             The created Message object.
@@ -315,7 +309,7 @@ class ChatHistoryPanel(TextComponent):
             
         # Create a new message
         # Account for box padding in initial max_width
-        initial_max_width = self.max_width - 2 - left_pad - right_pad
+        initial_max_width = self.max_width - 2 - self.left_pad - self.right_pad
         if initial_max_width < 1:
             initial_max_width = 1
 
@@ -323,13 +317,13 @@ class ChatHistoryPanel(TextComponent):
             message,
             msg_type=msg_type,
             max_width=initial_max_width,
-            padding_left=self.padding_left,
-            padding_right=self.padding_right,
+            left_pad=self.left_pad,
+            right_pad=self.right_pad,
             title=title,
             frame_color=frame_color,
             content_color=content_color,
-            left_pad=left_pad,
-            right_pad=right_pad
+            left_margin=left_margin,
+            right_margin=right_margin
         )
         self.messages.append(new_message)
         self.msg_container.children.append(new_message.get_component())
@@ -350,7 +344,7 @@ class ChatHistoryPanel(TextComponent):
             self.msg_container.children.pop()
             self.msg_container.sizes.pop()
 
-    def add_message(self, message: str, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None, left_pad: int = 0, right_pad: int = 0) -> Message:
+    def add_message(self, message: str, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None, left_margin: int = 0, right_margin: int = 0) -> Message:
         """Add a message to chat history and update UI.
         
         Args:
@@ -358,13 +352,13 @@ class ChatHistoryPanel(TextComponent):
             msg_type: The type of message
             title: Optional override for the message box title
             frame_color: Optional override for the box frame color
-            left_pad: Optional override for the box left padding
-            right_pad: Optional override for the box right padding
+            left_margin: Optional override for the box left margin
+            right_margin: Optional override for the box right margin
         
         Returns:
             The created Message object.
         """
-        return self.new_message(message, msg_type=msg_type, title=title, frame_color=frame_color, content_color=content_color, left_pad=left_pad, right_pad=right_pad)
+        return self.new_message(message, msg_type=msg_type, title=title, frame_color=frame_color, content_color=content_color, left_margin=left_margin, right_margin=right_margin)
 
 
     def clear(self):
@@ -400,4 +394,5 @@ class ChatHistoryPanel(TextComponent):
     def get_component(self):
         """Get the component for layout."""
         return self
+
 

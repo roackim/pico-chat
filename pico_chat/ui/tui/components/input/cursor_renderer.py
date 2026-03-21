@@ -54,5 +54,5 @@ class CursorRenderer:
             curr_cell = buffer.cells[cy][cx]
             char_to_show = curr_cell.char or " "
             
-            # Invert colors for block cursor
-            buffer.set(cx, cy, char_to_show, fg=self.bg_color, bg=cursor_color, bold=True)
+            # Use reverse video for cursor - works with any terminal background
+            buffer.set(cx, cy, char_to_show, fg=cursor_color, bg=self.bg_color, bold=True, reverse=True)

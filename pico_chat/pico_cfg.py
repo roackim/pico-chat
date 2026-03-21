@@ -26,32 +26,18 @@ class Config:
         # UI settings
         self.ui_cursor_frequency: float = 1.0  # Hz (flashes per second)
         self.ui_cursor_pulse_delay: float = 0.75  # Seconds before pulsating starts
+        
         self.ui_max_input_height: int = 10  # Maximum height of input field in lines
         self.ui_debug_console_height: int = 10 # Height of the debug console in lines
-        self.ui_global_padding: int = 0  # Global padding around the entire app (in characters)
+        
         self.ui_use_bg_color: bool = False  # Whether to use theme background color (False uses terminal default)
+        self.ui_app_global_padding: int = 1  # Global padding inside the entire app (in characters)
+        self.ui_msg_h_padding: int = 2 # Horizontal padding for text in UI components 
+        self.ui_msg_v_margin: int = 0 # Vertical padding between messages in ChatHistoryPanel
         
+        self.ui_box_style: str = "single" # Box border style: ("single", "double", "rounded")
         
-        # TODO investigate deadcode around these padding settings and remove if not used
-        # -------------------------------------------------------------------------------
-        # NOTE: box.py @ 26
-        # >         self.child.set_layout(x + 1, y + 1, width - 2, height - 2)
-        # probably the way to go
-        self.ui_msg_h_padding = 1 # Horizontal padding for text in UI components 
-        
-        self.ui_box_style = "single" # Box border style (e.g. "single", "double", "rounded")
-        
-        # NOTE: works as expected even with scroll
-        self.ui_v_padding = 0 # Vertical padding between messages in ChatHistoryPanel
-        
-        # TODO: plug this value (currently a stub)
-        self.ui_h_padding = 1 # Horizontal padding between messages and term borders in ChatHistoryPanel
-
         self.target_fps: int = 60
-
-        # Tool permissions (initialized at module level, can be imported and modified)
-        # from pico_chat.harness import tool_permissions
-        # tool_permissions.permissions = tool_permissions.strict  # Change profile
 
         # TODO: Load config from file if exists
 
