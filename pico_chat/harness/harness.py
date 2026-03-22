@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 from typing import AsyncGenerator, Any, Dict, List, Optional
 
 from pico_chat.harness.llm_status import AgentState
@@ -160,11 +161,22 @@ class Harness:
         self.state = AgentState.THINKING
         self.debug_stream.log("REQUEST", messages)
         
+        # Track time-to-first-token (TTFT)
+        request_start_time = time.perf_counter()
+        first_chunk_received = False
+        
         full_content = ""
         tool_calls_buffer: Dict[int, Dict[str, Any]] = {}
         
         # Use server's create_completion (handles retries automatically)
         async for chunk in self.server.create_completion(messages, tools=self.tool_schemas, stream=True):
+            # Log TTFT on first chunk
+            if not first_chunk_received:
+                ttft = time.perf_counter() - request_start_time
+                logger.info(f"Time-to-first-token: {ttft*1000:.0f}ms")
+                self.debug_stream.log("TTFT", f"{ttft*1000:.0f}ms")
+                first_chunk_received = True
+            
             if not chunk.choices:
                 continue
                 
