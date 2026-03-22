@@ -177,12 +177,13 @@ class Terminal:
 
     def _parse_mouse(self, seq: str) -> Optional[MouseEvent]:
         # \033[<Cb;Cx;CyM/m
+        # Note: ANSI coordinates are 1-indexed, convert to 0-indexed
         try:
             pressed = seq[-1] == 'M'
             parts = seq[3:-1].split(';')
             button = int(parts[0])
-            x = int(parts[1])
-            y = int(parts[2])
+            x = int(parts[1]) - 1  # Convert from 1-indexed to 0-indexed
+            y = int(parts[2]) - 1  # Convert from 1-indexed to 0-indexed
             drag = (button & 32) != 0
             if drag:
                 button -= 32

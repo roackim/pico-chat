@@ -7,7 +7,10 @@
     [ ] /retry
     [ ] /connect - connect to a different LLM server (prompt for URL, API key, etc)
 
-
+[ ] When focusing a message scroll to see it
+[ ] When focused add message footer with commands
+            like: [c] copy  [e] edit
+    [ ] add said commands
 
 [ ] THINKING TAGS DIFFERENT ON NEMOTRON ???
 [ ] split command:
@@ -86,7 +89,7 @@ LONG TERM:
 [ ] Custom System prompts / Personalities
 [ ] Custom commands / tools
 [ ] Custom prompts aliases like @docs to quickly ask for documentation 
-[x] Context builder
+[o] Context builder
 
     
 Cool test prompts:

@@ -414,9 +414,9 @@ class InputComponent(Component):
         
         # Handle mouse events (check bounds)
         if isinstance(event, MouseEvent):
-            target = self.parent if self.parent else self
-            if not (target.x <= event.x < target.x + target.width and
-                    target.y <= event.y < target.y + target.height):
+            # Only handle clicks within this component's bounds
+            if not (self.x <= event.x < self.x + self.width and
+                    self.y <= event.y < self.y + self.height):
                 return False
         
         # Create context for handlers (no menu_manager needed)

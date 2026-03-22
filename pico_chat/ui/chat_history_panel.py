@@ -289,6 +289,35 @@ class ChatHistoryPanel(TextComponent):
             # Each box's height, accounting for its specific margin
             total += msg.get_component().get_preferred_height(self.max_width - msg.left_margin - msg.right_margin)
         return total
+    
+    def _build_line_map(self) -> list[Optional[tuple[int, int]]]:
+        """Build a map of virtual y-coordinates to message references.
+        
+        Returns:
+            A list where each index represents a virtual y-coordinate (relative to the top
+            of the content area), and the value is either:
+            - None for gap lines
+            - (msg_index, local_y) tuple for lines belonging to a message,
+              where local_y is the y-offset within that message's box
+        """
+        line_map = []
+        gap = pico_cfg.config.ui_msg_v_margin
+        
+        for i, msg in enumerate(self.messages):
+            # Add gap lines before this message (skip for the first message)
+            if i > 0:
+                for _ in range(gap):
+                    line_map.append(None)
+            
+            # Add lines for this message
+            child = msg.get_component()
+            child_w = self.width - msg.left_margin - msg.right_margin
+            child_h = child.get_preferred_height(child_w)
+            
+            for local_y in range(child_h):
+                line_map.append((i, local_y))
+        
+        return line_map
 
     def render(self, buffer: Buffer):
         """Custom render to handle scrolling/clipping of messages."""
@@ -299,18 +328,18 @@ class ChatHistoryPanel(TextComponent):
         # Clear background first (to prevent artifacts from previous frames/scrolls)
         buffer.fill(self.x, self.y, self.width, self.height, " ", bg=theme.get_bg())
 
-        # number of messages
-        msg_nbr = len(self.messages)
+        # Build line map for efficient coordinate mapping
+        line_map = self._build_line_map()
+        total_height = len(line_map)
+        
         gap = pico_cfg.config.ui_msg_v_margin
-
-        total_height = self._get_all_rows() + (msg_nbr - 1) * pico_cfg.config.ui_msg_v_margin
         
         # Base offset (how much we need to scroll to see the bottom)
-        max_scroll = max(0, total_height - self.height + gap) # introduce a gap to prevent last message from sticking to the bottom edge
+        max_scroll = max(0, total_height - self.height)
         
         # If auto-scroll is on, we always show the bottom
         if self.auto_scroll:
-            self.scroll_offset = -gap
+            self.scroll_offset = 0
             
         # Actual offset from the TOP of the content
         # scroll_offset 0 means we are at the bottom.
@@ -320,12 +349,13 @@ class ChatHistoryPanel(TextComponent):
         # Reset any previous layout of the container children to prevent stale rendering
         curr_y = self.y - start_y
         for i, msg in enumerate(self.messages):
+            # Add gap before this message (skip for the first message)
+            if i > 0:
+                curr_y += gap
+            
             child = msg.get_component()
             child_w = self.width - msg.left_margin - msg.right_margin
             child_h = child.get_preferred_height(child_w)
-            
-            # Draw child if it is within or partially within the vertical bounds of the panel
-            curr_y += gap
             
             child.set_layout(self.x + msg.left_margin, curr_y, child_w, child_h)
             child.render(buffer)
@@ -353,29 +383,35 @@ class ChatHistoryPanel(TextComponent):
                 
                 # Handle clicks to focus messages
                 if event.pressed and event.button == 0:  # Left click
-                    # Find which message was clicked
+                    # Build line map and find which message was clicked
+                    line_map = self._build_line_map()
+                    total_height = len(line_map)
                     gap = pico_cfg.config.ui_msg_v_margin
-                    total_height = self._get_all_rows() + (len(self.messages) - 1) * gap
-                    max_scroll = max(0, total_height - self.height + gap)
+                    max_scroll = max(0, total_height - self.height)
                     start_y = max_scroll - self.scroll_offset
                     
-                    curr_y = self.y - start_y
-                    for i, msg in enumerate(self.messages):
-                        curr_y += gap
-                        child = msg.get_component()
-                        child_w = self.width - msg.left_margin - msg.right_margin
-                        child_h = child.get_preferred_height(child_w)
-                        
-                        # Check if click is within this message's bounds
-                        if curr_y <= event.y < curr_y + child_h:
-                            self.set_focused_message(i)
-                            return True
-                        
-                        curr_y += child_h
+                    # Convert screen y to virtual y coordinate
+                    virtual_y = (event.y - self.y) + start_y
+                    
+                    # Look up which message this corresponds to
+                    if 0 <= virtual_y < len(line_map):
+                        entry = line_map[virtual_y]
+                        if entry is not None:
+                            msg_index, local_y = entry
+                            self.set_focused_message(msg_index)
+                        else:
+                            # Clicked on a gap - clear focus
+                            self.clear_focus()
+                        return True
+                    else:
+                        # Clicked outside content bounds - clear focus
+                        self.clear_focus()
+                        return True
                 
                 # Button 64 is scroll up, 65 is scroll down
                 if event.button == 64: # Scroll Up
-                    total_height = self._get_all_rows()
+                    line_map = self._build_line_map()
+                    total_height = len(line_map)
                     max_scroll = max(0, total_height - self.height)
                     self.scroll_offset = min(max_scroll, self.scroll_offset + 3)
                     self.auto_scroll = False # Scrolling up disables auto-scroll
