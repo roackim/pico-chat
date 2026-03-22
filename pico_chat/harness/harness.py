@@ -332,7 +332,7 @@ class Harness:
                 
                 yield chunks.ToolError(name=func_name, error=str(e))
 
-    async def startup_check(self) -> Dict[str, Any]:
+    async def get_status(self) -> Dict[str, Any]:
         """
         Check server status at startup.
         

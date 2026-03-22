@@ -5,6 +5,8 @@ from pico_chat.ui.tui.colors import RGB, theme
 from pico_chat.ui.tui.msg_types import SysMsg, SysMsgError
 from pico_chat import pico_cfg
 
+import logging
+
 class ChatUIProtocol(Protocol):
     agent: Any
     chat_history_panel: Any
@@ -12,12 +14,16 @@ class ChatUIProtocol(Protocol):
     compositor: Any
 
 class Command:
-    def __init__(self, name: str, description: str):
+    def __init__(self, name: str, description: str, subcommands: Optional[Dict[str, 'Command']] = None):
         self.name = name
         self.description = description
+        self.subcommands = subcommands or {}
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         raise NotImplementedError
+    
+    def has_subcommands(self) -> bool:
+        return len(self.subcommands) > 0
 
 class HelpCommand(Command):
     def __init__(self):
@@ -73,48 +79,103 @@ class StatusCommand(Command):
         super().__init__("status", "Show system and connection status")
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        is_online = await ui.agent.check_connection()
-        status_text = "online" if is_online else "offline"
-        color_code = "\x1b[32m" if is_online else "\x1b[31m"
-        
-        cur, max_ctx, perc = ui.agent.check_context() if hasattr(ui.agent, 'check_context') else ui.agent.estimate_context_usage()
-        
-        # Query the model name dynamically if possible
-        if hasattr(ui.agent, 'get_model_name'):
-            try:
-                model_name = await ui.agent.get_model_name()
-            except Exception:
-                model_name = 'unknown'
-        else:
-            model_name = 'unknown'
-        
-        # Get server info from agent's server object
-        server_url = ui.agent.server.config.base_url if hasattr(ui.agent, 'server') else 'unknown'
-        server_name = ui.agent.server.config.name if hasattr(ui.agent, 'server') else 'unknown'
-        
-        report = (
-            f"Server           : {server_name}\n"
-            f"URL              : {server_url}\n"
-            f"LLM Connectivity : {color_code}{status_text}\u001b[0m\n"
-            f"Active Model     : {model_name}\n"
-            f"Context Pressure : {perc:.1f}% | {cur/1024:.1f}k / {max_ctx/1024:.1f}k"
-        )
+        status = await ui.agent.get_status()
+ 
         ui.chat_history_panel.add_message(
-            report,
+            self.format_status(status),
             msg_type=SysMsg(),
             title="status",
-            content_color=theme.DEFAULT
         )
+        logger = logging.getLogger("tui")
+        logger.info(f"Server status online: {status['online']}")
+        
+    
+    @staticmethod
+    def format_status(status: Dict[str, Any]) -> str:
+        status_color = "\x1b[32m" if status["online"] else "\x1b[31m"
+        status_text = "online" if status["online"] else "offline"
+        
+        color = str(theme.WARNING)
+        reset = theme.reset()
+        msg  = color + f"Server           : {reset}{status['server_name']} ({status['server_type']})\n"
+        msg += color + f"URL              : {reset}{status['base_url']}\n"
+        msg += color + f"Status           : {reset}{status_color}{status_text}\033[0m\n"
+        
+        if status_text == "online":
+            msg += color + f"Model            : {reset}{status['model']}\n"
+            msg += color + f"Context Window   : {reset}{status['context_window']}\n"
+        
+        return msg
 
-class DebugCommand(Command):
+class ShowDebugCommand(Command):
     def __init__(self):
-        super().__init__("_debug", "Toggle debug console")
+        super().__init__("debug", "Show debug console")
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         if hasattr(ui, 'toggle_debug_console'):
-            ui.toggle_debug_console()
+            if not ui.show_debug:
+                ui.toggle_debug_console()
         else:
             ui.chat_history_panel.add_message("Debug console not supported.", msg_type=SysMsg())
+
+class HideDebugCommand(Command):
+    def __init__(self):
+        super().__init__("debug", "Hide debug console")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if hasattr(ui, 'toggle_debug_console'):
+            if ui.show_debug:
+                ui.toggle_debug_console()
+        else:
+            ui.chat_history_panel.add_message("Debug console not supported.", msg_type=SysMsg())
+
+class ShowCommand(Command):
+    def __init__(self):
+        subcommands = {
+            "debug": ShowDebugCommand(),
+        }
+        super().__init__("show", "Show UI elements", subcommands=subcommands)
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if not args:
+            # Show error - missing subcommand
+            help_text = "Missing subcommand. Available subcommands:\n"
+            for name, cmd in sorted(self.subcommands.items()):
+                help_text += f"  {name.ljust(10)} - {cmd.description}\n"
+            ui.chat_history_panel.add_message(help_text.rstrip(), msg_type=SysMsgError())
+        else:
+            subcmd_name = args[0].lower()
+            if subcmd_name in self.subcommands:
+                await self.subcommands[subcmd_name].execute(ui, args[1:])
+            else:
+                ui.chat_history_panel.add_message(
+                    f"Unknown subcommand: {subcmd_name}",
+                    msg_type=SysMsgError()
+                )
+
+class HideCommand(Command):
+    def __init__(self):
+        subcommands = {
+            "debug": HideDebugCommand(),
+        }
+        super().__init__("hide", "Hide UI elements", subcommands=subcommands)
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if not args:
+            # Show error - missing subcommand
+            help_text = "Missing subcommand. Available subcommands:\n"
+            for name, cmd in sorted(self.subcommands.items()):
+                help_text += f"  {name.ljust(10)} - {cmd.description}\n"
+            ui.chat_history_panel.add_message(help_text.rstrip(), msg_type=SysMsgError())
+        else:
+            subcmd_name = args[0].lower()
+            if subcmd_name in self.subcommands:
+                await self.subcommands[subcmd_name].execute(ui, args[1:])
+            else:
+                ui.chat_history_panel.add_message(
+                    f"Unknown subcommand: {subcmd_name}",
+                    msg_type=SysMsgError()
+                )
 
 # Command Registry
 COMMANDS: Dict[str, Command] = {
@@ -123,7 +184,8 @@ COMMANDS: Dict[str, Command] = {
     "exit":     ExitCommand(),
     "stop":     StopCommand(),
     "status":   StatusCommand(),
-    "_debug":   DebugCommand(),
+    "show":     ShowCommand(),
+    "hide":     HideCommand(),
 }
 
 async def handle_command(ui: ChatUIProtocol, text: str):
@@ -144,4 +206,13 @@ async def handle_command(ui: ChatUIProtocol, text: str):
         
 
 def get_command_list() -> List[str]:
-    return [cmd for cmd in COMMANDS.keys()] # if not cmd.startswith("_")]
+    """Get list of top-level commands."""
+    return [cmd for cmd in COMMANDS.keys()]
+
+def get_subcommand_list(command: str) -> List[str]:
+    """Get list of subcommands for a given command."""
+    if command in COMMANDS:
+        cmd = COMMANDS[command]
+        if cmd.has_subcommands():
+            return list(cmd.subcommands.keys())
+    return []

@@ -1,6 +1,7 @@
 
 from dataclasses import dataclass
 
+from pico_chat import pico_cfg
 
 class RGB:
     def __init__(self, r, g=None, b=None):
@@ -17,6 +18,16 @@ class RGB:
                 self.b = int(hex_str[4:6], 16)
             else:
                 raise ValueError(f"Invalid hex color string: {r}")
+    
+    def __str__(self):
+        return self.ansi_fg()
+    
+    # concat support for ergonomics
+    def __add__(self, other):
+        if isinstance(other, str):
+            return self.ansi_fg() + other
+        else:
+            return self.ansi_fg() + str(other)
     
     def ansi_fg(self): 
         """ coinvert to ANSI foreground color code """
@@ -40,7 +51,13 @@ class _theme:
     
     def reset(self) -> str:
         """reset to theme bg + fg colors"""
-        return self.BACKGROUND.ansi_bg() + self.DEFAULT.ansi_fg()
+        
+        if pico_cfg.config.ui_use_bg_color:
+            return self.BACKGROUND.ansi_bg() + self.DEFAULT.ansi_fg()
+        else:
+            return "\033[0m"
+        
+        # return self.BACKGROUND.ansi_bg() + self.DEFAULT.ansi_fg()
     
     def get_bg(self):
         """Get background color respecting ui_use_bg_color config setting."""

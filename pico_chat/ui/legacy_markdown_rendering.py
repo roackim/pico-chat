@@ -1,3 +1,6 @@
+# WARNING: Currently DEAD CODE - markdown rendering is disabled in the TUI for now. 
+# This file is left here as a reference for future re-implementation.
+
 import re
 from pico_chat.ui.tui.layout_utils import strip_ansi
 

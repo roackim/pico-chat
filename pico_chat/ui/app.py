@@ -14,11 +14,12 @@ from pico_chat.ui.tui.terminal import MouseEvent
 from pico_chat.ui.tui.components import TextComponent, Box, InputComponent
 from pico_chat.ui.tui.components.debug_panel import DebugLogPanel
 from pico_chat.ui.chat_history_panel import ChatHistoryPanel
-from pico_chat.ui.commands import handle_command, get_command_list
+from pico_chat.ui.commands import handle_command, get_command_list, get_subcommand_list
 from pico_chat.ui.tui.container import Vsplit, Hsplit
 
         # Setup logging to debug panel
 import logging
+from pico_chat.ui.commands import StatusCommand
 from pico_chat.ui.tui.colors import theme
 from pico_chat.ui.tui.msg_types import PicoMsg, ThinkingMsg, UserMsg, SysMsg, SysMsgError
 
@@ -47,10 +48,16 @@ class chatTUI:
         self.input_component.config = pico_cfg.config  # Pass config for max height, cursor settings, etc.
         self.input_component.on_submit = self.on_user_submit
         
-        # Setup menus
+        # Setup command completion
         commands = get_command_list()
-        get_context = lambda: agent.list_files_and_folders() if hasattr(agent, 'list_files_and_folders') else []
-        self.input_component.setup_menus(commands, get_context_items=get_context)
+        self.input_component.setup_commands(commands)
+        
+        # Setup subcommand completion
+        self.input_component.setup_subcommands(get_subcommand_list)
+        
+        # Setup context (@file) completion
+        get_context_items = lambda: agent.list_files_and_folders() if hasattr(agent, 'list_files_and_folders') else []
+        self.input_component.setup_context(get_context_items)
         
         self.input_box = Box(self.input_component, title="message", fg=self.input_component.frame_color)
 
@@ -274,8 +281,54 @@ class chatTUI:
                         self._process_generation(user_input)
                     )
 
+                    # Wait for generation to complete, but keep checking for commands
                     try:
-                        await self.current_generation_task
+                        while not self.current_generation_task.done():
+                            # Wait for EITHER generation to finish OR a command to arrive
+                            cmd_task = asyncio.create_task(self.command_queue.get())
+                            gen_task = self.current_generation_task
+                            shutdown_task = asyncio.create_task(self.shutdown_event.wait())
+                            
+                            done, pending = await asyncio.wait(
+                                [cmd_task, gen_task, shutdown_task],
+                                return_when=asyncio.FIRST_COMPLETED
+                            )
+                            
+                            # Handle shutdown - cancel everything
+                            if shutdown_task in done:
+                                # Cancel command task if it's pending
+                                if cmd_task in pending:
+                                    cmd_task.cancel()
+                                # Cancel generation
+                                if not self.current_generation_task.done():
+                                    self.current_generation_task.cancel()
+                                return
+                            
+                            # Handle command during generation
+                            if cmd_task in done:
+                                command = cmd_task.result()
+                                logger.debug(f"Processing command during generation: {command}")
+                                # Cancel shutdown task if pending
+                                if shutdown_task in pending:
+                                    shutdown_task.cancel()
+                                # DO NOT cancel generation - keep it running!
+                                await handle_command(self, command)
+                                # Continue loop to wait for more commands or generation completion
+                            
+                            # Generation completed
+                            if gen_task in done:
+                                # Cancel pending tasks
+                                if cmd_task in pending:
+                                    cmd_task.cancel()
+                                if shutdown_task in pending:
+                                    shutdown_task.cancel()
+                                # Check if it raised an exception
+                                try:
+                                    gen_task.result()
+                                except asyncio.CancelledError:
+                                    pass
+                                break
+                    
                     except asyncio.CancelledError:
                         pass
                     finally:
@@ -448,33 +501,20 @@ class chatTUI:
 
         # Set compositor for all panels
         self.chat_history_panel.set_compositor(self.compositor)
+        self.input_component.set_compositor(self.compositor)
         
         # Start background server status check (non-blocking)
         async def background_startup_check():
-            if hasattr(self.agent, 'startup_check'):
-                try:
-                    status = await self.agent.startup_check()
-                    status_color = "\x1b[32m" if status["online"] else "\x1b[31m"
-                    status_text = "online" if status["online"] else "offline"
-                    
-                    startup_msg = (
-                        f"Server           : {status['server_name']} ({status['server_type']})\n"
-                        f"URL              : {status['base_url']}\n"
-                        f"Status           : {status_color}{status_text}\033[0m\n"
-                    )
-                    
-                    if status_text == "online":
-                        startup_msg += f"Model            : {status['model']}\n"
-                        startup_msg += f"Context Window   : {status['context_window']}\n"
-                    
-                    self.chat_history_panel.add_message(
-                        startup_msg,
-                        msg_type=SysMsg(),
-                        title="server status"
-                    )
-                    logger.info(f"Server status: {status_text}")
-                except Exception as e:
-                    logger.error(f"Failed to check server status: {e}")
+            status = await self.agent.get_status()
+
+            
+            self.chat_history_panel.add_message(
+                StatusCommand.format_status(status),
+                msg_type=SysMsg(),
+                title="status"
+            )
+            logger.info(f"Server status online: {status['online']}")
+            
 
         # Run all tasks
         try:

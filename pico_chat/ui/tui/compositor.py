@@ -18,6 +18,7 @@ class Compositor:
         self.running = False
         self.shutdown_event = shutdown_event
         self.padding = 0  # Global app padding
+        self.overlays = []  # Floating components rendered on top
 
     def _collect_ids(self, component: Component):
         if component.id:
@@ -35,6 +36,20 @@ class Compositor:
         comp = self.get_component(id)
         if comp:
             comp.update(data)
+    
+    def add_overlay(self, component: Component):
+        """Register a component as a floating overlay.
+        
+        Overlays are rendered on top of the main component tree and are not
+        clipped by parent bounds. Useful for menus, modals, tooltips, etc.
+        """
+        if component not in self.overlays:
+            self.overlays.append(component)
+    
+    def remove_overlay(self, component: Component):
+        """Unregister a component from overlays."""
+        if component in self.overlays:
+            self.overlays.remove(component)
 
     async def run(self):
         self.running = True
@@ -90,6 +105,10 @@ class Compositor:
         inner_height = max(0, self.height - 2 * pad)
         self.root.set_layout(pad, pad, inner_width, inner_height)
         self.root.render(self.buffer)
+        
+        # Render overlays on top (not clipped by parents)
+        for overlay in self.overlays:
+            overlay.render(self.buffer)
         
         # Use Buffer's built-in render method
         output = self.buffer.render()
