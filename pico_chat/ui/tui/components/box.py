@@ -8,13 +8,14 @@ from pico_chat import pico_cfg
 from pico_chat.ui.tui.colors import theme
 
 class Box(Component):
-    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None):
+    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False):
         super().__init__(id)
         self.child = child
         self.child.parent = self
         self.title = title
         self.bg = bg
         self.fg = fg
+        self.focused = focused
         
         if self.bg is None: self.bg = theme.get_bg()
         if self.fg is None: self.fg = theme.DEFAULT
@@ -22,6 +23,10 @@ class Box(Component):
     @property
     def children(self):
         return [self.child]
+    
+    def set_focused(self, focused: bool):
+        """Set the focused state of this box."""
+        self.focused = focused
 
     def set_layout(self, x: int, y: int, width: int, height: int):
         super().set_layout(x, y, width, height)
@@ -39,6 +44,9 @@ class Box(Component):
 
     def render(self, buffer: Buffer):
         fg, bg = self.fg, self.bg
+        
+        if self.focused:
+            fg = theme.FOCUSED
 
         if self.width < 2 or self.height < 2:
             return
@@ -61,7 +69,9 @@ class Box(Component):
             "rounded": BorderStyle("╭", "╮", "╰", "╯", "─", "│"),
         }
 
-        style = STYLES[pico_cfg.config.ui_box_style]
+        # Use focused style if box is focused, otherwise use normal style
+        style_name = pico_cfg.config.ui_box_style_focused if self.focused else pico_cfg.config.ui_box_style
+        style = STYLES[style_name]
 
         # 1. Top + Left borders
         buffer.set(self.x, self.y, style.tl, fg=fg, bg=bg)

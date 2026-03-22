@@ -86,6 +86,10 @@ class Message:
         """Update the content color of the message."""
         self.component.fg = color
     
+    def set_focused(self, focused: bool):
+        """Set the focused state of this message."""
+        self.box.set_focused(focused)
+    
     def _format_line_wrap(self) -> str:
         """Format the message text with smart word wrapping and padding.
         
@@ -170,12 +174,14 @@ class ChatHistoryPanel(TextComponent):
         self.max_messages = 150  # Maximum number of messages to keep
         self.scroll_offset = 0   # How many rows to scroll up from the bottom
         self.auto_scroll = True
+        self.focused_message_index: Optional[int] = None  # Index of the currently focused message
+        self.has_keyboard_focus = False  # Track if this panel should handle keyboard input
         
         # Container for all message boxes
         self.msg_container = Hsplit([], [])
         
         # Add welcome message
-        self.add_message(WELCOME_MESSAGE.rstrip())
+        # self.add_message(WELCOME_MESSAGE.rstrip())
         
         # Initial component - self is now the component
         self.compositor: Optional[object] = None
@@ -183,6 +189,70 @@ class ChatHistoryPanel(TextComponent):
     def set_compositor(self, compositor):
         """Set the compositor for updates."""
         self.compositor = compositor
+    
+    def set_focused_message(self, index: Optional[int]):
+        """Set the focused message by index.
+        
+        Args:
+            index: Index of message to focus, or None to clear focus
+        """
+        # Clear previous focus
+        if self.focused_message_index is not None and self.focused_message_index < len(self.messages):
+            self.messages[self.focused_message_index].set_focused(False)
+        
+        # Set new focus
+        self.focused_message_index = index
+        if self.focused_message_index is not None and self.focused_message_index < len(self.messages):
+            self.messages[self.focused_message_index].set_focused(True)
+            # Disable auto-scroll when focusing a message
+            self.auto_scroll = False
+    
+    def move_focus_up(self) -> bool:
+        """Move focus to the previous message.
+        
+        Returns:
+            True if focus moved, False if at top or no messages
+        """
+        if not self.messages:
+            return False
+        
+        if self.focused_message_index is None:
+            # Focus the last message if nothing is focused
+            self.set_focused_message(len(self.messages) - 1)
+            return True
+        elif self.focused_message_index > 0:
+            self.set_focused_message(self.focused_message_index - 1)
+            return True
+        return False
+    
+    def move_focus_down(self) -> bool:
+        """Move focus to the next message.
+        
+        Returns:
+            True if focus moved, False if at bottom or no messages
+        """
+        if not self.messages:
+            return False
+        
+        if self.focused_message_index is None:
+            # Focus the first message if nothing is focused
+            self.set_focused_message(0)
+            return True
+        elif self.focused_message_index < len(self.messages) - 1:
+            self.set_focused_message(self.focused_message_index + 1)
+            return True
+        return False
+    
+    def clear_focus(self):
+        """Clear the focused message."""
+        self.set_focused_message(None)
+    
+    def set_keyboard_focus(self, has_focus: bool):
+        """Set whether this panel should handle keyboard input."""
+        self.has_keyboard_focus = has_focus
+        if not has_focus:
+            # Clear message focus when losing keyboard focus
+            self.clear_focus()
 
     def set_layout(self, x: int, y: int, width: int, height: int):
         """Override to detect width changes and trigger reformat."""
@@ -267,11 +337,41 @@ class ChatHistoryPanel(TextComponent):
             buffer.clear_clip()
 
     def handle_input(self, event: Any) -> bool:
-        """Handle mouse wheel for scrolling."""
+        """Handle mouse wheel for scrolling and keyboard navigation."""
+        # Handle keyboard input only if this panel has keyboard focus
+        if isinstance(event, str) and self.has_keyboard_focus:
+            if event == '\x1b[A':  # Up arrow
+                return self.move_focus_up()
+            elif event == '\x1b[B':  # Down arrow
+                return self.move_focus_down()
+        
+        # Handle mouse input
         if isinstance(event, MouseEvent):
             # Check if mouse is over this panel
             if self.x <= event.x < self.x + self.width and \
                self.y <= event.y < self.y + self.height:
+                
+                # Handle clicks to focus messages
+                if event.pressed and event.button == 0:  # Left click
+                    # Find which message was clicked
+                    gap = pico_cfg.config.ui_msg_v_margin
+                    total_height = self._get_all_rows() + (len(self.messages) - 1) * gap
+                    max_scroll = max(0, total_height - self.height + gap)
+                    start_y = max_scroll - self.scroll_offset
+                    
+                    curr_y = self.y - start_y
+                    for i, msg in enumerate(self.messages):
+                        curr_y += gap
+                        child = msg.get_component()
+                        child_w = self.width - msg.left_margin - msg.right_margin
+                        child_h = child.get_preferred_height(child_w)
+                        
+                        # Check if click is within this message's bounds
+                        if curr_y <= event.y < curr_y + child_h:
+                            self.set_focused_message(i)
+                            return True
+                        
+                        curr_y += child_h
                 
                 # Button 64 is scroll up, 65 is scroll down
                 if event.button == 64: # Scroll Up
@@ -372,9 +472,6 @@ class ChatHistoryPanel(TextComponent):
         self.scroll_offset = 0
         self.auto_scroll = True
         
-        # Optionally re-add welcome message
-        self.new_message(WELCOME_MESSAGE.rstrip())
-    
     # def resize(self, new_width: int):
     #     """Resize the panel and reformat all messages.
         

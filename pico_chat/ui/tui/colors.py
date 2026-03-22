@@ -48,6 +48,7 @@ class _theme:
     WARNING: RGB
     USER: RGB
     PICO: RGB
+    FOCUSED: RGB
     
     def reset(self) -> str:
         """reset to theme bg + fg colors"""
@@ -55,7 +56,7 @@ class _theme:
         if pico_cfg.config.ui_use_bg_color:
             return self.BACKGROUND.ansi_bg() + self.DEFAULT.ansi_fg()
         else:
-            return "\033[0m"
+            return "\033[0m" + self.DEFAULT.ansi_fg()
         
         # return self.BACKGROUND.ansi_bg() + self.DEFAULT.ansi_fg()
     
@@ -78,7 +79,8 @@ default = _theme(
     ERROR       = RGB("#FF6060"),   # Red
     WARNING     = RGB("#FFC760"),  # Orange
     USER        = RGB("#7ADA92"),  # Blue
-    PICO        = RGB("#F4CE66"),  # Green
+    PICO        = RGB("#66C0F4"),  # Green
+    FOCUSED     = RGB("#F4CE66"),  # Yellow
 )
 
 theme: _theme = default

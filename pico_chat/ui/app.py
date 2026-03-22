@@ -38,7 +38,7 @@ class chatTUI:
         self.agent = agent
         self.message_queue = asyncio.Queue()
         self.compositor: Optional[Compositor] = None
-        self._last_focus_id: Optional[str] = None
+        self._last_focus_id: Optional[str] = "input"  # Start with input focused
         
         # Get colors from config
         self.chat_history_panel = ChatHistoryPanel()
@@ -421,9 +421,49 @@ class chatTUI:
             # Add to processing queue for agent
             self.message_queue.put_nowait(text)
 
+    def _update_focus_states(self):
+        """Update focus states of components based on _last_focus_id."""
+        is_input_focused = (self._last_focus_id == "input")
+        is_history_focused = (self._last_focus_id == "history")
+        
+        # Update input component focus state
+        self.input_component.set_focused(is_input_focused)
+        
+        # Update input box border style
+        self.input_box.set_focused(is_input_focused)
+        
+        # Update chat history keyboard focus
+        self.chat_history_panel.set_keyboard_focus(is_history_focused)
 
     def handle_global_input(self, event: Any) -> bool:
-        """Handle focus logging and input dispatch."""
+        """Handle focus logging and input dispatch with navigation between input and history."""
+        
+        # Handle keyboard navigation between input and history
+        if isinstance(event, str):
+            if event == '\x1b[A':  # Up arrow
+                # If input has focus and cursor is on first line, move to history
+                if self._last_focus_id == "input" and self.input_component.is_cursor_on_first_line():
+                    # Focus the last message (or the first message if list is empty)
+                    if self.chat_history_panel.messages:
+                        self.chat_history_panel.set_focused_message(len(self.chat_history_panel.messages) - 1)
+                        self._last_focus_id = "history"
+                        self._update_focus_states()
+                        return True
+                # Otherwise, let the event pass through to the active component
+            
+            elif event == '\x1b[B':  # Down arrow
+                # Only handle focus change when in history (not when in input)
+                if self._last_focus_id == "history" and self.chat_history_panel.focused_message_index is not None:
+                    if self.chat_history_panel.focused_message_index == len(self.chat_history_panel.messages) - 1:
+                        # At the bottom of history, switch to input
+                        self.chat_history_panel.clear_focus()
+                        self._last_focus_id = "input"
+                        self._update_focus_states()
+                        return True
+                # Otherwise: if in input, let DOWN work normally for cursor movement
+                # If in history (not at bottom), let it navigate messages normally
+        
+        # Handle mouse click focus changes
         if isinstance(event, MouseEvent):
             if event.pressed:
                 # Find which component was clicked to log focus
@@ -439,6 +479,8 @@ class chatTUI:
                 elif i_box.x <= event.x < i_box.x + i_box.width and \
                      i_box.y <= event.y < i_box.y + i_box.height:
                     target_id = "input"
+                    # Clear focused message when clicking input
+                    self.chat_history_panel.clear_focus()
                     
                 if target_id and target_id != self._last_focus_id:
                     # Log focus change
@@ -446,6 +488,7 @@ class chatTUI:
                     logger = logging.getLogger("harness")
                     logger.info(f"[UI] Focus changed to: {target_id}")
                     self._last_focus_id = target_id
+                    self._update_focus_states()
             
         # Call the original method to avoid infinite recursion
         return self._original_handle_input(event)
@@ -502,6 +545,9 @@ class chatTUI:
         # Set compositor for all panels
         self.chat_history_panel.set_compositor(self.compositor)
         self.input_component.set_compositor(self.compositor)
+        
+        # Set initial focus states
+        self._update_focus_states()
         
         # Start background server status check (non-blocking)
         async def background_startup_check():

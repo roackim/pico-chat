@@ -28,6 +28,7 @@ class InputComponent(Component):
         self.content_color = content_color if content_color is not None else theme.DEFAULT
         self.bg = theme.get_bg()  # Use global background
         self.config = None  # Config object passed during initialization
+        self.focused = True  # Track focus state for input handling and cursor rendering
         
         # Core components
         self.buffer = TextBuffer()
@@ -257,6 +258,21 @@ class InputComponent(Component):
         if self.config and hasattr(self.config, 'ui_max_input_height'):
             height = min(height, self.config.ui_max_input_height)
         return height
+    
+    def is_cursor_on_first_line(self) -> bool:
+        """Check if the cursor is on the first line of text (regardless of scroll position).
+        
+        Returns True only if the cursor is on row 0 of the actual text content,
+        not just the first visible line if the input is scrolled.
+        """
+        cursor_row, _ = self.coord_mapper.get_cursor_coords(
+            self.buffer.text, self.buffer.cursor_pos
+        )
+        return cursor_row == 0
+    
+    def set_focused(self, focused: bool):
+        """Set the focused state of this input component."""
+        self.focused = focused
 
     def render(self, buffer: Buffer):
         """Render the input field with prompt, text, scrolling, and menus."""
@@ -297,16 +313,21 @@ class InputComponent(Component):
             
             buffer.write_str(self.x, self.y + line_idx, display_line, fg=self.content_color, bg=self.bg, max_width=self.width)
         
-        # Render cursor
-        self.cursor_renderer.render(
-            buffer, cursor_row, cursor_col,
-            self.x, self.y, scroll_y, self.height
-        )
+        # Render cursor only if focused
+        if self.focused:
+            self.cursor_renderer.render(
+                buffer, cursor_row, cursor_col,
+                self.x, self.y, scroll_y, self.height
+            )
         
         # Menu is rendered by compositor as overlay (not here)
 
     def handle_input(self, event: Any) -> bool:
         """Handle input events by delegating to appropriate handlers."""
+        # Ignore keyboard input if not focused (but allow mouse events for potential focus change)
+        if not self.focused and not isinstance(event, MouseEvent):
+            return False
+        
         # Mark input for cursor animation
         self.cursor_renderer.mark_input()
         
