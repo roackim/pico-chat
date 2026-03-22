@@ -2,47 +2,60 @@ from typing import List, Dict
 
 # Base system prompt template
 BASE_PROMPT = """
-You are a helpful AI assistant named Pico, specialized in software development.
+Identity: Pico, a specialized software development assistant.
 
-INSTRUCTIONS:
-- Avoid using emojis.
-- Make concise answers when possible.
-- When writing code, follow best practices and the style of the existing codebase.
-- You have access to tools to read files, search the codebase, and execute commands.
-- Use tools pro-actively to gather information before answering complex questions.
-- Ask the user for more information if the question is ambiguous or lacks necessary details.
-- When asked to perform a task, break it down into smaller steps and use tools to accomplish each step if needed.
-- Admitting uncertainty is valued.
+Instructions:
+- Introduce yourself very concisely in your first response.
+- Provide concise, professional, and technical answers.
+- No emojis, metaphors, or conversational filler.
+- Pro-actively use tools (file/search/execute) to gather context.
+- Ask the user for more information if it would help improve the answer.
+- Break complex tasks into smaller, logical steps.
+- Follow existing codebase styles and best practices.
+- State clearly if you are uncertain or missing information.
+"""
+
+MODEL_CONTEXT_PROMPT = """
+Model Context:
+Current model: {model_name}
+Context window: {context_window} tokens
 """
 
 CONTEXT_PROMPT_TEMPLATE = """
-PROJECT CONTEXT:
-The following is an overview of the current project structure and key symbols. 
-Use this to understanding the codebase organization and available APIs.
+Project Context:
+The following is an overview of the current project structure. 
 
 {context_tree}
 """
 
-def get_system_prompt(project_context: str = "") -> str:
+def format_system_prompt(project_context: str = "", model_name: str = "", context_window: int = 0) -> str:
     """
     Constructs the full system prompt, optionally including project context.
     
     Args:
         project_context: The string representation of the project structure/symbols.
                          If empty, the context section is omitted.
+        model_name: The name of the current model.
+        context_window: The context window size in tokens.
     """
     prompt = BASE_PROMPT
     
-    if project_context:
-        prompt += CONTEXT_PROMPT_TEMPLATE.format(context_tree=project_context)
+    # Add model context if available
+    if model_name or context_window:
+        prompt += MODEL_CONTEXT_PROMPT.format(
+            model_name=model_name or "Unknown",
+            context_window=context_window or "Unknown"
+        )
+    
+    prompt += CONTEXT_PROMPT_TEMPLATE.format(context_tree=project_context)
         
     return prompt
 
-def get_system_message(project_context: str = "") -> Dict[str, str]:
+def get_system_message(project_context: str = "", model_name: str = "", context_window: int = 0) -> Dict[str, str]:
     """
     Returns the system message dictionary formatted for the LLM API.
     """
     return {
         "role": "system",
-        "content": get_system_prompt(project_context)
+        "content": format_system_prompt(project_context, model_name, context_window)
     }

@@ -3,19 +3,18 @@ import json
 import logging
 from typing import AsyncGenerator, Any, Dict, List, Optional
 
-from openai import AsyncOpenAI
-from pico_chat import pico_cfg
 from pico_chat.harness.llm_status import AgentState
 from pico_chat.harness.debug import get_debug_stream
 from pico_chat.harness.context_builder import build_harness_context
 from pico_chat.harness.system_prompt import get_system_message
 from pico_chat.harness import chunks
+from pico_chat.harness.llm_server import create_server, LLMServer
+from pico_chat.harness.llm_server_config import server_config
 
 # Import the minimal toolset
 from pico_chat.harness.tool_wrappers import create_minimal_tools
 
-# Re-implementation based on minichat.py for maximum performance and simplicity
-# Discarding complex Gateway logic in favor of direct AsyncOpenAI usage.
+logger = logging.getLogger(__name__)
 
 class Harness:
     def __init__(self, workspace_path: str | None = None):
@@ -42,12 +41,9 @@ class Harness:
         self.tool_schemas = [tool.get_schema() for tool in self.tools_map.values()] if self.tools_map else None
         self.debug_stream.log("TOOL_SCHEMAS", self.tool_schemas)
         
-        # Direct Client Initialization (No Polling, No Gateway)
-        self.client = AsyncOpenAI(
-            base_url=pico_cfg.config.base_url,
-            api_key=pico_cfg.config.api_key,
-        )
-        self.debug_stream.log("INIT", f"Connected to {pico_cfg.config.base_url}")
+        # Initialize LLM server
+        self.server: LLMServer = create_server(server_config)
+        self.debug_stream.log("INIT", f"Server initialized: {server_config.name} ({server_config.type}) at {server_config.base_url}")
 
     # def set_user_response(self, text: str):
         # """Called by the UI when a response to a tool's prompt is ready."""
@@ -108,44 +104,44 @@ class Harness:
         total_chars += 500
         
         current_tokens = total_chars // 4
-        # Get max context from config or default to 32k
-        max_tokens = getattr(pico_cfg.config, 'max_context', 32768)
+        # Get max context from server's cached value (will be queried on first use)
+        max_tokens = self.server._cached_context_window or 32768
         
         percentage = (current_tokens / max_tokens) * 100 if max_tokens > 0 else 0
         return current_tokens, max_tokens, percentage
 
     async def check_connection(self) -> bool:
         """Check if the LLM server is reachable."""
-        try:
-            # Try a very lightweight request (models list)
-            await asyncio.wait_for(self.client.models.list(), timeout=2.0)
-            return True
-        
-        except Exception:
-            # Any connection error means offline
-            return False 
+        return await self.server.check_connection()
 
     async def get_model_name(self) -> str:
         """
-        Query the server for the active model name, falling back to config if unavailable.
-        TODO: improve this, feels hacky
+        Get the active model name from the server.
+        Returns cached value if already queried.
         """
-        try:
-            # Try to get the models list from the server
-            models = await asyncio.wait_for(self.client.models.list(), timeout=2.0)
-            if models and models.data:
-                # Return the first model ID as the 'active' one (common for local servers like llama.cpp)
-                return models.data[0].id
-        except Exception as e:
-            raise e
+        return await self.server.get_model_name()
 
-    def _build_messages(self, user_input: str) -> List[Dict[str, Any]]:
+    async def _build_messages(self, user_input: str) -> List[Dict[str, Any]]:
         """Build message list with system prompt and conversation history."""
         # Add user message to history
         self.history.append({"role": "user", "content": user_input})
         
+        # Get model context information from server
+        model_name = await self.server.get_model_name()
+        context_window = await self.server.get_context_window()
+        
+        # Format context window for display
+        if isinstance(context_window, int):
+            context_window_str = f"{context_window // 1024}k"
+        else:
+            context_window_str = str(context_window)
+        
         # Build System Prompt with Context
-        system_msg = get_system_message(self.project_context)
+        system_msg = get_system_message(
+            project_context=self.project_context,
+            model_name=model_name,
+            context_window=context_window_str
+        )
         
         return [system_msg] + self.history
 
@@ -164,17 +160,11 @@ class Harness:
         self.state = AgentState.THINKING
         self.debug_stream.log("REQUEST", messages)
         
-        stream = await self.client.chat.completions.create(
-            model=pico_cfg.config.model,
-            messages=messages,
-            tools=self.tool_schemas,
-            stream=True
-        )
-        
         full_content = ""
         tool_calls_buffer: Dict[int, Dict[str, Any]] = {}
         
-        async for chunk in stream:
+        # Use server's create_completion (handles retries automatically)
+        async for chunk in self.server.create_completion(messages, tools=self.tool_schemas, stream=True):
             if not chunk.choices:
                 continue
                 
@@ -330,6 +320,40 @@ class Harness:
                 
                 yield chunks.ToolError(name=func_name, error=str(e))
 
+    async def startup_check(self) -> Dict[str, Any]:
+        """
+        Check server status at startup.
+        
+        Returns:
+            Dictionary with status information
+        """
+        status = {
+            "online": False,
+            "server_name": self.server.config.name,
+            "server_type": self.server.config.type,
+            "base_url": self.server.config.base_url,
+            "model": "unknown",
+            "context_window": "unknown",
+        }
+        
+        # Check connection
+        status["online"] = await self.server.check_connection()
+        
+        if status["online"]:
+            # Query model info
+            try:
+                status["model"] = await self.server.get_model_name()
+            except Exception as e:
+                logger.warning(f"Failed to query model name: {e}")
+            
+            try:
+                ctx = await self.server.get_context_window()
+                status["context_window"] = f"{ctx // 1024}k" if isinstance(ctx, int) else str(ctx)
+            except Exception as e:
+                logger.warning(f"Failed to query context window: {e}")
+        
+        return status
+
     async def chat(self, user_input: str) -> AsyncGenerator[chunks.Chunk, None]:
         """
         Main chat loop orchestrator.
@@ -337,7 +361,7 @@ class Harness:
         
         Yields: chunks.Chunk objects - see chunks.py for all chunk types.
         """
-        messages = self._build_messages(user_input)
+        messages = await self._build_messages(user_input)
 
         # Agent Loop (Handle Multi-step Tool Calls)
         while True:

@@ -79,17 +79,23 @@ class StatusCommand(Command):
         
         cur, max_ctx, perc = ui.agent.check_context() if hasattr(ui.agent, 'check_context') else ui.agent.estimate_context_usage()
         
-        # Query the model name dynamically if possible, fall back to config
+        # Query the model name dynamically if possible
         if hasattr(ui.agent, 'get_model_name'):
             try:
                 model_name = await ui.agent.get_model_name()
             except Exception:
-                model_name = getattr(pico_cfg.config, 'model', 'unknown')
+                model_name = 'unknown'
         else:
-            model_name = getattr(pico_cfg.config, 'model', 'unknown')
+            model_name = 'unknown'
+        
+        # Get server info from agent's server object
+        server_url = ui.agent.server.config.base_url if hasattr(ui.agent, 'server') else 'unknown'
+        server_name = ui.agent.server.config.name if hasattr(ui.agent, 'server') else 'unknown'
         
         report = (
-            f"LLM Connectivity : {color_code}{status_text}\n"
+            f"Server           : {server_name}\n"
+            f"URL              : {server_url}\n"
+            f"LLM Connectivity : {color_code}{status_text}\u001b[0m\n"
             f"Active Model     : {model_name}\n"
             f"Context Pressure : {perc:.1f}% | {cur/1024:.1f}k / {max_ctx/1024:.1f}k"
         )
@@ -138,4 +144,4 @@ async def handle_command(ui: ChatUIProtocol, text: str):
         
 
 def get_command_list() -> List[str]:
-    return [cmd for cmd in COMMANDS.keys() if not cmd.startswith("_")]
+    return [cmd for cmd in COMMANDS.keys()] # if not cmd.startswith("_")]

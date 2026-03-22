@@ -422,7 +422,7 @@ class chatTUI:
         if hasattr(self.agent, 'start'):
             self.agent.start()
             logger.info("Agent started")
-            
+        
         # Column
         children = [
             self.chat_history_panel.get_component(),
@@ -448,12 +448,40 @@ class chatTUI:
 
         # Set compositor for all panels
         self.chat_history_panel.set_compositor(self.compositor)
+        
+        # Start background server status check (non-blocking)
+        async def background_startup_check():
+            if hasattr(self.agent, 'startup_check'):
+                try:
+                    status = await self.agent.startup_check()
+                    status_color = "\x1b[32m" if status["online"] else "\x1b[31m"
+                    status_text = "online" if status["online"] else "offline"
+                    
+                    startup_msg = (
+                        f"Server           : {status['server_name']} ({status['server_type']})\n"
+                        f"URL              : {status['base_url']}\n"
+                        f"Status           : {status_color}{status_text}\033[0m\n"
+                    )
+                    
+                    if status_text == "online":
+                        startup_msg += f"Model            : {status['model']}\n"
+                        startup_msg += f"Context Window   : {status['context_window']}\n"
+                    
+                    self.chat_history_panel.add_message(
+                        startup_msg,
+                        msg_type=SysMsg(),
+                        title="server status"
+                    )
+                    logger.info(f"Server status: {status_text}")
+                except Exception as e:
+                    logger.error(f"Failed to check server status: {e}")
 
         # Run all tasks
         try:
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(self.compositor.run())
                 tg.create_task(self.agent_worker())
+                tg.create_task(background_startup_check())
         except Exception:
             # On exception, cleanup without clearing screen to preserve traceback
             if self.compositor and self.compositor.terminal:

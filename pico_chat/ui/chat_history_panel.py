@@ -146,6 +146,9 @@ class Message:
 
     def append(self, text: str):
         """Append text to the message and reformat."""
+        # If message is currently empty or whitespace-only, strip leading whitespace from first append
+        if not self.base_text.strip():
+            text = text.lstrip()
         self.base_text += text
         self.reformat(self.max_width)
         

@@ -12,9 +12,6 @@ class Config:
     def __init__(self, config_path: str | None = None):
         """Initialize configuration, optionally loading from TOML."""
         # LLM settings
-        self.base_url: str = "http://clank:3344/v1"
-        self.model: str = "GLM-4.7-Flash-Q8_0.gguf"
-        self.api_key: str = "EMPTY"
 
         # Other settings
         self.render_thinking: bool = False
