@@ -3,58 +3,30 @@ Security layer for command execution.
 
 Provides:
 - Operator parsing (quote-aware splitting of command chains)
-- Command whitelist checking
+- Permission-based command checking
 - User confirmation for interactive commands
 """
-from typing import List, Tuple, Optional, Callable
+from typing import List, Tuple, Optional, Callable, Literal, TYPE_CHECKING
 from dataclasses import dataclass
 from enum import Enum
 
+if TYPE_CHECKING:
+    from pico_chat.harness.tool_permissions import RunPermissions
 
-class CommandCategory(Enum):
-    """Command security categories"""
-    SAFE = "safe"           # Auto-allowed
-    INTERACTIVE = "interactive"  # Needs user confirmation
-    BLOCKED = "blocked"     # Never allowed
+
+class CommandAction(Enum):
+    """Action to take for a command"""
+    ALLOW = "allow"       # Auto-allowed
+    ASK = "ask"           # Needs user confirmation
+    DENY = "deny"         # Never allowed
 
 
 @dataclass
 class CommandCheck:
     """Result of command security check"""
     allowed: bool
-    category: CommandCategory
+    action: CommandAction
     message: str
-
-
-# Command classification
-SAFE_COMMANDS = {
-    # File reading
-    'cat', 'head', 'tail', 'less', 'more',
-    # File discovery
-    'ls', 'find', 'tree', 'file', 'which',
-    # Text processing
-    'grep', 'awk', 'sed', 'cut', 'sort', 'uniq', 'wc',
-    # Utilities
-    'echo', 'pwd', 'basename', 'dirname', 'realpath', 'date',
-    # File operations (within workspace)
-    'cp', 'mv', 'mkdir', 'touch', 'ln',
-}
-
-INTERACTIVE_COMMANDS = {
-    'curl', 'wget',           # Network access
-    'git',                    # Version control
-    'python', 'python3',      # Code execution
-    'node', 'npm', 'npx',     # JavaScript
-    'rm', 'rmdir',            # Deletion
-}
-
-BLOCKED_COMMANDS = {
-    'bash', 'sh', 'zsh', 'fish',  # Shell spawning
-    'eval', 'exec',               # Code injection vectors
-    'dd', 'mkfs',                 # Low-level operations
-    'sudo', 'su', 'doas',         # Privilege escalation
-    'reboot', 'shutdown',         # System control
-}
 
 
 def parse_operators(command: str) -> List[str]:
@@ -160,52 +132,67 @@ def get_command_name(command: str) -> str:
     return parts[0]
 
 
-def check_command(command: str) -> CommandCheck:
+def check_command(command: str, permissions: 'RunPermissions') -> CommandCheck:
     """
-    Check if a single command is allowed based on whitelist.
+    Check if a single command is allowed based on permissions.
     
     Args:
         command: Single command string (no operators)
+        permissions: RunPermissions object with command lists and policies
         
     Returns:
-        CommandCheck with allowed status and category
+        CommandCheck with allowed status and action
     """
     cmd_name = get_command_name(command)
     
     if not cmd_name:
         return CommandCheck(
             allowed=False,
-            category=CommandCategory.BLOCKED,
+            action=CommandAction.DENY,
             message="Empty command"
         )
     
-    if cmd_name in BLOCKED_COMMANDS:
+    # Check command lists
+    if cmd_name in permissions.deny:
         return CommandCheck(
             allowed=False,
-            category=CommandCategory.BLOCKED,
-            message=f"Command '{cmd_name}' is blocked for security reasons"
+            action=CommandAction.DENY,
+            message=f"Command '{cmd_name}' is blocked"
         )
     
-    if cmd_name in INTERACTIVE_COMMANDS:
+    if cmd_name in permissions.ask:
         return CommandCheck(
-            allowed=False,  # Will be True after user confirmation
-            category=CommandCategory.INTERACTIVE,
-            message=f"Command '{cmd_name}' requires user confirmation"
+            allowed=False,
+            action=CommandAction.ASK,
+            message=f"Command '{cmd_name}' requires confirmation"
         )
     
-    if cmd_name in SAFE_COMMANDS:
+    if cmd_name in permissions.allow:
         return CommandCheck(
             allowed=True,
-            category=CommandCategory.SAFE,
-            message=f"Command '{cmd_name}' is safe"
+            action=CommandAction.ALLOW,
+            message=f"Command '{cmd_name}' is allowed"
         )
     
-    # Unknown command - block by default
-    return CommandCheck(
-        allowed=False,
-        category=CommandCategory.BLOCKED,
-        message=f"Unknown command '{cmd_name}' (not in whitelist)"
-    )
+    # Not in any list - use 'others' policy
+    if permissions.others == "allow":
+        return CommandCheck(
+            allowed=True,
+            action=CommandAction.ALLOW,
+            message=f"Command '{cmd_name}' allowed (others policy)"
+        )
+    elif permissions.others == "ask":
+        return CommandCheck(
+            allowed=False,
+            action=CommandAction.ASK,
+            message=f"Command '{cmd_name}' requires confirmation (others policy)"
+        )
+    else:  # deny
+        return CommandCheck(
+            allowed=False,
+            action=CommandAction.DENY,
+            message=f"Command '{cmd_name}' not in allowlist"
+        )
 
 
 class SecurityChecker:
@@ -214,11 +201,17 @@ class SecurityChecker:
     Handles user confirmation for interactive commands.
     """
     
-    def __init__(self, confirmation_callback: Optional[Callable[[str], bool]] = None):
+    def __init__(
+        self,
+        permissions: 'RunPermissions',
+        confirmation_callback: Optional[Callable[[str], bool]] = None
+    ):
         """
         Args:
+            permissions: RunPermissions object defining command policies
             confirmation_callback: Function that prompts user and returns True if approved
         """
+        self.permissions = permissions
         self.confirmation_callback = confirmation_callback
     
     def check_chain(self, command: str) -> Tuple[bool, str]:
@@ -239,32 +232,63 @@ class SecurityChecker:
         if not commands:
             return False, "Empty command"
         
+        # Check chain policy first
+        if len(commands) > 1 and self.permissions.chain_policy == "ask":
+            if self.confirmation_callback:
+                approved = self.confirmation_callback(command)
+                if not approved:
+                    return False, f"[WARNING] User denied command chain"
+            else:
+                return False, f"[WARNING] Command chain requires confirmation (no confirmation mechanism available)"
+        
         # Check each command
-        blocked = []
+        denied = []
         needs_confirmation = []
+        strictest_action = CommandAction.ALLOW
         
         for cmd in commands:
-            check = check_command(cmd)
+            check = check_command(cmd, self.permissions)
             
-            if check.category == CommandCategory.BLOCKED:
-                blocked.append((cmd, check.message))
-            elif check.category == CommandCategory.INTERACTIVE:
+            if check.action == CommandAction.DENY:
+                denied.append((cmd, check.message))
+                strictest_action = CommandAction.DENY
+            elif check.action == CommandAction.ASK:
                 needs_confirmation.append((cmd, check.message))
+                if strictest_action == CommandAction.ALLOW:
+                    strictest_action = CommandAction.ASK
         
-        # If any blocked, reject immediately
-        if blocked:
-            messages = [f"[ERROR] {msg}" for cmd, msg in blocked]
+        # If any denied, reject immediately
+        if denied:
+            messages = [f"[ERROR] {msg}" for cmd, msg in denied]
             return False, "\n".join(messages)
         
-        # If any need confirmation, ask user
-        if needs_confirmation:
+        # Handle chain policy "strictest" with multiple commands
+        if len(commands) > 1 and self.permissions.chain_policy == "strictest":
+            if strictest_action == CommandAction.ASK:
+                # At least one command needs confirmation, ask about the whole chain
+                if self.confirmation_callback:
+                    approved = self.confirmation_callback(command)
+                    if not approved:
+                        return False, f"[WARNING] User denied command chain"
+                else:
+                    return False, f"[WARNING] Command chain requires confirmation (no confirmation mechanism available)"
+        elif self.permissions.chain_policy == "allow":
+            # Check each command individually that needs confirmation
             for cmd, msg in needs_confirmation:
                 if self.confirmation_callback:
                     approved = self.confirmation_callback(cmd)
                     if not approved:
                         return False, f"[WARNING] User denied: {cmd}"
                 else:
-                    # No callback means we can't confirm, so reject
+                    return False, f"[WARNING] {msg} (no confirmation mechanism available)"
+        else:
+            # Single command or chain_policy already handled
+            for cmd, msg in needs_confirmation:
+                if self.confirmation_callback:
+                    approved = self.confirmation_callback(cmd)
+                    if not approved:
+                        return False, f"[WARNING] User denied: {cmd}"
+                else:
                     return False, f"[WARNING] {msg} (no confirmation mechanism available)"
         
         # All checks passed

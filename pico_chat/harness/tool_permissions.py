@@ -3,13 +3,39 @@ Tool permissions configuration system.
 
 Provides granular permission control for LLM tools:
 - read/write/patch: Inside/outside repo granularity
-- run: Command execution with containerization toggle
+- run: Command execution with configurable command lists and policies
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 
 Permission = Literal["allow", "ask", "deny"]
+
+
+# Default command lists (migrated from security.py)
+DEFAULT_ALLOW = {
+    'cat', 'head', 'tail', 'less', 'more',                      # File reading
+    'ls', 'find', 'tree', 'file', 'which',                      # File discovery   
+    'grep', 'awk', 'sed', 'cut', 'sort', 'uniq', 'wc',          # Text processing
+    'echo', 'pwd', 'basename', 'dirname', 'realpath', 'date',   # Utilities
+    'cp', 'mv', 'mkdir', 'touch', 'ln',                         # File writing (non-destructive)
+}
+
+DEFAULT_ASK = {
+    'curl', 'wget',           # Network access
+    'git',                    # Version control
+    'python', 'python3',      # Code execution
+    'node', 'npm', 'npx',     # JavaScript
+    'rm', 'rmdir',            # Deletion
+}
+
+DEFAULT_DENY = {
+    'bash', 'sh', 'zsh', 'fish',  # Shell spawning
+    'eval', 'exec',               # Code injection vectors
+    'dd', 'mkfs',                 # Low-level operations
+    'sudo', 'su', 'doas',         # Privilege escalation
+    'reboot', 'shutdown',         # System control
+}
 
 
 @dataclass
@@ -25,15 +51,23 @@ class FilePermissions:
 
 @dataclass
 class RunPermissions:
-    """Permissions for shell command execution."""
-    enabled: Permission
-    # Containerization toggle - future feature
-    # NOTE: containerization cannot be applied to file operations outside repo
-    use_container: bool = False
+    """Permissions for shell command execution with granular command control."""
+    # Command classifications
+    allow: set[str] = field(default_factory=lambda: DEFAULT_ALLOW.copy())
+    deny: set[str] = field(default_factory=lambda: DEFAULT_DENY.copy())
+    ask: set[str] = field(default_factory=lambda: DEFAULT_ASK.copy())
     
-    def get(self) -> Permission:
-        """Get permission for running commands."""
-        return self.enabled
+    # Policy for commands not in any list
+    others: Literal["allow", "ask", "deny"] = "deny"
+    
+    # Policy for command chains (&&, ||, |, ;)
+    chain_policy: Literal["ask", "strictest", "allow"] = "strictest"
+    #   ask: Always ask when multiple commands detected
+    #   strictest: Use the strictest policy of any command in chain
+    #   allow: Allow if all individual commands are allowed
+    
+    # Containerization toggle - future feature
+    use_container: bool = False
 
 
 @dataclass
@@ -61,9 +95,9 @@ class ToolPermissionsProfile:
         """Get patch permission for a path."""
         return self.patch.get(is_inside_repo)
     
-    def get_run_permission(self) -> Permission:
-        """Get run permission."""
-        return self.run.get()
+    def get_run_permission(self) -> RunPermissions:
+        """Get run permissions."""
+        return self.run
 
 
 # --- Predefined Profiles ---
@@ -74,15 +108,13 @@ strict = ToolPermissionsProfile(
     read=FilePermissions(inside_repo="ask", outside_repo="deny"),
     write=FilePermissions(inside_repo="ask", outside_repo="deny"),
     patch=FilePermissions(inside_repo="ask", outside_repo="deny"),
-    run=RunPermissions(enabled="ask", use_container=False),
-)
-
-safe = ToolPermissionsProfile(
-    name="safe",
-    read=FilePermissions(inside_repo="allow", outside_repo="deny"),
-    write=FilePermissions(inside_repo="allow", outside_repo="deny"),
-    patch=FilePermissions(inside_repo="allow", outside_repo="deny"),
-    run=RunPermissions(enabled="ask", use_container=True),
+    run=RunPermissions(
+        allow=set(),
+        deny=set(),
+        ask=set(),
+        others="ask",
+        use_container=False
+    ),
 )
 
 # Permissive profile: allow operations inside repo, ask for outside/commands
@@ -91,7 +123,7 @@ permissive = ToolPermissionsProfile(
     read=FilePermissions(inside_repo="allow", outside_repo="ask"),
     write=FilePermissions(inside_repo="allow", outside_repo="deny"),
     patch=FilePermissions(inside_repo="allow", outside_repo="deny"),
-    run=RunPermissions(enabled="ask", use_container=False),
+    run=RunPermissions(use_container=False),
 )
 
 # Unrestricted profile: allow everything (use with caution!)
@@ -100,7 +132,13 @@ unrestricted = ToolPermissionsProfile(
     read=FilePermissions(inside_repo="allow", outside_repo="allow"),
     write=FilePermissions(inside_repo="allow", outside_repo="allow"),
     patch=FilePermissions(inside_repo="allow", outside_repo="allow"),
-    run=RunPermissions(enabled="allow", use_container=False),
+    run=RunPermissions(
+        allow=set(),
+        deny=set(),
+        ask=set(),
+        others="allow", # allow all commands
+        use_container=False
+    ),
 )
 
 # Locked profile: deny everything
@@ -109,7 +147,13 @@ locked = ToolPermissionsProfile(
     read=FilePermissions(inside_repo="deny", outside_repo="deny"),
     write=FilePermissions(inside_repo="deny", outside_repo="deny"),
     patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
-    run=RunPermissions(enabled="deny", use_container=False),
+    run=RunPermissions(
+        allow=set(),
+        deny=DEFAULT_ALLOW | DEFAULT_ASK | DEFAULT_DENY,
+        ask=set(),
+        others="deny",
+        use_container=False
+    ),
 )
 
 # Global permissions profile (can be changed at runtime)

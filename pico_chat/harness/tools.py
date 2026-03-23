@@ -222,17 +222,27 @@ class ShellTool:
         self,
         workspace_path: str | Path,
         security_checker: Optional[SecurityChecker] = None,
-        permissions: Optional[ToolPermissionsProfile] = None
+        permissions: Optional[ToolPermissionsProfile] = None,
+        confirmation_callback: Optional[Callable[[str], bool]] = None
     ):
         """
         Args:
             workspace_path: Working directory for command execution
-            security_checker: Security checker for command validation
+            security_checker: Security checker for command validation (deprecated, will be created from permissions)
             permissions: Tool permissions profile (uses default if not provided)
+            confirmation_callback: Callback for user confirmation
         """
         self.workspace = Path(workspace_path).resolve()
-        self.security_checker = security_checker or SecurityChecker()
         self.permissions = permissions or default_permissions
+        
+        # Create security checker with permissions if not provided
+        if security_checker:
+            self.security_checker = security_checker
+        else:
+            self.security_checker = SecurityChecker(
+                permissions=self.permissions.run,
+                confirmation_callback=confirmation_callback
+            )
     
     def run(self, command: str, timeout: int = 30) -> str:
         """
@@ -252,15 +262,7 @@ class ShellTool:
             >>> tool.run("ls -la")
             '[stdout]\\nfile.txt\\n[exit:0 | 0.1ms]'
         """
-        # Check permissions
-        permission = self.permissions.get_run_permission()
-        if permission == "deny":
-            raise ToolError("Permission denied: run command is not allowed")
-        elif permission == "ask":
-            # Security check handles ask permission via confirmation callback
-            pass
-        
-        # Security check
+        # Security check (now handles all permission logic)
         allowed, message = self.security_checker.check_chain(command)
         if not allowed:
             raise ToolError(message)
@@ -323,9 +325,11 @@ class MinimalToolset:
         perms = permissions or default_permissions
         
         self.file_tools = FileTools(workspace, permissions=perms)
-        
-        security_checker = SecurityChecker(confirmation_callback)
-        self.shell_tool = ShellTool(workspace, security_checker, permissions=perms)
+        self.shell_tool = ShellTool(
+            workspace,
+            permissions=perms,
+            confirmation_callback=confirmation_callback
+        )
         
         self.permissions = perms
     
