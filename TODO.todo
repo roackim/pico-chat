@@ -9,13 +9,11 @@
 
 [ ] Live Markdown rendering
     [ ] Special for code
-        [ ] Split into multiple messages ? 
+        [ ] Split into multiple messages e? 
             - md
             - code block (without md rendering, maybe with syntax highlighting, no line wrapping ?, etc)
             - md
             
-            
-
 [ ] When scrolling up in the history, anchor the hist to not scroll down 
     when new messages come in until the user scrolls back to the bottom (like in slack, discord, etc)
     and when a message is being written
@@ -27,10 +25,10 @@
             like: [c] copy  [e] edit
     [!] add said commands
 
-[ ] llamacpp add a reasoning budget
+[ ] reasoning budget - llamacpp supports this
 
 [ ] check for different thinking tags for different models
-[ ] split command:
+[?] split command:
     - splits the terminal in 2 vertical panels, seperate conversations in each panel ?
         [?] think more about the use case for this. Should not be so difficult to implement.
         [ ] maybe the vsplit should be attached to the conversation
@@ -48,7 +46,12 @@
         -> should be clickable with mouse or keyboard with LEFT/RIGHT to select button and ENTER to confirm
             -> or maybe also Y / N
 
-[ ] Bubblewrap containerize tool calls for security (e.g. file access, command execution, etc)
+[ ] containerize tool calls for security (e.g. file access, command execution, etc)
+    [ ] Bubblewrap 
+    [ ] Docker
+    [ ] Podman
+    ---
+    [ ] Evalutate the need for multiple containerization options
 
 [x] Input field: dynamic height when line wrapping
 [x] Input field: ergonomics (ctrl+w, cursor movement, home/end, ctrl+backspace etc)
@@ -63,11 +66,6 @@
     - [expand] [collapse] button to toggle visibility of intermediate thoughts / tool calls
     - show last N lines of intermediate thoughts / tool calls in the history panel while generating
         
-[ ] Complexify Markdown rendering
-    [ ] Live markdown rendering (e.g. render code blocks as they are being generated, render headers, lists, etc)
-    [ ] Add AsciiTable for interpreting markdown tables in the chat history
-    [ ] Codeblock should not wrap lines or add continuation chars (way simpler)
-
 [x] Sky Color plugging
 [x] Styles
 
@@ -101,11 +99,17 @@ BUGS:
     [x] Re-enable cursor after program closes OR ctrl+c
 
 LONG TERM:
-[ ] Config
-[ ] Open Router support
-[ ] Custom System prompts / Personalities
-[ ] Custom commands / tools
-[ ] Custom prompts aliases like @docs to quickly ask for documentation 
+[o] Config
+    [ ] Save / Load config from file
+[x] Theme support
+[ ] Containerization for security
+
+[o] Open Router support
+    [ ] Needs testing and debugging
+[ ] Plugin system for tools, prompts, etc
+    [ ] Custom commands / tools
+    [ ] Custom System prompts / Personalities
+    [ ] Custom prompts aliases like @docs to quickly ask for documentation 
 [o] Context builder
 
     
