@@ -604,8 +604,8 @@ class ChatHistoryPanel(TextComponent):
         return False
 
 
-    def new_message(self, message: str, *, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None, left_margin: int = 0, right_margin: int = 0) -> Message:
-        """Create a new message and append it to the chat history.
+    def new_message(self, message: str, *, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None, left_margin: int = 0, right_margin: int = 0, append=False) -> Message:
+        """Create a new message. If append is True, add it to the chat history. Return the Message object for further manipulation.
         
         Args:
             message: The text to add
@@ -642,9 +642,11 @@ class ChatHistoryPanel(TextComponent):
             left_margin=left_margin,
             right_margin=right_margin
         )
-        self.messages.append(new_message)
-        self.msg_container.children.append(new_message.get_component())
-        self.msg_container.sizes.append("auto")
+        
+        if append:
+            self.messages.append(new_message)
+            self.msg_container.children.append(new_message.get_component())
+            self.msg_container.sizes.append("auto")
         
         # Keep only last max_messages
         if len(self.messages) > self.max_messages:
@@ -738,7 +740,7 @@ class ChatHistoryPanel(TextComponent):
         Returns:
             The created Message object.
         """
-        return self.new_message(message, msg_type=msg_type, title=title, frame_color=frame_color, content_color=content_color, left_margin=left_margin, right_margin=right_margin)
+        return self.new_message(message, msg_type=msg_type, title=title, frame_color=frame_color, content_color=content_color, left_margin=left_margin, right_margin=right_margin, append=True)
 
 
     def clear(self):

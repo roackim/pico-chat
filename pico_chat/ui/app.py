@@ -131,6 +131,9 @@ class chatTUI:
         # Track the current generation task
         self.current_generation_task: Optional[asyncio.Task] = None
         
+        # Track which message is being edited (for edit-then-submit workflow)
+        self.editing_message_index: Optional[int] = None
+        
         # Command queue for structured execution
         self.command_queue = asyncio.Queue()
         
@@ -164,8 +167,8 @@ class chatTUI:
         chat = self.chat_history_panel
         current_msg = chat.add_message("Sending request...", msg_type=SysMsg())
         
-        mode = "connecting"
-        current_msg = None
+        mode = "request"
+        # current_msg = None
         
         # Process streaming response from Harness
         try:
@@ -173,10 +176,10 @@ class chatTUI:
                 
                 if isinstance(chunk, chunks.Thinking): # Special chunk type for "thinking" content
                     
-                    if current_msg is None and mode != "thinking":
+                    if mode == "request":
                         # Start a new message for thinking content
                         new_msg = chat.new_message("", msg_type=ThinkingMsg())
-                        chat.replace_message(current_msg, new_msg)
+                        chat.replace_message(current_msg, new_msg) # Replace the "Sending request..." message with the new thinking message
                         current_msg = new_msg
                         mode = "thinking"
                     
@@ -187,7 +190,7 @@ class chatTUI:
                     text = chunk.content
                     if mode == "thinking":
                         current_msg.set_title("thoughts") # Update title for thinking content
-                        current_msg = chat.add_message("", msg_type=PicoMsg())
+                        current_msg = chat.add_message("", msg_type=PicoMsg()) # Create a new message for regular content
                         mode = "answering"
                     
                     # Render regular content
@@ -429,6 +432,12 @@ class chatTUI:
         logger = logging.getLogger("tui")
         logger.info("Edit action triggered")
         
+        # Store which message is being edited
+        try:
+            self.editing_message_index = self.chat_history_panel.messages.index(message)
+        except ValueError:
+            self.editing_message_index = None
+        
         # Populate input field with message content
         self.input_component.update(message.base_text)
         
@@ -561,7 +570,22 @@ class chatTUI:
         else:
             import logging
             logger = logging.getLogger("tui")
-            logger.info(f"User submitted: {text[:50]}...")
+            
+            # Check if we're editing an existing message
+            if self.editing_message_index is not None:
+                logger.info(f"Editing message at index {self.editing_message_index}: {text[:50]}...")
+                
+                # Remove all messages after the edited one
+                messages_to_remove = len(self.chat_history_panel.messages) - self.editing_message_index
+                for _ in range(messages_to_remove):
+                    self.chat_history_panel.remove_last_message()
+                
+                # Clear editing state
+                self.editing_message_index = None
+                
+                # Fall through to add the edited message and resubmit
+            else:
+                logger.info(f"User submitted: {text[:50]}...")
             
             # Enable auto-scroll to show the new message
             self.chat_history_panel.auto_scroll = True
