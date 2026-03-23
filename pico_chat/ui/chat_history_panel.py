@@ -70,7 +70,7 @@ class Message:
         self.right_margin = right_margin
         self.formatted_text = self._format_line_wrap()
         self.component = TextComponent(self.formatted_text, fg=content_color)
-        self.box = Box(self.component, title=self.title, fg=self.frame_color)
+        self.box = Box(self.component, title=self.title, fg=self.frame_color, actions=self.type.actions)
     
     def set_title(self, title: str):
         """Update the title of the message box."""

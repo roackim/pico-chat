@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional, Any
+from typing import Optional, Any, List
 from pico_chat.ui.tui.components.base import Component
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.terminal import MouseEvent
@@ -8,7 +8,7 @@ from pico_chat import pico_cfg
 from pico_chat.ui.tui.colors import theme
 
 class Box(Component):
-    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False):
+    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None):
         super().__init__(id)
         self.child = child
         self.child.parent = self
@@ -16,6 +16,7 @@ class Box(Component):
         self.bg = bg
         self.fg = fg
         self.focused = focused
+        self.actions = actions or []
         
         if self.bg is None: self.bg = theme.get_bg()
         if self.fg is None: self.fg = theme.DEFAULT
@@ -95,8 +96,35 @@ class Box(Component):
         for i in range(1, self.height - 1):
             buffer.set(self.x + self.width - 1, self.y + i, style.v, fg=fg, bg=bg)
 
-        for i in range(1, self.width - 1):
-            buffer.set(self.x + i, self.y + self.height - 1, style.h, fg=fg, bg=bg)
+        # Bottom border with actions
+        if self.actions and self.focused:
+            # Format actions string like " [r] remove [c] copy [e] edit "
+            actions_str = " " + " ".join(action.format() for action in self.actions) + " "
+            actions_width = len(actions_str)
+            
+            # Calculate how much space we have for the bottom border
+            # We need at least 2 chars for corners + 1 char border on the right
+            available_width = self.width - 3
+            
+            if actions_width <= available_width:
+                # Draw left part of bottom border
+                left_border_width = available_width - actions_width
+                for i in range(1, left_border_width + 1):
+                    buffer.set(self.x + i, self.y + self.height - 1, style.h, fg=fg, bg=bg)
+                
+                # Draw actions string
+                buffer.write_str(self.x + left_border_width + 1, self.y + self.height - 1, actions_str, fg=fg, bg=bg)
+                
+                # Draw one more border char on the right before the corner
+                buffer.set(self.x + self.width - 2, self.y + self.height - 1, style.h, fg=fg, bg=bg)
+            else:
+                # Actions too long, just draw normal border
+                for i in range(1, self.width - 1):
+                    buffer.set(self.x + i, self.y + self.height - 1, style.h, fg=fg, bg=bg)
+        else:
+            # No actions, draw normal bottom border
+            for i in range(1, self.width - 1):
+                buffer.set(self.x + i, self.y + self.height - 1, style.h, fg=fg, bg=bg)
 
         # Corners
         buffer.set(self.x + self.width - 1, self.y, style.tr, fg=fg, bg=bg)
