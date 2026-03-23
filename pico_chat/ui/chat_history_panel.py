@@ -219,9 +219,11 @@ class ChatHistoryPanel(TextComponent):
         if self.focused_message_index is None:
             # Focus the last message if nothing is focused
             self.set_focused_message(len(self.messages) - 1)
+            self._scroll_to_show_message(self.focused_message_index, prefer_top=True)
             return True
         elif self.focused_message_index > 0:
             self.set_focused_message(self.focused_message_index - 1)
+            self._scroll_to_show_message(self.focused_message_index, prefer_top=True)
             return True
         return False
     
@@ -237,9 +239,11 @@ class ChatHistoryPanel(TextComponent):
         if self.focused_message_index is None:
             # Focus the first message if nothing is focused
             self.set_focused_message(0)
+            self._scroll_to_show_message(self.focused_message_index, prefer_top=False)
             return True
         elif self.focused_message_index < len(self.messages) - 1:
             self.set_focused_message(self.focused_message_index + 1)
+            self._scroll_to_show_message(self.focused_message_index, prefer_top=False)
             return True
         return False
     
@@ -318,6 +322,109 @@ class ChatHistoryPanel(TextComponent):
                 line_map.append((i, local_y))
         
         return line_map
+    
+    def _get_message_virtual_y_range(self, msg_index: int) -> tuple[int, int]:
+        """Get the virtual y-coordinate range for a message.
+        
+        Args:
+            msg_index: Index of the message
+            
+        Returns:
+            Tuple of (start_y, end_y) in virtual coordinates (exclusive end)
+        """
+        if msg_index < 0 or msg_index >= len(self.messages):
+            return (0, 0)
+        
+        gap = pico_cfg.config.ui_msg_v_margin
+        virtual_y = 0
+        
+        for i, msg in enumerate(self.messages):
+            # Add gap before this message (skip for the first message)
+            if i > 0:
+                virtual_y += gap
+            
+            if i == msg_index:
+                # Found our message
+                child = msg.get_component()
+                child_w = self.width - msg.left_margin - msg.right_margin
+                child_h = child.get_preferred_height(child_w)
+                return (virtual_y, virtual_y + child_h)
+            
+            # Move past this message
+            child = msg.get_component()
+            child_w = self.width - msg.left_margin - msg.right_margin
+            child_h = child.get_preferred_height(child_w)
+            virtual_y += child_h
+        
+        return (0, 0)
+    
+    def _scroll_to_show_message(self, msg_index: int, prefer_top: bool = True):
+        """Scroll to ensure a message is visible.
+        
+        Args:
+            msg_index: Index of the message to show
+            prefer_top: If True, prioritize showing the top of the message.
+                       If False, prioritize showing the bottom.
+        """
+        if msg_index < 0 or msg_index >= len(self.messages):
+            return
+        
+        # Get message's virtual position
+        msg_start, msg_end = self._get_message_virtual_y_range(msg_index)
+        msg_height = msg_end - msg_start
+        
+        # Calculate current visible range in virtual coordinates
+        line_map = self._build_line_map()
+        total_height = len(line_map)
+        max_scroll = max(0, total_height - self.height)
+        start_y = max_scroll - self.scroll_offset
+        end_y = start_y + self.height
+        
+        # Check if message is already fully visible
+        if msg_start >= start_y and msg_end <= end_y:
+            return  # Already visible
+        
+        if prefer_top:
+            # Scrolling up - prioritize showing the top
+            if msg_start < start_y:
+                # Message top is above visible area, scroll up to show it
+                new_start_y = msg_start
+                self.scroll_offset = max_scroll - new_start_y
+                self.scroll_offset = max(0, min(max_scroll, self.scroll_offset))
+            elif msg_end > end_y:
+                # Message bottom is below visible area
+                # Try to show the whole message, but prioritize the top
+                if msg_height <= self.height:
+                    # Message fits in view, show it all
+                    new_start_y = msg_end - self.height
+                else:
+                    # Message is taller than view, show from the top
+                    new_start_y = msg_start
+                self.scroll_offset = max_scroll - new_start_y
+                self.scroll_offset = max(0, min(max_scroll, self.scroll_offset))
+        else:
+            # Scrolling down - prioritize showing the bottom
+            if msg_end > end_y:
+                # Message bottom is below visible area, scroll down to show it
+                new_end_y = msg_end
+                new_start_y = new_end_y - self.height
+                self.scroll_offset = max_scroll - new_start_y
+                self.scroll_offset = max(0, min(max_scroll, self.scroll_offset))
+            elif msg_start < start_y:
+                # Message top is above visible area
+                # Try to show the whole message, but prioritize the bottom
+                if msg_height <= self.height:
+                    # Message fits in view, show it all
+                    new_end_y = msg_start + self.height
+                    new_start_y = new_end_y - self.height
+                else:
+                    # Message is taller than view, show from the bottom
+                    new_end_y = msg_end
+                    new_start_y = new_end_y - self.height
+                self.scroll_offset = max_scroll - new_start_y
+                self.scroll_offset = max(0, min(max_scroll, self.scroll_offset))
+        
+        self.auto_scroll = False
 
     def render(self, buffer: Buffer):
         """Custom render to handle scrolling/clipping of messages."""
