@@ -439,6 +439,11 @@ class chatTUI:
         
         # Update chat history keyboard focus
         self.chat_history_panel.set_keyboard_focus(is_history_focused)
+        
+        # Auto-scroll to bottom when input field is focused
+        if is_input_focused:
+            self.chat_history_panel.auto_scroll = True
+            self.chat_history_panel.scroll_offset = 0
 
     def handle_global_input(self, event: Any) -> bool:
         """Handle focus logging and input dispatch with navigation between input and history."""

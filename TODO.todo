@@ -7,12 +7,20 @@
     [ ] /retry
     [ ] /connect - connect to a different LLM server (prompt for URL, API key, etc)
 
-[ ] When focusing a message scroll to see it
-[ ] When focused add message footer with commands
-            like: [c] copy  [e] edit
-    [ ] add said commands
+[ ] when scrolling up in the history, anchor the hist to not scroll down 
+    when new messages come in until the user scrolls back to the bottom (like in slack, discord, etc)
+    and when a message is being written
 
-[ ] THINKING TAGS DIFFERENT ON NEMOTRON ???
+[ ] add an indicator for down message like "+3 messages"
+
+[x] When focusing a message scroll to see it
+[x] When focused add message footer with commands
+            like: [c] copy  [e] edit
+    [!] add said commands
+
+[ ] llamacpp add a reasoning budget
+
+[ ] check for different thinking tags for different models
 [ ] split command:
     - splits the terminal in 2 vertical panels, seperate conversations in each panel ?
         [?] think more about the use case for this. Should not be so difficult to implement.

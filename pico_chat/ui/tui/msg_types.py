@@ -18,6 +18,7 @@ class MsgAction(Enum):
     def format(self) -> str:
         """Format action as [key] label."""
         return f"[{self.key}] {self.label}"
+        # return f"{self.key}: {self.label}"
 
 class MsgType:
     """Base class for message types."""
