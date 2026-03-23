@@ -14,6 +14,7 @@ from pico_chat.ui.tui.terminal import MouseEvent
 from pico_chat.ui.tui.components import TextComponent, Box, InputComponent
 from pico_chat.ui.tui.components.debug_panel import DebugLogPanel
 from pico_chat.ui.chat_history_panel import ChatHistoryPanel
+from pico_chat.ui.chat_message import Message
 from pico_chat.ui.commands import handle_command, get_command_list, get_subcommand_list
 from pico_chat.ui.tui.container import Vsplit, Hsplit
 from pico_chat.ui.tui.layout_utils import strip_ansi
@@ -136,6 +137,8 @@ class chatTUI:
         
         # Track if we're in a retry (to avoid duplicate user message in UI)
         self.is_retrying: bool = False
+        # Track the specific user message being processed (for harness ID assignment)
+        self.processing_user_msg: Optional[Message] = None
         
         # Command queue for structured execution
         self.command_queue = asyncio.Queue()
@@ -183,12 +186,19 @@ class chatTUI:
                     logger.debug(f"MessageStart: {chunk.role} with ID {chunk.message_id}")
                     
                     if chunk.role == "user":
-                        # Find the user message without a harness ID and update it
-                        for msg in reversed(chat.messages):
-                            if isinstance(msg.type, UserMsg) and not msg.harness_message_ids:
-                                msg.harness_message_ids = [chunk.message_id]
-                                logger.debug(f"Updated user message with harness ID {chunk.message_id}")
-                                break
+                        # Find the specific user message being processed or last one without ID
+                        target_msg = self.processing_user_msg if self.processing_user_msg else None
+                        if target_msg and not target_msg.harness_message_ids:
+                            target_msg.harness_message_ids = [chunk.message_id]
+                            logger.debug(f"Updated tracked user message with harness ID {chunk.message_id}")
+                            self.processing_user_msg = None
+                        else:
+                            # Fallback: find last user message without ID
+                            for msg in reversed(chat.messages):
+                                if isinstance(msg.type, UserMsg) and not msg.harness_message_ids:
+                                    msg.harness_message_ids = [chunk.message_id]
+                                    logger.debug(f"Updated user message with harness ID {chunk.message_id}")
+                                    break
                     
                 elif isinstance(chunk, chunks.Thinking): # Special chunk type for "thinking" content
                     
@@ -506,6 +516,8 @@ class chatTUI:
                 
                 # Set retry flag to prevent duplicate in UI
                 self.is_retrying = True
+                # Track which message we're processing so ID gets assigned correctly
+                self.processing_user_msg = user_msg
                 
                 # Resubmit the user message
                 user_text = user_msg.base_text
@@ -634,6 +646,8 @@ class chatTUI:
                 
                 # Set flag to prevent duplicate user message
                 self.is_retrying = True
+                # Track which message we're processing
+                self.processing_user_msg = edited_msg
                 
                 # Clear editing state
                 self.editing_message_index = None
@@ -647,7 +661,9 @@ class chatTUI:
             
             # Add user message to UI (skip if retrying - already exists)
             if not self.is_retrying:
-                self.chat_history_panel.add_message(text, msg_type=UserMsg())
+                # Track the new message for harness ID assignment
+                new_msg = self.chat_history_panel.add_message(text, msg_type=UserMsg())
+                self.processing_user_msg = new_msg
             else:
                 self.is_retrying = False
             
