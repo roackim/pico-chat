@@ -32,8 +32,9 @@ class Config:
         self.ui_msg_h_padding: int = 1 # Horizontal padding for text in UI components 
         self.ui_msg_v_margin: int = 0 # Vertical padding between messages in ChatHistoryPanel
         
-        self.ui_box_style: str = "rounded" # Box border style: ("single", "double", "rounded")
-        self.ui_box_style_focused: str = "rounded" # NOTE: currently unplugged; Box border style when focused: ("single", "double", "rounded")
+        style = "rounded"
+        self.ui_box_style: str = style # Box border style: ("single", "double", "rounded")
+        self.ui_box_style_focused: str = style # NOTE: currently unplugged; Box border style when focused: ("single", "double", "rounded")
         
         self.target_fps: int = 60
 
