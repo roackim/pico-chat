@@ -22,12 +22,6 @@ class Content(Chunk):
 
 
 @dataclass
-class ToolBatchStart(Chunk):
-    """Indicates the start of tool execution batch."""
-    count: int
-
-
-@dataclass
 class ToolStart(Chunk):
     """A tool execution is starting."""
     name: str

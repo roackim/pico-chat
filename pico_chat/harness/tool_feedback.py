@@ -72,20 +72,6 @@ class ToolFeedbackFormatter:
         
         return f"\033[90m{status} {func_name}: {result_preview}\033[0m\n"
     
-    def format_batch_start(self, count: int) -> str:
-        """
-        Format message when starting to execute multiple tools.
-        
-        Args:
-            count: Number of tools to execute
-            
-        Returns:
-            Formatted message string
-        """
-        if count == 1:
-            return ""  # Don't show batch message for single tool
-        return f"\n\033[90m[Executing {count} tool calls...]\033[0m\n"
-    
     def _format_args_for_display(self, func_name: str, args: Dict[str, Any]) -> str:
         """
         Format arguments for readable display.
@@ -146,11 +132,6 @@ def format_tool_call_start(func_name: str, args_str: str) -> str:
 def format_tool_call_complete(func_name: str, result: str) -> str:
     """Format tool call complete message using default formatter"""
     return _default_formatter.format_tool_call_complete(func_name, result)
-
-
-def format_batch_start(count: int) -> str:
-    """Format batch execution start message using default formatter"""
-    return _default_formatter.format_batch_start(count)
 
 
 def set_verbose(verbose: bool):

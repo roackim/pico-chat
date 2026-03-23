@@ -196,24 +196,20 @@ class chatTUI:
                     # Render regular content
                     current_msg.append(text)
                 
-                elif isinstance(chunk, chunks.ToolBatchStart):
-                    # Show tool execution started
-                    current_msg.append(f"\n{theme.MUTED}[Executing {chunk.count} tool(s)...]{theme.reset()}\n")
-                
                 elif isinstance(chunk, chunks.ToolStart):
                     # Show which tool is being called
-                    current_msg.append(f"{theme.INFO}🔧 {chunk.name}{theme.reset()} ")
+                    current_msg.append(f"{theme.DEFAULT}🔧 {chunk.name}{theme.reset()} ")
                 
                 elif isinstance(chunk, chunks.ToolComplete):
                     # Show tool completion (truncate long results)
                     result = chunk.result
                     if len(result) > 100:
                         result = result[:100] + "..."
-                    current_msg.append(f"{theme.SUCCESS}✓{theme.reset()}\n")
+                    current_msg.append(f"{theme.DEFAULT}✓{theme.reset()}\n")
                 
                 elif isinstance(chunk, chunks.ToolWaitInput):
                     # Show waiting for user input
-                    current_msg.append(f"\n{theme.INFO}[Waiting for input: {chunk.prompt}]{theme.reset()}\n")
+                    current_msg.append(f"\n{theme.DEFAULT}[Waiting for input: {chunk.prompt}]{theme.reset()}\n")
                 
                 elif isinstance(chunk, chunks.ToolError):
                     # Show tool error

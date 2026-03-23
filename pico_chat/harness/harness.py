@@ -248,14 +248,12 @@ class Harness:
         Execute all tool calls and update history.
         
         Yields: chunks.Chunk subclasses:
-            - chunks.ToolBatchStart: Starting batch of tools
             - chunks.ToolStart: Individual tool execution begins
             - chunks.ToolComplete: Tool finished successfully
             - chunks.ToolWaitInput: Waiting for user input
             - chunks.ToolError: Tool execution failed
         """
         self.state = AgentState.THINKING
-        yield chunks.ToolBatchStart(count=len(tool_calls_list))
         
         for tc in tool_calls_list:
             func_name = tc["function"]["name"]

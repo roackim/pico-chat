@@ -64,7 +64,7 @@ class Box(Component):
             v: str   # vertical
             
         STYLES = {
-            "single":  BorderStyle("┌", "┐", "└", "┘", "─", "│"),
+            "square":  BorderStyle("┌", "┐", "└", "┘", "─", "│"),
             "double":  BorderStyle("╔", "╗", "╚", "╝", "═", "║"),
             "ascii":   BorderStyle("+", "+", "+", "+", "-", "|"),
             "rounded": BorderStyle("╭", "╮", "╰", "╯", "─", "│"),
