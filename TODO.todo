@@ -7,6 +7,10 @@
     [ ] /retry
     [ ] /connect - connect to a different LLM server (prompt for URL, API key, etc)
 
+[ ] Re-Inject reasoning / tool call content to the LLM for successive messages
+    [ ] Feature to summerize the reasoning / tool call content to avoid hitting context limits too fast
+    [ ] Option to include / exclude certain types of content (e.g. only tool calls, only reasoning, etc)
+
 [ ] Live Markdown rendering
     [ ] Special for code
         [ ] Split into multiple messages e? 
@@ -23,7 +27,8 @@
 [x] When focusing a message scroll to see it
 [x] When focused add message footer with commands
             like: [c] copy  [e] edit
-    [!] add said commands
+    [x] add said commands
+    [ ] allow / deny prompt
 
 [ ] reasoning budget - llamacpp supports this
 

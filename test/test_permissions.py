@@ -1,0 +1,531 @@
+"""
+Test suite for tool permissions system.
+
+Tests permission enforcement for read/write/patch/run operations
+with inside/outside repo granularity and ask/allow/deny states.
+"""
+import pytest
+from pathlib import Path
+from pico_chat.harness.tools import MinimalToolset, ToolError
+from pico_chat.harness.tool_permissions import (
+    ToolPermissionsProfile,
+    FilePermissions,
+    RunPermissions,
+)
+
+
+class TestReadPermissions:
+    """Test read permission enforcement."""
+    
+    def test_read_allowed_inside_repo(self, tmp_path):
+        """Read should work when allowed inside repo."""
+        # Setup
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("content")
+        
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="allow", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="deny"),
+        )
+        
+        tools = MinimalToolset(tmp_path, permissions=permissions)
+        
+        # Execute
+        result = tools.read("test.txt")
+        
+        # Assert
+        assert result == "content"
+    
+    def test_read_denied_inside_repo(self, tmp_path):
+        """Read should fail when denied inside repo."""
+        # Setup
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("content")
+        
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="deny"),
+        )
+        
+        tools = MinimalToolset(tmp_path, permissions=permissions)
+        
+        # Execute & Assert
+        with pytest.raises(ToolError, match="Permission denied: read inside repo"):
+            tools.read("test.txt")
+    
+    def test_read_denied_outside_repo(self, tmp_path):
+        """Read should fail when denied outside repo."""
+        # Setup workspace and external file
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        
+        external = tmp_path / "external"
+        external.mkdir()
+        external_file = external / "secret.txt"
+        external_file.write_text("secret")
+        
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="allow", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="deny"),
+        )
+        
+        tools = MinimalToolset(workspace, permissions=permissions)
+        
+        # Execute & Assert
+        with pytest.raises(ToolError, match="Permission denied: read outside repo"):
+            tools.read(str(external_file))
+    
+    def test_read_allowed_outside_repo(self, tmp_path):
+        """Read should work when allowed outside repo."""
+        # Setup workspace and external file
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        
+        external = tmp_path / "external"
+        external.mkdir()
+        external_file = external / "data.txt"
+        external_file.write_text("external data")
+        
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="allow", outside_repo="allow"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="deny"),
+        )
+        
+        tools = MinimalToolset(workspace, permissions=permissions)
+        
+        # Execute
+        result = tools.read(str(external_file))
+        
+        # Assert
+        assert result == "external data"
+    
+    def test_read_ask_not_implemented(self, tmp_path):
+        """Read with 'ask' should raise not implemented error."""
+        # Setup
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("content")
+        
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="ask", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="deny"),
+        )
+        
+        tools = MinimalToolset(tmp_path, permissions=permissions)
+        
+        # Execute & Assert
+        with pytest.raises(ToolError, match="not yet implemented"):
+            tools.read("test.txt")
+
+
+class TestWritePermissions:
+    """Test write permission enforcement."""
+    
+    def test_write_allowed_inside_repo(self, tmp_path):
+        """Write should work when allowed inside repo."""
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            write=FilePermissions(inside_repo="allow", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="deny"),
+        )
+        
+        tools = MinimalToolset(tmp_path, permissions=permissions)
+        
+        # Execute
+        result = tools.write("output.txt", "data")
+        
+        # Assert
+        assert "[OK]" in result
+        assert (tmp_path / "output.txt").read_text() == "data"
+    
+    def test_write_denied_inside_repo(self, tmp_path):
+        """Write should fail when denied inside repo."""
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="deny"),
+        )
+        
+        tools = MinimalToolset(tmp_path, permissions=permissions)
+        
+        # Execute & Assert
+        with pytest.raises(ToolError, match="Permission denied: write inside repo"):
+            tools.write("output.txt", "data")
+    
+    def test_write_denied_outside_repo(self, tmp_path):
+        """Write should fail when denied outside repo."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        
+        external = tmp_path / "external"
+        external.mkdir()
+        
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            write=FilePermissions(inside_repo="allow", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="deny"),
+        )
+        
+        tools = MinimalToolset(workspace, permissions=permissions)
+        
+        # Execute & Assert
+        with pytest.raises(ToolError, match="Permission denied: write outside repo"):
+            tools.write(str(external / "file.txt"), "data")
+    
+    def test_write_allowed_outside_repo(self, tmp_path):
+        """Write should work when allowed outside repo."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        
+        external = tmp_path / "external"
+        external.mkdir()
+        
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            write=FilePermissions(inside_repo="allow", outside_repo="allow"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="deny"),
+        )
+        
+        tools = MinimalToolset(workspace, permissions=permissions)
+        
+        # Execute
+        result = tools.write(str(external / "file.txt"), "external")
+        
+        # Assert
+        assert "[OK]" in result
+        assert (external / "file.txt").read_text() == "external"
+
+
+class TestPatchPermissions:
+    """Test patch permission enforcement."""
+    
+    def test_patch_allowed_inside_repo(self, tmp_path):
+        """Patch should work when allowed inside repo."""
+        # Setup
+        test_file = tmp_path / "code.py"
+        test_file.write_text("old = 1\n")
+        
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="allow", outside_repo="deny"),
+            write=FilePermissions(inside_repo="allow", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="allow", outside_repo="deny"),
+            run=RunPermissions(others="deny"),
+        )
+        
+        tools = MinimalToolset(tmp_path, permissions=permissions)
+        
+        patch_content = """code.py
+<<<<<<< SEARCH
+old = 1
+=======
+new = 2
+>>>>>>> REPLACE
+"""
+        
+        # Execute
+        result = tools.patch(patch_content)
+        
+        # Assert
+        assert "[OK]" in result
+        assert test_file.read_text() == "new = 2\n"
+    
+    def test_patch_denied_inside_repo(self, tmp_path):
+        """Patch should fail when denied inside repo."""
+        test_file = tmp_path / "code.py"
+        test_file.write_text("old = 1\n")
+        
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="allow", outside_repo="deny"),
+            write=FilePermissions(inside_repo="allow", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="deny"),
+        )
+        
+        tools = MinimalToolset(tmp_path, permissions=permissions)
+        
+        patch_content = """code.py
+<<<<<<< SEARCH
+old = 1
+=======
+new = 2
+>>>>>>> REPLACE
+"""
+        
+        # Execute & Assert
+        with pytest.raises(ToolError, match="Permission denied: patch inside repo"):
+            tools.patch(patch_content)
+    
+    def test_patch_denied_outside_repo(self, tmp_path):
+        """Patch should fail when denied outside repo."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        
+        external = tmp_path / "external"
+        external.mkdir()
+        external_file = external / "code.py"
+        external_file.write_text("old = 1\n")
+        
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="allow", outside_repo="allow"),
+            write=FilePermissions(inside_repo="allow", outside_repo="allow"),
+            patch=FilePermissions(inside_repo="allow", outside_repo="deny"),
+            run=RunPermissions(others="deny"),
+        )
+        
+        tools = MinimalToolset(workspace, permissions=permissions)
+        
+        patch_content = f"""{external_file}
+<<<<<<< SEARCH
+old = 1
+=======
+new = 2
+>>>>>>> REPLACE
+"""
+        
+        # Execute & Assert
+        with pytest.raises(ToolError, match="Permission denied: patch outside repo"):
+            tools.patch(patch_content)
+
+
+class TestRunPermissions:
+    """Test run command permission enforcement."""
+    
+    def test_run_allowed(self, tmp_path):
+        """Run should work when allowed."""
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="allow"),
+        )
+        
+        tools = MinimalToolset(tmp_path, permissions=permissions)
+        
+        # Execute
+        result = tools.run("echo hello")
+        
+        # Assert
+        assert "hello" in result
+        assert "[exit:0]" in result
+    
+    def test_run_denied(self, tmp_path):
+        """Run should fail when denied."""
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(allow=set(), deny=set(), ask=set(), others="deny"),
+        )
+        
+        tools = MinimalToolset(tmp_path, permissions=permissions)
+        
+        # Execute & Assert
+        with pytest.raises(ToolError, match="not in allowlist"):
+            tools.run("echo hello")
+
+
+class TestAskPermissions:
+    """Test 'ask' permission with stubbed user input."""
+    
+    def test_run_ask_with_user_approval(self, tmp_path):
+        """Run with 'ask' should work when user approves."""
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="ask"),
+        )
+        
+        # Mock confirmation callback that approves
+        def approve_callback(command: str) -> bool:
+            return True
+        
+        tools = MinimalToolset(tmp_path, confirmation_callback=approve_callback, permissions=permissions)
+        
+        # Execute - use git (interactive command) that will trigger confirmation
+        result = tools.run("git --version")
+        
+        # Assert
+        assert "git" in result.lower()
+        assert "[exit:0]" in result
+    
+    def test_run_ask_with_user_denial(self, tmp_path):
+        """Run with 'ask' should fail when user denies."""
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="ask"),
+        )
+        
+        # Mock confirmation callback that denies
+        def deny_callback(command: str) -> bool:
+            return False
+        
+        tools = MinimalToolset(tmp_path, confirmation_callback=deny_callback, permissions=permissions)
+        
+        # Execute & Assert - use git (interactive command) that will trigger confirmation
+        with pytest.raises(ToolError, match="User denied"):
+            tools.run("git status")
+
+
+class TestPermissionProfiles:
+    """Test different permission profiles."""
+    
+    def test_strict_profile_denies_outside_operations(self, tmp_path):
+        """Strict profile should deny operations outside repo."""
+        from pico_chat.harness.tool_permissions import strict
+        
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        external = tmp_path / "external"
+        external.mkdir()
+        external_file = external / "file.txt"
+        external_file.write_text("data")
+        
+        tools = MinimalToolset(workspace, permissions=strict)
+        
+        # All outside operations should be denied
+        with pytest.raises(ToolError, match="Permission denied"):
+            tools.read(str(external_file))
+    
+    def test_unrestricted_profile_allows_all(self, tmp_path):
+        """Unrestricted profile should allow all operations."""
+        from pico_chat.harness.tool_permissions import unrestricted
+        
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        external = tmp_path / "external"
+        external.mkdir()
+        
+        tools = MinimalToolset(workspace, permissions=unrestricted)
+        
+        # All operations should work
+        result = tools.write(str(external / "test.txt"), "data")
+        assert "[OK]" in result
+        
+        result = tools.read(str(external / "test.txt"))
+        assert result == "data"
+        
+        result = tools.run("echo test")
+        assert "test" in result
+    
+    def test_locked_profile_denies_all(self, tmp_path):
+        """Locked profile should deny all operations."""
+        from pico_chat.harness.tool_permissions import locked
+        
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("data")
+        
+        tools = MinimalToolset(tmp_path, permissions=locked)
+        
+        # All operations should be denied
+        with pytest.raises(ToolError, match="Permission denied"):
+            tools.read("test.txt")
+        
+        with pytest.raises(ToolError, match="Permission denied"):
+            tools.write("output.txt", "data")
+        
+        with pytest.raises(ToolError, match="is blocked"):
+            tools.run("echo test")
+
+
+class TestPathResolution:
+    """Test path resolution and inside/outside repo detection."""
+    
+    def test_relative_path_inside_repo(self, tmp_path):
+        """Relative paths should be resolved inside repo."""
+        test_file = tmp_path / "subdir" / "file.txt"
+        test_file.parent.mkdir()
+        test_file.write_text("content")
+        
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="allow", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="deny"),
+        )
+        
+        tools = MinimalToolset(tmp_path, permissions=permissions)
+        
+        # Execute with relative path
+        result = tools.read("subdir/file.txt")
+        
+        # Assert
+        assert result == "content"
+    
+    def test_absolute_path_outside_repo(self, tmp_path):
+        """Absolute paths outside workspace should be detected."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        
+        external = tmp_path / "external"
+        external.mkdir()
+        external_file = external / "file.txt"
+        external_file.write_text("external")
+        
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="allow", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="deny"),
+        )
+        
+        tools = MinimalToolset(workspace, permissions=permissions)
+        
+        # Execute with absolute path
+        with pytest.raises(ToolError, match="Permission denied: read outside repo"):
+            tools.read(str(external_file))
+    
+    def test_parent_directory_traversal(self, tmp_path):
+        """Parent directory traversal should be detected as outside repo."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        
+        external_file = tmp_path / "secret.txt"
+        external_file.write_text("secret")
+        
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="allow", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="deny"),
+        )
+        
+        tools = MinimalToolset(workspace, permissions=permissions)
+        
+        # Try to access parent directory
+        with pytest.raises(ToolError, match="Permission denied: read outside repo"):
+            tools.read("../secret.txt")
