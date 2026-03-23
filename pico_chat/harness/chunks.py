@@ -1,12 +1,20 @@
 """Stream chunks for harness-to-UI communication."""
 
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
 class Chunk:
     """Base class for all stream chunks from harness."""
     pass
+
+
+@dataclass
+class MessageStart(Chunk):
+    """Signals the start of a new message with its harness ID."""
+    message_id: str
+    role: str  # "user" or "assistant"
 
 
 @dataclass

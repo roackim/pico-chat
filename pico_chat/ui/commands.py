@@ -1,5 +1,7 @@
 from typing import Any, Dict, List, Optional, Protocol
 import asyncio
+import json
+import subprocess
 
 from pico_chat.ui.tui.colors import RGB, theme
 from pico_chat.ui.tui.msg_types import SysMsg, SysMsgError
@@ -107,65 +109,100 @@ class StatusCommand(Command):
         
         return msg
 
-class ShowDebugCommand(Command):
+class DebugPanelCommand(Command):
     def __init__(self):
-        super().__init__("debug", "Show debug console")
+        super().__init__("panel", "Toggle debug console visibility")
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         if hasattr(ui, 'toggle_debug_console'):
-            if not ui.show_debug:
-                ui.toggle_debug_console()
+            ui.toggle_debug_console()
         else:
             ui.chat_history_panel.add_message("Debug console not supported.", msg_type=SysMsg())
 
-class HideDebugCommand(Command):
+class DebugGetContextCommand(Command):
     def __init__(self):
-        super().__init__("debug", "Hide debug console")
+        super().__init__("get_context", "Copy current LLM context to clipboard")
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        if hasattr(ui, 'toggle_debug_console'):
-            if ui.show_debug:
-                ui.toggle_debug_console()
-        else:
-            ui.chat_history_panel.add_message("Debug console not supported.", msg_type=SysMsg())
-
-class ShowCommand(Command):
-    def __init__(self):
-        subcommands = {
-            "debug": ShowDebugCommand(),
-        }
-        super().__init__("show", "Show UI elements", subcommands=subcommands)
-
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        if not args:
-            # Show error - missing subcommand
-            help_text = "Missing subcommand. Available subcommands:\n"
-            for name, cmd in sorted(self.subcommands.items()):
-                help_text += f"  {name.ljust(10)} - {cmd.description}\n"
-            ui.chat_history_panel.add_message(help_text.rstrip(), msg_type=SysMsgError())
-        else:
-            subcmd_name = args[0].lower()
-            if subcmd_name in self.subcommands:
-                await self.subcommands[subcmd_name].execute(ui, args[1:])
-            else:
+        logger = logging.getLogger("tui")
+        
+        try:
+            # Get the exact context that would be sent to the LLM
+            context = await ui.agent.get_current_context()
+            
+            # Format as pretty JSON
+            context_json = json.dumps(context, indent=2, ensure_ascii=False)
+            
+            # Try to copy to clipboard using various methods
+            copied = False
+            
+            # Method 1: Try xclip (X11)
+            try:
+                subprocess.run(['xclip', '-selection', 'clipboard'], 
+                             input=context_json.encode(), 
+                             check=True, 
+                             stderr=subprocess.DEVNULL)
+                copied = True
+                logger.info("Context copied to clipboard (xclip)")
+            except (FileNotFoundError, subprocess.CalledProcessError):
+                pass
+            
+            # Method 2: Try xsel (X11 alternative)
+            if not copied:
+                try:
+                    subprocess.run(['xsel', '--clipboard', '--input'], 
+                                 input=context_json.encode(), 
+                                 check=True,
+                                 stderr=subprocess.DEVNULL)
+                    copied = True
+                    logger.info("Context copied to clipboard (xsel)")
+                except (FileNotFoundError, subprocess.CalledProcessError):
+                    pass
+            
+            # Method 3: Try wl-copy (Wayland)
+            if not copied:
+                try:
+                    subprocess.run(['wl-copy'], 
+                                 input=context_json.encode(), 
+                                 check=True,
+                                 stderr=subprocess.DEVNULL)
+                    copied = True
+                    logger.info("Context copied to clipboard (wl-copy)")
+                except (FileNotFoundError, subprocess.CalledProcessError):
+                    pass
+            
+            if copied:
+                msg_count = len(context)
+                char_count = len(context_json)
                 ui.chat_history_panel.add_message(
-                    f"Unknown subcommand: {subcmd_name}",
+                    f"Copied {msg_count} messages ({char_count:,} characters) to clipboard",
+                    msg_type=SysMsg()
+                )
+            else:
+                logger.warning("No clipboard utility found")
+                ui.chat_history_panel.add_message(
+                    "Could not copy: no clipboard utility found\nInstall xclip, xsel, or wl-copy",
                     msg_type=SysMsgError()
                 )
+                
+        except Exception as e:
+            logger.error(f"Error getting context: {e}", exc_info=True)
+            ui.chat_history_panel.add_message(f"Failed to get context: {e}", msg_type=SysMsgError())
 
-class HideCommand(Command):
+class DebugCommand(Command):
     def __init__(self):
         subcommands = {
-            "debug": HideDebugCommand(),
+            "panel": DebugPanelCommand(),
+            "get_context": DebugGetContextCommand(),
         }
-        super().__init__("hide", "Hide UI elements", subcommands=subcommands)
+        super().__init__("debug", "Debug utilities", subcommands=subcommands)
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         if not args:
             # Show error - missing subcommand
             help_text = "Missing subcommand. Available subcommands:\n"
             for name, cmd in sorted(self.subcommands.items()):
-                help_text += f"  {name.ljust(10)} - {cmd.description}\n"
+                help_text += f"  {name.ljust(15)} - {cmd.description}\n"
             ui.chat_history_panel.add_message(help_text.rstrip(), msg_type=SysMsgError())
         else:
             subcmd_name = args[0].lower()
@@ -184,8 +221,7 @@ COMMANDS: Dict[str, Command] = {
     "exit":     ExitCommand(),
     "stop":     StopCommand(),
     "status":   StatusCommand(),
-    "show":     ShowCommand(),
-    "hide":     HideCommand(),
+    "debug":    DebugCommand(),
 }
 
 async def handle_command(ui: ChatUIProtocol, text: str):

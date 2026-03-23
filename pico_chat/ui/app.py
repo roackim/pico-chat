@@ -134,6 +134,9 @@ class chatTUI:
         # Track which message is being edited (for edit-then-submit workflow)
         self.editing_message_index: Optional[int] = None
         
+        # Track if we're in a retry (to avoid duplicate user message in UI)
+        self.is_retrying: bool = False
+        
         # Command queue for structured execution
         self.command_queue = asyncio.Queue()
         
@@ -168,17 +171,30 @@ class chatTUI:
         current_msg = chat.add_message("Sending request...", msg_type=SysMsg())
         
         mode = "request"
-        # current_msg = None
+        current_harness_ids = []  # Track harness message IDs for current UI message
         
         # Process streaming response from Harness
         try:
             async for chunk in self.agent.chat(user_input):
                 
-                if isinstance(chunk, chunks.Thinking): # Special chunk type for "thinking" content
+                if isinstance(chunk, chunks.MessageStart):
+                    # New message starting from harness
+                    current_harness_ids = [chunk.message_id]
+                    logger.debug(f"MessageStart: {chunk.role} with ID {chunk.message_id}")
+                    
+                    if chunk.role == "user":
+                        # Find the user message without a harness ID and update it
+                        for msg in reversed(chat.messages):
+                            if isinstance(msg.type, UserMsg) and not msg.harness_message_ids:
+                                msg.harness_message_ids = [chunk.message_id]
+                                logger.debug(f"Updated user message with harness ID {chunk.message_id}")
+                                break
+                    
+                elif isinstance(chunk, chunks.Thinking): # Special chunk type for "thinking" content
                     
                     if mode == "request":
                         # Start a new message for thinking content
-                        new_msg = chat.new_message("", msg_type=ThinkingMsg())
+                        new_msg = chat.new_message("", msg_type=ThinkingMsg(), harness_message_ids=current_harness_ids)
                         chat.replace_message(current_msg, new_msg) # Replace the "Sending request..." message with the new thinking message
                         current_msg = new_msg
                         mode = "thinking"
@@ -190,7 +206,7 @@ class chatTUI:
                     text = chunk.content
                     if mode == "thinking":
                         current_msg.set_title("thoughts") # Update title for thinking content
-                        current_msg = chat.add_message("", msg_type=PicoMsg()) # Create a new message for regular content
+                        current_msg = chat.add_message("", msg_type=PicoMsg(), harness_message_ids=current_harness_ids) # Create a new message for regular content
                         mode = "answering"
                     
                     # Render regular content
@@ -454,28 +470,48 @@ class chatTUI:
         logger = logging.getLogger("tui")
         logger.info("Retry action triggered")
         
-        # Find the previous user message to retry
+        # Stop any ongoing generation first
+        if self.stop_generation():
+            logger.info("Stopped ongoing generation for retry")
+        
+        # Find the previous user message to retry using harness IDs
         try:
             msg_index = self.chat_history_panel.messages.index(message)
             
             # Look backwards for the last user message
-            user_msg_text = None
+            user_msg = None
+            user_msg_index = None
             for i in range(msg_index - 1, -1, -1):
                 msg = self.chat_history_panel.messages[i]
                 if isinstance(msg.type, UserMsg):
-                    user_msg_text = msg.base_text
+                    user_msg = msg
+                    user_msg_index = i
                     break
             
-            if user_msg_text:
-                # Remove all messages from the retry point onwards
-                messages_to_remove = len(self.chat_history_panel.messages) - msg_index
+            if user_msg and user_msg.harness_message_ids:
+                # Use the harness ID to delete from harness history
+                user_harness_id = user_msg.harness_message_ids[0]
+                
+                # Delete user message AND everything after from harness (will be re-added on resubmit)
+                if self.agent.delete_messages_after_id(user_harness_id, inclusive=True):
+                    logger.info(f"Deleted harness messages after ID {user_harness_id} (inclusive)")
+                
+                # Remove UI messages AFTER the user message (keep user visible)
+                messages_to_remove = len(self.chat_history_panel.messages) - user_msg_index - 1
                 for _ in range(messages_to_remove):
                     self.chat_history_panel.remove_last_message()
                 
+                # Clear the user message's harness ID (will get new one)
+                user_msg.harness_message_ids = []
+                
+                # Set retry flag to prevent duplicate in UI
+                self.is_retrying = True
+                
                 # Resubmit the user message
+                user_text = user_msg.base_text
                 self.chat_history_panel.auto_scroll = True
-                self.message_queue.put_nowait(user_msg_text)
-                logger.info(f"Retrying with message: {user_msg_text[:50]}...")
+                self.message_queue.put_nowait(user_text)
+                logger.info(f"Retrying with message: {user_text[:50]}...")
             else:
                 self.chat_history_panel.add_message(
                     "Could not find user message to retry",
@@ -575,10 +611,29 @@ class chatTUI:
             if self.editing_message_index is not None:
                 logger.info(f"Editing message at index {self.editing_message_index}: {text[:50]}...")
                 
-                # Remove all messages after the edited one
-                messages_to_remove = len(self.chat_history_panel.messages) - self.editing_message_index
+                # Get the message being edited
+                if self.editing_message_index < len(self.chat_history_panel.messages):
+                    edited_msg = self.chat_history_panel.messages[self.editing_message_index]
+                    
+                    # Delete from harness history starting at this message's ID
+                    if edited_msg.harness_message_ids:
+                        harness_id = edited_msg.harness_message_ids[0]
+                        if self.agent.delete_messages_after_id(harness_id, inclusive=True):
+                            logger.info(f"Deleted harness messages after ID {harness_id}")
+                    
+                    # Update the message text in place
+                    edited_msg.set_text(text)
+                    
+                    # Clear its harness ID (will be reassigned)
+                    edited_msg.harness_message_ids = []
+                
+                # Remove all UI messages AFTER the edited one (keep edited message visible)
+                messages_to_remove = len(self.chat_history_panel.messages) - self.editing_message_index - 1
                 for _ in range(messages_to_remove):
                     self.chat_history_panel.remove_last_message()
+                
+                # Set flag to prevent duplicate user message
+                self.is_retrying = True
                 
                 # Clear editing state
                 self.editing_message_index = None
@@ -589,8 +644,13 @@ class chatTUI:
             
             # Enable auto-scroll to show the new message
             self.chat_history_panel.auto_scroll = True
-            # Add user message immediately with color and header
-            self.chat_history_panel.add_message(text, msg_type=UserMsg())
+            
+            # Add user message to UI (skip if retrying - already exists)
+            if not self.is_retrying:
+                self.chat_history_panel.add_message(text, msg_type=UserMsg())
+            else:
+                self.is_retrying = False
+            
             # Add to processing queue for agent
             self.message_queue.put_nowait(text)
 

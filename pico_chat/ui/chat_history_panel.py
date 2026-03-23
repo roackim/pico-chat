@@ -30,6 +30,7 @@ class Message:
                  content_color: RGB = None,
                  left_margin: int = 0,
                  right_margin: int = 0,
+                 harness_message_ids: list = None,
 ):
         """Initialize a message.
         
@@ -44,9 +45,13 @@ class Message:
             content_color: Optional override for the content text color
             left_margin: Number of spaces to pad the left side of the box
             right_margin: Number of spaces to pad the right side of the box
+            harness_message_ids: List of harness message IDs this UI message references
         """
         
         self.type = msg_type or MsgType()
+        
+        # Track which harness messages this UI message represents
+        self.harness_message_ids = harness_message_ids or []
         
         # Resolve defaults from msg_type if not provided
         if title is None:
@@ -604,7 +609,7 @@ class ChatHistoryPanel(TextComponent):
         return False
 
 
-    def new_message(self, message: str, *, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None, left_margin: int = 0, right_margin: int = 0, append=False) -> Message:
+    def new_message(self, message: str, *, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None, left_margin: int = 0, right_margin: int = 0, harness_message_ids: list = None, append=False) -> Message:
         """Create a new message. If append is True, add it to the chat history. Return the Message object for further manipulation.
         
         Args:
@@ -615,6 +620,7 @@ class ChatHistoryPanel(TextComponent):
             content_color: Optional override for the box content color
             left_margin: Optional override for the box left margin
             right_margin: Optional override for the box right margin
+            harness_message_ids: List of harness message IDs this UI message references
             
         Returns:
             The created Message object.
@@ -640,7 +646,8 @@ class ChatHistoryPanel(TextComponent):
             frame_color=frame_color,
             content_color=content_color,
             left_margin=left_margin,
-            right_margin=right_margin
+            right_margin=right_margin,
+            harness_message_ids=harness_message_ids
         )
         
         if append:
@@ -726,7 +733,7 @@ class ChatHistoryPanel(TextComponent):
             # Message not found, ignore
             pass
 
-    def add_message(self, message: str, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None, left_margin: int = 0, right_margin: int = 0) -> Message:
+    def add_message(self, message: str, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None, left_margin: int = 0, right_margin: int = 0, harness_message_ids: list = None) -> Message:
         """Add a message to chat history and update UI.
         
         Args:
@@ -736,11 +743,12 @@ class ChatHistoryPanel(TextComponent):
             frame_color: Optional override for the box frame color
             left_margin: Optional override for the box left margin
             right_margin: Optional override for the box right margin
+            harness_message_ids: List of harness message IDs this UI message references
         
         Returns:
             The created Message object.
         """
-        return self.new_message(message, msg_type=msg_type, title=title, frame_color=frame_color, content_color=content_color, left_margin=left_margin, right_margin=right_margin, append=True)
+        return self.new_message(message, msg_type=msg_type, title=title, frame_color=frame_color, content_color=content_color, left_margin=left_margin, right_margin=right_margin, harness_message_ids=harness_message_ids, append=True)
 
 
     def clear(self):

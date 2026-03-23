@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from typing import AsyncGenerator, Any, Dict, List, Optional
 
 from pico_chat.harness.llm_status import AgentState
@@ -46,6 +47,27 @@ class Harness:
         self.server: LLMServer = create_server(server_config)
         self.debug_stream.log("INIT", f"Server initialized: {server_config.name} ({server_config.type}) at {server_config.base_url}")
 
+    def _add_message_to_history(self, role: str, content: Optional[str], **kwargs) -> str:
+        """Add a message to history with a unique ID.
+        
+        Args:
+            role: Message role (user, assistant, tool)
+            content: Message content
+            **kwargs: Additional fields (tool_calls, tool_call_id, name, etc.)
+            
+        Returns:
+            The generated message ID
+        """
+        msg_id = str(uuid.uuid4())
+        msg = {
+            "id": msg_id,
+            "role": role,
+            "content": content,
+            **kwargs
+        }
+        self.history.append(msg)
+        return msg_id
+
     # def set_user_response(self, text: str):
         # """Called by the UI when a response to a tool's prompt is ready."""
         # self._user_response_queue.put_nowait(text)
@@ -80,6 +102,40 @@ class Harness:
         """Clear the conversation history for the agent."""
         self.history = []
         self.debug_stream.log("CLEAR", "Conversation history cleared")
+    
+    def delete_messages_after_id(self, message_id: str, inclusive: bool = True) -> bool:
+        """Delete all messages after (and optionally including) the message with given ID.
+        
+        Args:
+            message_id: The ID of the message to delete from
+            inclusive: If True, delete the message with this ID too. If False, keep it.
+            
+        Returns:
+            True if message was found and deletion occurred, False otherwise
+        """
+        for i, msg in enumerate(self.history):
+            if msg.get("id") == message_id:
+                if inclusive:
+                    self.history = self.history[:i]
+                else:
+                    self.history = self.history[:i+1]
+                self.debug_stream.log("DELETE_AFTER_ID", f"Deleted messages after ID {message_id} (inclusive={inclusive})")
+                return True
+        return False
+    
+    def get_message_by_id(self, message_id: str) -> Optional[Dict[str, Any]]:
+        """Get a message by its ID.
+        
+        Args:
+            message_id: The ID of the message to find
+            
+        Returns:
+            The message dict if found, None otherwise
+        """
+        for msg in self.history:
+            if msg.get("id") == message_id:
+                return msg
+        return None
 
     def list_files_and_folders(self) -> List[str]:
         """Returns a list of all files and folders in the workspace, respecting .gitignore."""
@@ -124,9 +180,35 @@ class Harness:
 
     async def _build_messages(self, user_input: str) -> List[Dict[str, Any]]:
         """Build message list with system prompt and conversation history."""
-        # Add user message to history
-        self.history.append({"role": "user", "content": user_input})
+        # Add user message to history and store its ID
+        user_msg_id = self._add_message_to_history("user", user_input)
+        self._last_user_message_id = user_msg_id
         
+        # Get model context information from server
+        model_name = await self.server.get_model_name()
+        context_window = await self.server.get_context_window()
+        
+        # Format context window for display
+        if isinstance(context_window, int):
+            context_window_str = f"{context_window // 1024}k"
+        else:
+            context_window_str = str(context_window)
+        
+        # Build System Prompt with Context
+        system_msg = get_system_message(
+            project_context=self.project_context,
+            model_name=model_name,
+            context_window=context_window_str
+        )
+        
+        return [system_msg] + self.history
+
+    async def get_current_context(self) -> List[Dict[str, Any]]:
+        """Get the current conversation context (system + history) without modifying state.
+        
+        Returns the exact message list that would be sent to the LLM.
+        Useful for debugging and inspecting what the model sees.
+        """
         # Get model context information from server
         model_name = await self.server.get_model_name()
         context_window = await self.server.get_context_window()
@@ -302,13 +384,18 @@ class Harness:
                 self.debug_stream.log("TOOL_RESULT", {"call_id": call_id, "result": result})
                     
                 # Append tool result to history
-                tool_msg = {
+                self._add_message_to_history(
+                    role="tool",
+                    content=result,
+                    tool_call_id=call_id
+                )
+                
+                # Also add to messages for current request
+                messages.append({
                     "role": "tool",
                     "tool_call_id": call_id,
                     "content": result
-                }
-                self.history.append(tool_msg)
-                messages.append(tool_msg)
+                })
                 
                 # Yield tool complete chunk
                 yield chunks.ToolComplete(name=func_name, result=result)
@@ -320,13 +407,17 @@ class Harness:
                 
                 # Ensure we append SOMETHING to history so LLM doesn't hang
                 if not self.history or self.history[-1].get("tool_call_id") != call_id:
-                    tool_msg = {
+                    self._add_message_to_history(
+                        role="tool",
+                        content=err_msg,
+                        tool_call_id=call_id
+                    )
+                    
+                    messages.append({
                         "role": "tool",
                         "tool_call_id": call_id,
                         "content": err_msg
-                    }
-                    self.history.append(tool_msg)
-                    messages.append(tool_msg)
+                    })
                 
                 yield chunks.ToolError(name=func_name, error=str(e))
 
@@ -372,10 +463,17 @@ class Harness:
         Yields: chunks.Chunk objects - see chunks.py for all chunk types.
         """
         messages = await self._build_messages(user_input)
+        
+        # Emit user message start with its ID
+        yield chunks.MessageStart(message_id=self._last_user_message_id, role="user")
 
         # Agent Loop (Handle Multi-step Tool Calls)
         while True:
             try:
+                # Generate assistant message ID upfront so UI can track it
+                assistant_msg_id = str(uuid.uuid4())
+                yield chunks.MessageStart(message_id=assistant_msg_id, role="assistant")
+                
                 # Stream LLM response
                 async for chunk in self._stream_llm_response(messages):
                     yield chunk
@@ -384,13 +482,23 @@ class Harness:
                 full_content = self._last_full_content
                 tool_calls_list = self._last_tool_calls
                 
-                # Build assistant message for history
-                assistant_msg = {"role": "assistant", "content": full_content if full_content else None}
+                # Add assistant message to history with pre-generated ID
+                msg = {
+                    "id": assistant_msg_id,
+                    "role": "assistant",
+                    "content": full_content if full_content else None
+                }
                 if tool_calls_list:
-                    assistant_msg["tool_calls"] = tool_calls_list
+                    msg["tool_calls"] = tool_calls_list
+                self.history.append(msg)
+                self._last_assistant_message_id = assistant_msg_id
                 
-                self.history.append(assistant_msg)
-                messages.append(assistant_msg)
+                # Also add to messages for current request (without ID for API call)
+                messages.append({
+                    "role": "assistant",
+                    "content": full_content if full_content else None,
+                    "tool_calls": tool_calls_list if tool_calls_list else None
+                })
                 
                 # If no tools, we're done
                 if not tool_calls_list:
