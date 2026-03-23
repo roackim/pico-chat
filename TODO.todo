@@ -7,6 +7,11 @@
     [ ] /retry
     [ ] /connect - connect to a different LLM server (prompt for URL, API key, etc)
 
+[ ] Better implicit focus of input 
+    [ ] when new messages arrive (e.g. when the user is not actively scrolling up in the history)
+    [ ] when nothing focused ?
+    [ ] shortcut to focus input (e.g. i ? enter ? t ?)
+
 [ ] Re-Inject reasoning / tool call content to the LLM for successive messages
     [ ] Feature to summerize the reasoning / tool call content to avoid hitting context limits too fast
     [ ] Option to include / exclude certain types of content (e.g. only tool calls, only reasoning, etc)
