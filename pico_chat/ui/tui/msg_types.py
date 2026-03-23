@@ -10,6 +10,8 @@ class MsgAction(Enum):
     EDIT = ("e", "edit")
     RETRY = ("r", "retry")
     STOP = ("s", "stop")
+    ALLOW = ("a", "allow")
+    DENY = ("x", "deny")
     
     def __init__(self, key: str, label: str):
         self.key = key
@@ -65,3 +67,10 @@ class ThinkingMsg(PicoMsg):
     frame_color = "MUTED"
     content_color = "MUTED"
     actions = [MsgAction.COPY, MsgAction.DELETE]
+
+class ToolPermissionMsg(MsgType):
+    name = "tool_permission"
+    title = "tool permission"
+    frame_color = "WARNING"
+    content_color = None
+    actions = [MsgAction.ALLOW, MsgAction.DENY, MsgAction.COPY]

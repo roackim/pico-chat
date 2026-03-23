@@ -16,12 +16,13 @@ from pico_chat.ui.tui.components.debug_panel import DebugLogPanel
 from pico_chat.ui.chat_history_panel import ChatHistoryPanel
 from pico_chat.ui.commands import handle_command, get_command_list, get_subcommand_list
 from pico_chat.ui.tui.container import Vsplit, Hsplit
+from pico_chat.ui.tui.layout_utils import strip_ansi
 
         # Setup logging to debug panel
 import logging
 from pico_chat.ui.commands import StatusCommand
 from pico_chat.ui.tui.colors import theme
-from pico_chat.ui.tui.msg_types import PicoMsg, ThinkingMsg, UserMsg, SysMsg, SysMsgError
+from pico_chat.ui.tui.msg_types import PicoMsg, ThinkingMsg, UserMsg, SysMsg, SysMsgError, ToolPermissionMsg
 
 from pico_chat import pico_cfg
 
@@ -170,17 +171,13 @@ class chatTUI:
         try:
             async for chunk in self.agent.chat(user_input):
                 
-                if mode == "connecting":
-                    chat.remove_last_message()
-                    current_msg = None
-                    
-                    mode = "connected"
-                
                 if isinstance(chunk, chunks.Thinking): # Special chunk type for "thinking" content
                     
                     if current_msg is None and mode != "thinking":
                         # Start a new message for thinking content
-                        current_msg = chat.add_message("", msg_type=ThinkingMsg())
+                        new_msg = chat.new_message("", msg_type=ThinkingMsg())
+                        chat.replace_message(current_msg, new_msg)
+                        current_msg = new_msg
                         mode = "thinking"
                     
                     current_msg.append(chunk.content)
@@ -346,7 +343,7 @@ class chatTUI:
                 
                 if type(e) in recoverable_exceptions:
                     logger.warning(f"Recoverable error: {type(e).__name__}: {str(e)}")
-                    self.chat_history_panel.remove_last_message()  # Remove the pico message
+                    # self.chat_history_panel.remove_last_message()  # Remove the pico message
                     self.chat_history_panel.add_message(
                         message=f"{str(e)}",
                         msg_type=SysMsgError()
@@ -362,6 +359,157 @@ class chatTUI:
             self.current_generation_task.cancel()
             return True
         return False
+
+    # Action handlers for focused messages
+    
+    def handle_copy_action(self, message):
+        """Handle copy action for a focused message."""
+        import logging
+        logger = logging.getLogger("tui")
+        
+        try:
+            # Strip ANSI escape codes for clean clipboard content
+            text_to_copy = strip_ansi(message.base_text)
+            
+            # Try to copy to clipboard using various methods
+            
+            # Method 1: Try xclip (X11)
+            try:
+                import subprocess
+                subprocess.run(['xclip', '-selection', 'clipboard'], 
+                             input=text_to_copy.encode(), 
+                             check=True, 
+                             stderr=subprocess.DEVNULL)
+                logger.info("Message copied to clipboard (xclip)")
+                self.chat_history_panel.add_message("Copied to clipboard", msg_type=SysMsg())
+                return
+            except (FileNotFoundError, subprocess.CalledProcessError):
+                pass
+            
+            # Method 2: Try xsel (X11 alternative)
+            try:
+                import subprocess
+                subprocess.run(['xsel', '--clipboard', '--input'], 
+                             input=text_to_copy.encode(), 
+                             check=True,
+                             stderr=subprocess.DEVNULL)
+                logger.info("Message copied to clipboard (xsel)")
+                self.chat_history_panel.add_message("Copied to clipboard", msg_type=SysMsg())
+                return
+            except (FileNotFoundError, subprocess.CalledProcessError):
+                pass
+            
+            # Method 3: Try wl-copy (Wayland)
+            try:
+                import subprocess
+                subprocess.run(['wl-copy'], 
+                             input=text_to_copy.encode(), 
+                             check=True,
+                             stderr=subprocess.DEVNULL)
+                logger.info("Message copied to clipboard (wl-copy)")
+                self.chat_history_panel.add_message("Copied to clipboard", msg_type=SysMsg())
+                return
+            except (FileNotFoundError, subprocess.CalledProcessError):
+                pass
+            
+            # If all methods fail
+            logger.warning("No clipboard utility found (tried xclip, xsel, wl-copy)")
+            self.chat_history_panel.add_message(
+                "Could not copy: no clipboard utility found\nInstall xclip, xsel, or wl-copy",
+                msg_type=SysMsgError()
+            )
+            
+        except Exception as e:
+            logger.error(f"Error copying to clipboard: {e}")
+            self.chat_history_panel.add_message(f"Copy failed: {e}", msg_type=SysMsgError())
+    
+    def handle_edit_action(self, message):
+        """Handle edit action for a focused message (user messages only)."""
+        import logging
+        logger = logging.getLogger("tui")
+        logger.info("Edit action triggered")
+        
+        # Populate input field with message content
+        self.input_component.update(message.base_text)
+        
+        # Switch focus to input
+        self._last_focus_id = "input"
+        self._update_focus_states()
+        
+        # Clear message focus
+        self.chat_history_panel.clear_focus()
+    
+    def handle_retry_action(self, message):
+        """Handle retry action for a message (regenerate response)."""
+        import logging
+        logger = logging.getLogger("tui")
+        logger.info("Retry action triggered")
+        
+        # Find the previous user message to retry
+        try:
+            msg_index = self.chat_history_panel.messages.index(message)
+            
+            # Look backwards for the last user message
+            user_msg_text = None
+            for i in range(msg_index - 1, -1, -1):
+                msg = self.chat_history_panel.messages[i]
+                if isinstance(msg.type, UserMsg):
+                    user_msg_text = msg.base_text
+                    break
+            
+            if user_msg_text:
+                # Remove all messages from the retry point onwards
+                messages_to_remove = len(self.chat_history_panel.messages) - msg_index
+                for _ in range(messages_to_remove):
+                    self.chat_history_panel.remove_last_message()
+                
+                # Resubmit the user message
+                self.chat_history_panel.auto_scroll = True
+                self.message_queue.put_nowait(user_msg_text)
+                logger.info(f"Retrying with message: {user_msg_text[:50]}...")
+            else:
+                self.chat_history_panel.add_message(
+                    "Could not find user message to retry",
+                    msg_type=SysMsgError()
+                )
+        except ValueError:
+            logger.error("Message not found in history")
+    
+    def handle_stop_action(self, message):
+        """Handle stop action for ongoing generation."""
+        import logging
+        logger = logging.getLogger("tui")
+        logger.info("Stop action triggered")
+        
+        if self.stop_generation():
+            logger.info("Generation stopped by user")
+            # The cancellation will be handled in _process_generation
+        else:
+            logger.info("No active generation to stop")
+    
+    def handle_allow_action(self, message):
+        """Handle allow action for tool permission requests."""
+        import logging
+        logger = logging.getLogger("tui")
+        logger.info("Allow action triggered")
+        
+        # TODO: Implement tool permission system
+        self.chat_history_panel.add_message(
+            "Tool permission system not yet implemented",
+            msg_type=SysMsg()
+        )
+    
+    def handle_deny_action(self, message):
+        """Handle deny action for tool permission requests."""
+        import logging
+        logger = logging.getLogger("tui")
+        logger.info("Deny action triggered")
+        
+        # TODO: Implement tool permission system
+        self.chat_history_panel.add_message(
+            "Tool permission system not yet implemented",
+            msg_type=SysMsg()
+        )
 
 
     def on_command_submit(self, text: str):
@@ -551,6 +699,14 @@ class chatTUI:
         # Set compositor for all panels
         self.chat_history_panel.set_compositor(self.compositor)
         self.input_component.set_compositor(self.compositor)
+        
+        # Wire up action handlers
+        self.chat_history_panel.on_copy_action = self.handle_copy_action
+        self.chat_history_panel.on_edit_action = self.handle_edit_action
+        self.chat_history_panel.on_retry_action = self.handle_retry_action
+        self.chat_history_panel.on_stop_action = self.handle_stop_action
+        self.chat_history_panel.on_allow_action = self.handle_allow_action
+        self.chat_history_panel.on_deny_action = self.handle_deny_action
         
         # Set initial focus states
         self._update_focus_states()

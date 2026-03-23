@@ -11,7 +11,7 @@ from pico_chat.ui.tui.terminal import MouseEvent
 
 from pico_chat import pico_cfg
 from pico_chat.ui.tui.colors import theme, RGB
-from pico_chat.ui.tui.msg_types import MsgType, MsgAction, UserMsg, PicoMsg, SysMsg, SysMsgError, SysMsgWarning
+from pico_chat.ui.tui.msg_types import MsgType, MsgAction, UserMsg, PicoMsg, SysMsg, SysMsgError, SysMsgWarning, ToolPermissionMsg
 
 
 WELCOME_MESSAGE = "Welcome to pico-chat!\n"
@@ -203,6 +203,14 @@ class ChatHistoryPanel(TextComponent):
         
         # Initial component - self is now the component
         self.compositor: Optional[object] = None
+        
+        # Action callbacks (set by parent app)
+        self.on_copy_action: Optional[callable] = None
+        self.on_edit_action: Optional[callable] = None
+        self.on_retry_action: Optional[callable] = None
+        self.on_stop_action: Optional[callable] = None
+        self.on_allow_action: Optional[callable] = None
+        self.on_deny_action: Optional[callable] = None
 
     def set_compositor(self, compositor):
         """Set the compositor for updates."""
@@ -499,6 +507,51 @@ class ChatHistoryPanel(TextComponent):
                 return self.move_focus_up()
             elif event == '\x1b[B':  # Down arrow
                 return self.move_focus_down()
+            
+            # Handle action keys when a message is focused
+            if self.focused_message_index is not None:
+                focused_msg = self.messages[self.focused_message_index]
+                
+                # Delete action
+                if event == 'd' and MsgAction.DELETE in focused_msg.type.actions:
+                    self.remove_message_by_index(self.focused_message_index)
+                    return True
+                
+                # Copy action
+                elif event == 'c' and MsgAction.COPY in focused_msg.type.actions:
+                    if self.on_copy_action:
+                        self.on_copy_action(focused_msg)
+                    return True
+                
+                # Edit action
+                elif event == 'e' and MsgAction.EDIT in focused_msg.type.actions:
+                    if self.on_edit_action:
+                        self.on_edit_action(focused_msg)
+                    return True
+                
+                # Retry action
+                elif event == 'r' and MsgAction.RETRY in focused_msg.type.actions:
+                    if self.on_retry_action:
+                        self.on_retry_action(focused_msg)
+                    return True
+                
+                # Stop action
+                elif event == 's' and MsgAction.STOP in focused_msg.type.actions:
+                    if self.on_stop_action:
+                        self.on_stop_action(focused_msg)
+                    return True
+                
+                # Allow action
+                elif event == 'a' and MsgAction.ALLOW in focused_msg.type.actions:
+                    if self.on_allow_action:
+                        self.on_allow_action(focused_msg)
+                    return True
+                
+                # Deny action
+                elif event == 'x' and MsgAction.DENY in focused_msg.type.actions:
+                    if self.on_deny_action:
+                        self.on_deny_action(focused_msg)
+                    return True
         
         # Handle mouse input
         if isinstance(event, MouseEvent):
@@ -607,6 +660,69 @@ class ChatHistoryPanel(TextComponent):
             self.messages.pop()
             self.msg_container.children.pop()
             self.msg_container.sizes.pop()
+
+    def remove_message(self, message: Message):
+        """Remove a specific message from the chat history.
+        
+        Args:
+            message: The message to remove
+        """
+        try:
+            index = self.messages.index(message)
+            self.remove_message_by_index(index)
+        except ValueError:
+            # Message not found, ignore
+            pass
+    
+    def remove_message_by_index(self, index: int):
+        """Remove a message by its index.
+        
+        Args:
+            index: The index of the message to remove
+        """
+        if 0 <= index < len(self.messages):
+            # Adjust focused message index if needed
+            if self.focused_message_index is not None:
+                if self.focused_message_index == index:
+                    # Deleting the focused message - clear focus or move to adjacent
+                    if len(self.messages) > 1:
+                        # Move focus to the next message, or previous if at end
+                        if index < len(self.messages) - 1:
+                            new_focus = index  # Will focus what becomes the new message at this index
+                        else:
+                            new_focus = index - 1  # Focus previous message
+                        self.focused_message_index = new_focus
+                    else:
+                        # Only one message, clear focus after deletion
+                        self.focused_message_index = None
+                elif self.focused_message_index > index:
+                    # Adjust focus index if it's after the deleted message
+                    self.focused_message_index -= 1
+            
+            # Remove the message
+            self.messages.pop(index)
+            self.msg_container.children.pop(index)
+            self.msg_container.sizes.pop(index)
+            
+            # Update focus state after deletion
+            if self.focused_message_index is not None and self.focused_message_index < len(self.messages):
+                self.messages[self.focused_message_index].set_focused(True)
+
+    def replace_message(self, current: Message, new: Message):
+        """Replace a message with a new message.
+        
+        Args:
+            current: The message to replace
+            new: The new message to put in its place
+        """
+        try:
+            index = self.messages.index(current)
+            self.messages[index] = new
+            self.msg_container.children[index] = new.get_component()
+            # sizes remain the same ("auto")
+        except ValueError:
+            # Message not found, ignore
+            pass
 
     def add_message(self, message: str, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None, left_margin: int = 0, right_margin: int = 0) -> Message:
         """Add a message to chat history and update UI.
