@@ -234,6 +234,11 @@ class chatTUI:
             
         except Exception as e:
             raise e
+    
+        finally:
+            if current_msg is not None:
+                current_msg.finalized = True
+                current_msg.update_actions()
             
             
         

@@ -5,10 +5,11 @@ from enum import Enum
 
 class MsgAction(Enum):
     """Available actions for messages."""
-    REMOVE = ("r", "remove")
+    DELETE = ("d", "delete")
     COPY = ("c", "copy")
     EDIT = ("e", "edit")
-    RETRY = ("t", "retry")
+    RETRY = ("r", "retry")
+    STOP = ("s", "stop")
     
     def __init__(self, key: str, label: str):
         self.key = key
@@ -29,13 +30,13 @@ class MsgType:
 class UserMsg(MsgType):
     name = "user"
     title = "user"
-    actions = [MsgAction.REMOVE, MsgAction.COPY, MsgAction.EDIT]
+    actions = [MsgAction.COPY, MsgAction.EDIT]
     frame_color = "USER"
 
 class PicoMsg(MsgType):
     name = "pico"
     title = "pico"
-    actions = [MsgAction.REMOVE, MsgAction.COPY, MsgAction.RETRY]
+    actions = [MsgAction.COPY, MsgAction.RETRY, MsgAction.STOP]
     frame_color = "PICO"
 
 class SysMsg(MsgType):
@@ -43,7 +44,7 @@ class SysMsg(MsgType):
     title = "system"
     frame_color = "MUTED"
     content_color = "MUTED"
-    actions = [MsgAction.COPY]
+    actions = [MsgAction.COPY, MsgAction.DELETE]
 
 class SysMsgError(SysMsg):
     name = "error"
@@ -62,4 +63,4 @@ class ThinkingMsg(PicoMsg):
     title = "thinking"
     frame_color = "MUTED"
     content_color = "MUTED"
-    actions = [MsgAction.COPY]
+    actions = [MsgAction.COPY, MsgAction.DELETE]

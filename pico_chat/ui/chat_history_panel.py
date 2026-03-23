@@ -11,7 +11,7 @@ from pico_chat.ui.tui.terminal import MouseEvent
 
 from pico_chat import pico_cfg
 from pico_chat.ui.tui.colors import theme, RGB
-from pico_chat.ui.tui.msg_types import MsgType, UserMsg, PicoMsg, SysMsg, SysMsgError, SysMsgWarning
+from pico_chat.ui.tui.msg_types import MsgType, MsgAction, UserMsg, PicoMsg, SysMsg, SysMsgError, SysMsgWarning
 
 
 WELCOME_MESSAGE = "Welcome to pico-chat!\n"
@@ -70,7 +70,25 @@ class Message:
         self.right_margin = right_margin
         self.formatted_text = self._format_line_wrap()
         self.component = TextComponent(self.formatted_text, fg=content_color)
-        self.box = Box(self.component, title=self.title, fg=self.frame_color, actions=self.type.actions)
+        self.finalized = False  # Whether this message is finalized
+        self.box = Box(self.component, title=self.title, fg=self.frame_color, actions=self.get_active_actions())
+    
+    def get_active_actions(self):
+        """Get the list of active actions based on message state.
+        
+        Returns actions excluding STOP if message is finalized.
+        """
+        actions = list(self.type.actions)
+        
+        # Remove STOP action if message is finalized
+        if self.finalized:
+            actions = [a for a in actions if a != MsgAction.STOP]
+        
+        return actions
+    
+    def update_actions(self):
+        """Update the box's actions list based on current state."""
+        self.box.actions = self.get_active_actions()
     
     def set_title(self, title: str):
         """Update the title of the message box."""
