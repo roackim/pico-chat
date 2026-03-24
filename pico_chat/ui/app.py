@@ -174,14 +174,18 @@ class chatTUI(ChatActionHandlers):
                 
                 elif isinstance(chunk, chunks.ToolStart):
                     # Show which tool is being called
-                    current_msg.append(f"{theme.WARNING}running tool::{chunk.name}{theme.reset()} ")
+                    current_msg.append(f"{theme.WARNING}> running tool::{chunk.name}{theme.reset()} ")
                 
                 elif isinstance(chunk, chunks.ToolComplete):
-                    # Show tool completion (truncate long results)
-                    result = chunk.result
-                    if len(result) > 100:
-                        result = result[:100] + "..."
-                    current_msg.append(f"{theme.SUCCESS}status OK {theme.reset()}\n")
+                    # Show tool completion using status field
+                    if chunk.status == "denied":
+                        status_text = f"{theme.ERROR}status DENIED {theme.reset()}"
+                    elif chunk.status == "error":
+                        status_text = f"{theme.ERROR}status REJECTED {theme.reset()}"
+                    else:  # "ok"
+                        status_text = f"{theme.SUCCESS}status OK {theme.reset()}"
+                    
+                    current_msg.append(f"{status_text}\n")
                 
                 elif isinstance(chunk, chunks.ToolWaitInput):
                     # Show waiting for user input
@@ -189,7 +193,7 @@ class chatTUI(ChatActionHandlers):
                 
                 elif isinstance(chunk, chunks.ToolError):
                     # Show tool error
-                    current_msg.append(f"\n{theme.ERROR}status ERR: \n {theme.WARNING} > {chunk.error}]{theme.reset()}\n")
+                    current_msg.append(f"\n{theme.ERROR}status ERROR: \n {theme.WARNING} > {chunk.error}]{theme.reset()}\n")
 
                 # Ensure we scroll to bottom if needed
                 if self.chat_history_panel.auto_scroll:

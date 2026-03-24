@@ -1,7 +1,7 @@
 """Stream chunks for harness-to-UI communication."""
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Literal
 
 
 @dataclass
@@ -38,9 +38,10 @@ class ToolStart(Chunk):
 
 @dataclass
 class ToolComplete(Chunk):
-    """A tool execution completed successfully."""
+    """A tool execution completed."""
     name: str
     result: str
+    status: Literal["ok", "denied", "error"] = "ok"
 
 
 @dataclass

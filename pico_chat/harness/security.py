@@ -226,70 +226,55 @@ class SecurityChecker:
             - allowed: True if entire chain is safe to execute
             - message: Feedback message for the LLM
         """
-        # Parse into individual commands
+        # Simplified chain detection: if any operators exist anywhere (even in strings),
+        # consider it a chain and check chain_policy
+        has_operators = any(op in command for op in ['|', '&&', '||', ';'])
+        
+        if has_operators:
+            # Treat as chain - check chain_policy
+            if self.permissions.chain_policy == "deny":
+                return False, f"[ERROR] Command chains are blocked by policy"
+            elif self.permissions.chain_policy == "ask":
+                if self.confirmation_callback:
+                    approved = self.confirmation_callback(command)
+                    if not approved:
+                        return False, f"[DENIED] User denied command chain"
+                else:
+                    return False, f"[DENIED] Command chain requires confirmation (no confirmation mechanism available)"
+        
+        # Parse into individual commands for single-command checks
         commands = parse_operators(command)
         
         if not commands:
             return False, "Empty command"
         
-        # Check chain policy first
-        if len(commands) > 1 and self.permissions.chain_policy == "ask":
-            if self.confirmation_callback:
-                approved = self.confirmation_callback(command)
-                if not approved:
-                    return False, f"[WARNING] User denied command chain"
-            else:
-                return False, f"[WARNING] Command chain requires confirmation (no confirmation mechanism available)"
-        
-        # Check each command
+        # Check each command individually
         denied = []
         needs_confirmation = []
-        strictest_action = CommandAction.ALLOW
         
         for cmd in commands:
             check = check_command(cmd, self.permissions)
             
             if check.action == CommandAction.DENY:
                 denied.append((cmd, check.message))
-                strictest_action = CommandAction.DENY
             elif check.action == CommandAction.ASK:
                 needs_confirmation.append((cmd, check.message))
-                if strictest_action == CommandAction.ALLOW:
-                    strictest_action = CommandAction.ASK
         
         # If any denied, reject immediately
         if denied:
             messages = [f"[ERROR] {msg}" for cmd, msg in denied]
             return False, "\n".join(messages)
         
-        # Handle chain policy "strictest" with multiple commands
-        if len(commands) > 1 and self.permissions.chain_policy == "strictest":
-            if strictest_action == CommandAction.ASK:
-                # At least one command needs confirmation, ask about the whole chain
-                if self.confirmation_callback:
-                    approved = self.confirmation_callback(command)
-                    if not approved:
-                        return False, f"[WARNING] User denied command chain"
-                else:
-                    return False, f"[WARNING] Command chain requires confirmation (no confirmation mechanism available)"
-        elif self.permissions.chain_policy == "allow":
-            # Check each command individually that needs confirmation
-            for cmd, msg in needs_confirmation:
-                if self.confirmation_callback:
-                    approved = self.confirmation_callback(cmd)
-                    if not approved:
-                        return False, f"[WARNING] User denied: {cmd}"
-                else:
-                    return False, f"[WARNING] {msg} (no confirmation mechanism available)"
-        else:
-            # Single command or chain_policy already handled
-            for cmd, msg in needs_confirmation:
-                if self.confirmation_callback:
-                    approved = self.confirmation_callback(cmd)
-                    if not approved:
-                        return False, f"[WARNING] User denied: {cmd}"
-                else:
-                    return False, f"[WARNING] {msg} (no confirmation mechanism available)"
+        # Handle commands that need confirmation
+        for cmd, msg in needs_confirmation:
+            if self.confirmation_callback:
+                approved = self.confirmation_callback(cmd)
+                if not approved:
+                    return False, f"[DENIED] User denied: {cmd}"
+            else:
+                return False, f"[DENIED] {msg} (no confirmation mechanism available)"
         
         # All checks passed
         return True, f"[OK] Command validated ({len(commands)} command(s))"
+
+# TODO: rework message passing with proper status, like return status, str

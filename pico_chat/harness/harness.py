@@ -455,8 +455,15 @@ class Harness:
                     "content": result
                 })
                 
-                # Yield tool complete chunk
-                yield chunks.ToolComplete(name=func_name, result=result)
+                # Yield tool complete chunk with status
+                # Detect status from result content
+                if "[DENIED]" in result or "[WARNING] User denied" in result:
+                    status = "denied"
+                elif result.startswith("[ERROR]"):
+                    status = "error"
+                else:
+                    status = "ok"
+                yield chunks.ToolComplete(name=func_name, result=result, status=status)
 
             except Exception as e:
                 # Fallback for system errors during tool processing

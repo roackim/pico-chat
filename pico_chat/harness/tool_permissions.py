@@ -61,10 +61,10 @@ class RunPermissions:
     others: Literal["allow", "ask", "deny"] = "deny"
     
     # Policy for command chains (&&, ||, |, ;)
-    chain_policy: Literal["ask", "strictest", "allow"] = "strictest"
-    #   ask: Always ask when multiple commands detected
-    #   strictest: Use the strictest policy of any command in chain
-    #   allow: Allow if all individual commands are allowed
+    # Simplified: any operators detected = treated as chain
+    chain_policy: Literal["ask", "deny"] = "ask"
+    #   ask: Always ask when operators detected (even in strings)
+    #   deny: Block any command with operators
     
     # Containerization toggle - future feature
     use_container: bool = False
