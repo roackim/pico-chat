@@ -72,8 +72,10 @@ class ChatHistoryPanel(TextComponent):
         self.focused_message_index = index
         if self.focused_message_index is not None and self.focused_message_index < len(self.messages):
             self.messages[self.focused_message_index].set_focused(True)
-            # Disable auto-scroll when focusing a message
-            self.auto_scroll = False
+            # Disable auto-scroll when focusing a message, UNLESS it's the last message
+            # (we want to follow the last message's content as it updates)
+            if self.focused_message_index < len(self.messages) - 1:
+                self.auto_scroll = False
     
     def move_focus_up(self) -> bool:
         """Move focus to the previous message.

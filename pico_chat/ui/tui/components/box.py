@@ -8,10 +8,11 @@ from pico_chat import pico_cfg
 from pico_chat.ui.tui.colors import theme
 
 class Box(Component):
-    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None):
+    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None, parent_msg=None):
         super().__init__(id)
         self.child = child
         self.child.parent = self
+        self.parent_msg = parent_msg  # Reference to parent Message if provided
         self.title = title
         self.bg = bg
         self.fg = fg
@@ -44,7 +45,17 @@ class Box(Component):
         return 0
 
     def render(self, buffer: Buffer):
-        fg, bg = self.fg, self.bg
+        # Get values from parent_msg if available, otherwise use direct attributes
+        if self.parent_msg:
+            title = self.parent_msg.title
+            fg = self.parent_msg.frame_color
+            actions = self.parent_msg.get_active_actions()
+        else:
+            title = self.title
+            fg = self.fg
+            actions = self.actions
+        
+        bg = self.bg
         
         if self.focused:
             fg = theme.FOCUSED
@@ -97,9 +108,9 @@ class Box(Component):
             buffer.set(self.x + self.width - 1, self.y + i, style.v, fg=fg, bg=bg)
 
         # Bottom border with actions
-        if self.actions and self.focused:
+        if actions and self.focused:
             # Format actions string like " [r] remove [c] copy [e] edit "
-            actions_str = " " + " ".join(action.format() for action in self.actions) + " "
+            actions_str = " " + " ".join(action.format() for action in actions) + " "
             actions_width = len(actions_str)
             
             # Calculate how much space we have for the bottom border
@@ -132,8 +143,8 @@ class Box(Component):
         buffer.set(self.x + self.width - 1, self.y + self.height - 1, style.br, fg=fg, bg=bg)
 
         # Title
-        if self.title:
-            title_str = f" {self.title[:self.width-4]} "
+        if title:
+            title_str = f" {title[:self.width-4]} "
             buffer.write_str(self.x + 2, self.y, title_str, fg=fg, bg=bg)
 
     def handle_input(self, event: Any) -> bool:

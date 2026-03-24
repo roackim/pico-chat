@@ -166,6 +166,7 @@ class chatTUI(ChatActionHandlers):
                     text = chunk.content
                     if mode == "thinking":
                         current_msg.set_title("thoughts") # Update title for thinking content
+                        current_msg.finalize()
                         current_msg = chat.add_message("", msg_type=PicoMsg(), harness_message_ids=current_harness_ids) # Create a new message for regular content
                         mode = "answering"
                     
@@ -199,7 +200,8 @@ class chatTUI(ChatActionHandlers):
                 if self.chat_history_panel.auto_scroll:
                     self.chat_history_panel.scroll_offset = 0
                     # Auto-focus input when new messages arrive (if at bottom)
-                    if self._last_focus_id != "input":
+                    # BUT: Don't steal focus if user has explicitly focused a message
+                    if self._last_focus_id != "input" and self.chat_history_panel.focused_message_index is None:
                         self._last_focus_id = "input"
                         self._update_focus_states()
 

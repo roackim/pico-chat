@@ -68,7 +68,13 @@ class Message:
         self.formatted_text = self._format_line_wrap()
         self.component = TextComponent(self.formatted_text, fg=content_color)
         self.finalized = False  # Whether this message is finalized
-        self.box = Box(self.component, title=self.title, fg=self.frame_color, actions=self.get_active_actions())
+        self.box = Box(
+            self.component,
+            parent_msg=self
+        )
+    
+    def finalize(self):
+        self.finalized = True
     
     def get_active_actions(self):
         """Get the list of active actions based on message state.
@@ -81,11 +87,18 @@ class Message:
         if self.finalized:
             actions = [a for a in actions if a != MsgAction.STOP]
         
+        if not self.finalized:
+            actions = [a for a in actions if a != MsgAction.DELETE]
+        
         return actions
     
     def update_actions(self):
-        """Update the box's actions list based on current state."""
-        self.box.actions = self.get_active_actions()
+        """Update the box's actions list based on current state.
+        
+        Note: This is now a no-op since Box pulls actions dynamically from parent_msg.
+        Kept for backward compatibility.
+        """
+        pass
     
     def set_title(self, title: str):
         """Update the title of the message box."""

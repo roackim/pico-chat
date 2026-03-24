@@ -66,7 +66,7 @@ class ThinkingMsg(PicoMsg):
     title = "thinking"
     frame_color = "MUTED"
     content_color = "MUTED"
-    actions = [MsgAction.COPY, MsgAction.DELETE]
+    actions = [MsgAction.COPY, MsgAction.RETRY, MsgAction.DELETE, MsgAction.STOP]
 
 class ToolPermissionMsg(MsgType):
     name = "tool_permission"
