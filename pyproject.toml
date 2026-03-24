@@ -1,16 +1,17 @@
 [project]
 name = "pico_chat"
-version = "0.1.0"
+version = "0.7.0"
 description = "Local AI assistant in the command line"
 requires-python = ">= 3.10"
 authors = [{name = "Joackim Orciere", email = "joackim.orciere@proton.me"}]
 dependencies = [
-    "pathspec",
-]
-
-[project.optional-dependencies]
-git = [
-    # insert github dependencies
+    "openai",
+    "toml",
+    
+    # Pinned dependencies for stability and avoiding supply-chain issues
+    # > Theses packages do not have dependencies of their own so we can safely pin them 
+    "pathspec == 1.0.4", # For .gitignore parsing
+    "wcwidth == 0.6.0",  # For accurate character width calculation in the terminal
 ]
 
 [build-system]
@@ -41,13 +42,4 @@ pytest-xdist = "*"
 # pillow = "*"
 openai = "*"
 toml = "*"
-wcwidth = "*"
-
-[tool.pixi.environments]
-default = { features = ['sys', 'sub', 'dev'], solve-group = "default" }
-
-[tool.pixi.feature.sys.dependencies]
-
-[tool.pixi.feature.dev.dependencies]
-
-[tool.pixi.feature.sub.dependencies]
+wcwidth = "0.6.0"
