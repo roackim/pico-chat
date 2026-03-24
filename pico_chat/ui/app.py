@@ -522,6 +522,7 @@ class chatTUI:
                 # Resubmit the user message
                 user_text = user_msg.base_text
                 self.chat_history_panel.auto_scroll = True
+                self.chat_history_panel.anchored_start_y = None  # Clear anchor for retry
                 self.message_queue.put_nowait(user_text)
                 logger.info(f"Retrying with message: {user_text[:50]}...")
             else:
@@ -656,8 +657,11 @@ class chatTUI:
             else:
                 logger.info(f"User submitted: {text[:50]}...")
             
-            # Enable auto-scroll to show the new message
+            # Enable auto-scroll when user submits their own message
+            # They expect to see their message and the response
             self.chat_history_panel.auto_scroll = True
+            self.chat_history_panel.scroll_offset = 0
+            self.chat_history_panel.anchored_start_y = None  # Clear anchor
             
             # Add user message to UI (skip if retrying - already exists)
             if not self.is_retrying:
@@ -684,10 +688,8 @@ class chatTUI:
         # Update chat history keyboard focus
         self.chat_history_panel.set_keyboard_focus(is_history_focused)
         
-        # Auto-scroll to bottom when input field is focused
-        if is_input_focused:
-            self.chat_history_panel.auto_scroll = True
-            self.chat_history_panel.scroll_offset = 0
+        # Don't auto-scroll when focusing input - let user stay where they scrolled
+        # Only scroll when they explicitly submit a message
 
     def handle_global_input(self, event: Any) -> bool:
         """Handle focus logging and input dispatch with navigation between input and history."""

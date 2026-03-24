@@ -33,6 +33,7 @@ class ChatHistoryPanel(TextComponent):
         self.max_messages = 150  # Maximum number of messages to keep
         self.scroll_offset = 0   # How many rows to scroll up from the bottom
         self.auto_scroll = True
+        self.anchored_start_y: Optional[int] = None  # Absolute Y position when scrolled up (for stability)
         self.focused_message_index: Optional[int] = None  # Index of the currently focused message
         self.has_keyboard_focus = False  # Track if this panel should handle keyboard input
         
@@ -256,6 +257,7 @@ class ChatHistoryPanel(TextComponent):
             if msg_start < start_y:
                 # Message top is above visible area, scroll up to show it
                 new_start_y = msg_start
+                self.anchored_start_y = new_start_y
                 self.scroll_offset = max_scroll - new_start_y
                 self.scroll_offset = max(0, min(max_scroll, self.scroll_offset))
             elif msg_end > end_y:
@@ -267,6 +269,7 @@ class ChatHistoryPanel(TextComponent):
                 else:
                     # Message is taller than view, show from the top
                     new_start_y = msg_start
+                self.anchored_start_y = new_start_y
                 self.scroll_offset = max_scroll - new_start_y
                 self.scroll_offset = max(0, min(max_scroll, self.scroll_offset))
         else:
@@ -288,6 +291,7 @@ class ChatHistoryPanel(TextComponent):
                     # Message is taller than view, show from the bottom
                     new_end_y = msg_end
                     new_start_y = new_end_y - self.height
+                self.anchored_start_y = new_start_y
                 self.scroll_offset = max_scroll - new_start_y
                 self.scroll_offset = max(0, min(max_scroll, self.scroll_offset))
         
@@ -314,11 +318,21 @@ class ChatHistoryPanel(TextComponent):
         # If auto-scroll is on, we always show the bottom
         if self.auto_scroll:
             self.scroll_offset = 0
+            self.anchored_start_y = None  # Clear anchor when in auto-scroll mode
+            start_y = max_scroll
+        else:
+            # When manually scrolled, use anchored position to stay stable
+            # even when content grows at the bottom
+            if self.anchored_start_y is None:
+                # First time entering manual scroll mode, anchor current position
+                self.anchored_start_y = max_scroll - self.scroll_offset
             
-        # Actual offset from the TOP of the content
-        # scroll_offset 0 means we are at the bottom.
-        # scroll_offset > 0 means we are scrolled up.
-        start_y = max_scroll - self.scroll_offset
+            # Clamp anchored position to valid range
+            self.anchored_start_y = max(0, min(max_scroll, self.anchored_start_y))
+            start_y = self.anchored_start_y
+            
+            # Keep scroll_offset in sync for compatibility
+            self.scroll_offset = max_scroll - start_y
         
         # Reset any previous layout of the container children to prevent stale rendering
         curr_y = self.y - start_y
@@ -407,7 +421,12 @@ class ChatHistoryPanel(TextComponent):
                     total_height = len(line_map)
                     gap = pico_cfg.config.ui_msg_v_margin
                     max_scroll = max(0, total_height - self.height)
-                    start_y = max_scroll - self.scroll_offset
+                    
+                    # Get current start_y (consistent with render)
+                    if self.auto_scroll or self.anchored_start_y is None:
+                        start_y = max_scroll
+                    else:
+                        start_y = self.anchored_start_y
                     
                     # Convert screen y to virtual y coordinate
                     virtual_y = (event.y - self.y) + start_y
@@ -432,14 +451,40 @@ class ChatHistoryPanel(TextComponent):
                     line_map = self._build_line_map()
                     total_height = len(line_map)
                     max_scroll = max(0, total_height - self.height)
-                    self.scroll_offset = min(max_scroll, self.scroll_offset + 3)
+                    
+                    # Get current start_y
+                    if self.auto_scroll or self.anchored_start_y is None:
+                        current_start_y = max_scroll
+                    else:
+                        current_start_y = self.anchored_start_y
+                    
+                    # Scroll up by 3 lines
+                    new_start_y = max(0, current_start_y - 3)
+                    self.anchored_start_y = new_start_y
+                    self.scroll_offset = max_scroll - new_start_y
                     self.auto_scroll = False # Scrolling up disables auto-scroll
                     return True
                     
                 elif event.button == 65: # Scroll Down
-                    self.scroll_offset = max(0, self.scroll_offset - 3)
+                    line_map = self._build_line_map()
+                    total_height = len(line_map)
+                    max_scroll = max(0, total_height - self.height)
+                    
+                    # Get current start_y
+                    if self.anchored_start_y is None:
+                        current_start_y = max_scroll
+                    else:
+                        current_start_y = self.anchored_start_y
+                    
+                    # Scroll down by 3 lines
+                    new_start_y = min(max_scroll, current_start_y + 3)
+                    self.anchored_start_y = new_start_y
+                    self.scroll_offset = max_scroll - new_start_y
+                    
+                    # If we reached the bottom, enable auto-scroll
                     if self.scroll_offset == 0:
-                        self.auto_scroll = True # Back at bottom enables auto-scroll
+                        self.auto_scroll = True
+                        self.anchored_start_y = None
                     return True
                     
         return False
@@ -462,9 +507,8 @@ class ChatHistoryPanel(TextComponent):
             The created Message object.
         """
         
-        # If we are near the bottom (within a few pixels), stay at bottom
-        if self.scroll_offset < 1 or self.auto_scroll:
-            self.auto_scroll = True
+        # Don't change auto_scroll state here - let it be controlled externally
+        # This prevents unwanted scrolling when user has scrolled up
             
         # Create a new message
         # Account for box padding in initial max_width
@@ -594,6 +638,7 @@ class ChatHistoryPanel(TextComponent):
         self.msg_container.sizes = []
         self.scroll_offset = 0
         self.auto_scroll = True
+        self.anchored_start_y = None
         
     # def resize(self, new_width: int):
     #     """Resize the panel and reformat all messages.
