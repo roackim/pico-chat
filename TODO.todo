@@ -4,8 +4,29 @@
     [x] /exit - exit the application
     [x] /status - show infos about connection, model, context etc
     [x] /stop - stop the current generation
-    [x] /retry
+    [x] /retry - retry the last assistant message
     [ ] /connect - connect to a different LLM server (prompt for URL, API key, etc)
+    [ ] /config - show and edit configuration (e.g. model parameters, tools, etc)
+    
+    Ideas:
+    [!] /theme - switch between themes
+    [!] /export - export conversation history to a file (e.g. markdown, json, etc)
+    [!] /import - import conversation history from a file
+    [?] /memory - manage work memory (list items, forget some, edit some, etc)
+        [ ] Not sure is this is really needed. The LLM should be able to manage its own memory.
+        
+        [ ] possibly add bangs ? !important to mark as to memorize or something. 
+        !instructions to mark as system instructions, etc. This way the LLM can decide what to memorize and what not, and we can also use it to give it instructions on how to manage its memory.
+            [ ] add /instruct command to instruct the LLM important infos that it should remember for the whole conversation
+                -> then store into the system prompt or something like that.
+            
+                examples:
+                    /instruct in the shell, always use `pixi run` prefix to access python environment for the project.
+                    /instruct when coding assembly always use GNU assembly syntax and not intel
+                    /instruct when modifying a file, always document your approach in a comment at the top of the code unit your are modifying.
+            
+            [ ] Support for global instructions ? 
+                - kinda on the territory of custom system prompts
 
 [x] Memory / Context management:
     [x] Tools: memorize / forget important info, events, etc
@@ -99,6 +120,30 @@
 [ ] Add support for multiple conversations / threads
 [x] PATCH tool problems 
     patch: Invalid patch format: Missing '<<<<<<< SEARCH' marker 
+
+[ ] Git integration ?
+    [!] Must be optionnal / disabled by config
+    
+    [ ] Must be in an initialized repo -> solves the file boundaries problem
+    [ ] /session -> branch code session wide
+        pico_dev_UUID
+    [ ] /save -> mark commit as start of feature, when done -> squash ?
+    [ ] /snapshot -> save current changes to a commit
+    [ ] /rollback -> git reset --hard snapshot_commit (! dangerous !)
+        [ ] Verify we are on a pico_<branch> branch
+        [ ] Verify the commit hash is present in the /snapshot history
+        
+    [ ] /push
+    [ ] Give LLM git tools (Not via shell ! from harness, as described up)
+
+[?] Multi agent ?
+    [?] Is there a real need ? especially with local ai ?
+    [ ] For each parallel agent: 
+        - Duplicate the codebase 
+        - Create own Branch
+        - Merge How ?? 
+    [ ] Seems complexe with non obvious benefits
+    [ ] Extremely out of scope for now
 
 BUGS:
 [x] Exception model

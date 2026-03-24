@@ -3,15 +3,10 @@ name = "pico_chat"
 version = "0.1.0"
 description = "Local AI assistant in the command line"
 requires-python = ">= 3.10"
-<<<<<<< HEAD
 authors = [{name = "Joackim Orciere", email = "joackim.orciere@proton.me"}]
-dependencies = []
-=======
-authors = [{name = "HYGEOS", email = "contact@hygeos.com"}]
 dependencies = [
     "pathspec",
 ]
->>>>>>> 881d14f (Disable markdown rendering + Added code tree basis)
 
 [project.optional-dependencies]
 git = [
