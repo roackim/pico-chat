@@ -27,7 +27,7 @@ from pico_chat.ui.tui.msg_types import PicoMsg, ThinkingMsg, UserMsg, SysMsg, Sy
 
 from pico_chat import pico_cfg
 from pico_chat.ui.logging_handlers import setup_tui_logging
-from pico_chat.ui.action_handlers import ChatActionHandlers
+from pico_chat.ui.chat_action_handlers import ChatActionHandlers
 
 # Import chunks module for type checking
 from pico_chat.harness import chunks

@@ -189,11 +189,98 @@ class DebugGetContextCommand(Command):
             logger.error(f"Error getting context: {e}", exc_info=True)
             ui.chat_history_panel.add_message(f"Failed to get context: {e}", msg_type=SysMsgError())
 
+class DebugGetMemoryCommand(Command):
+    def __init__(self):
+        super().__init__("get_memory", "Copy current memory state to clipboard")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        logger = logging.getLogger("tui")
+        
+        try:
+            # Get the current memory state
+            if not hasattr(ui.agent, 'memory'):
+                ui.chat_history_panel.add_message(
+                    "Memory system not available",
+                    msg_type=SysMsgError()
+                )
+                return
+            
+            memory = ui.agent.memory
+            
+            if not memory:
+                ui.chat_history_panel.add_message(
+                    "Memory is empty",
+                    msg_type=SysMsg()
+                )
+                return
+            
+            # Format as pretty JSON (list of memory items)
+            memory_items = list(memory.values())
+            memory_json = json.dumps(memory_items, indent=2, ensure_ascii=False)
+            
+            # Try to copy to clipboard using various methods
+            copied = False
+            
+            # Method 1: Try xclip (X11)
+            try:
+                subprocess.run(['xclip', '-selection', 'clipboard'], 
+                             input=memory_json.encode(), 
+                             check=True, 
+                             stderr=subprocess.DEVNULL)
+                copied = True
+                logger.info("Memory copied to clipboard (xclip)")
+            except (FileNotFoundError, subprocess.CalledProcessError):
+                pass
+            
+            # Method 2: Try xsel (X11 alternative)
+            if not copied:
+                try:
+                    subprocess.run(['xsel', '--clipboard', '--input'], 
+                                 input=memory_json.encode(), 
+                                 check=True,
+                                 stderr=subprocess.DEVNULL)
+                    copied = True
+                    logger.info("Memory copied to clipboard (xsel)")
+                except (FileNotFoundError, subprocess.CalledProcessError):
+                    pass
+            
+            # Method 3: Try wl-copy (Wayland)
+            if not copied:
+                try:
+                    subprocess.run(['wl-copy'], 
+                                 input=memory_json.encode(), 
+                                 check=True,
+                                 stderr=subprocess.DEVNULL)
+                    copied = True
+                    logger.info("Memory copied to clipboard (wl-copy)")
+                except (FileNotFoundError, subprocess.CalledProcessError):
+                    pass
+            
+            if copied:
+                item_count = len(memory_items)
+                total_tokens = sum(item["metadata"]["token_size"] for item in memory_items)
+                char_count = len(memory_json)
+                ui.chat_history_panel.add_message(
+                    f"Copied {item_count} memory items ({total_tokens} tokens, {char_count:,} characters) to clipboard",
+                    msg_type=SysMsg()
+                )
+            else:
+                logger.warning("No clipboard utility found")
+                ui.chat_history_panel.add_message(
+                    "Could not copy: no clipboard utility found\nInstall xclip, xsel, or wl-copy",
+                    msg_type=SysMsgError()
+                )
+                
+        except Exception as e:
+            logger.error(f"Error getting memory: {e}", exc_info=True)
+            ui.chat_history_panel.add_message(f"Failed to get memory: {e}", msg_type=SysMsgError())
+
 class DebugCommand(Command):
     def __init__(self):
         subcommands = {
             "panel": DebugPanelCommand(),
             "get_context": DebugGetContextCommand(),
+            "get_memory": DebugGetMemoryCommand(),
         }
         super().__init__("debug", "Debug utilities", subcommands=subcommands)
 

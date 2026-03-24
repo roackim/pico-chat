@@ -24,6 +24,10 @@ class Harness:
         self.state = AgentState.IDLE
         self.history = []
         
+        # Memory system
+        self.memory = {}  # Current memory state
+        self.memory_snapshots = {}  # Snapshots keyed by user message ID
+        
         # User input queue for tool confirmations and prompts
         self._user_response_queue = asyncio.Queue()
         
@@ -32,7 +36,8 @@ class Harness:
         self.workspace = workspace_path or os.getcwd()
         self.tools_map = create_minimal_tools(
             workspace_path=self.workspace,
-            confirmation_callback=self._request_user_confirmation
+            confirmation_callback=self._request_user_confirmation,
+            memory_store=self.memory
         )
         
         # Build initial project context
@@ -66,6 +71,11 @@ class Harness:
             **kwargs
         }
         self.history.append(msg)
+        
+        # Take memory snapshot on user messages (for rollback support)
+        if role == "user":
+            self.memory_snapshots[msg_id] = self.memory.copy()
+        
         return msg_id
 
     # def set_user_response(self, text: str):
@@ -101,6 +111,8 @@ class Harness:
     def clear_history(self):
         """Clear the conversation history for the agent."""
         self.history = []
+        self.memory = {}
+        self.memory_snapshots = {}
         self.debug_stream.log("CLEAR", "Conversation history cleared")
     
     def delete_messages_after_id(self, message_id: str, inclusive: bool = True) -> bool:
@@ -115,10 +127,26 @@ class Harness:
         """
         for i, msg in enumerate(self.history):
             if msg.get("id") == message_id:
+                # Restore memory to this snapshot (if user message)
+                if message_id in self.memory_snapshots:
+                    self.memory = self.memory_snapshots[message_id].copy()
+                
+                # Collect deleted messages for snapshot cleanup
+                delete_from = i if inclusive else i + 1
+                deleted_msgs = self.history[delete_from:]
+                
+                # Delete messages
                 if inclusive:
                     self.history = self.history[:i]
                 else:
                     self.history = self.history[:i+1]
+                
+                # Cleanup orphaned snapshots
+                for deleted_msg in deleted_msgs:
+                    deleted_id = deleted_msg.get("id")
+                    if deleted_id in self.memory_snapshots:
+                        del self.memory_snapshots[deleted_id]
+                
                 self.debug_stream.log("DELETE_AFTER_ID", f"Deleted messages after ID {message_id} (inclusive={inclusive})")
                 return True
         return False
@@ -201,7 +229,22 @@ class Harness:
             context_window=context_window_str
         )
         
-        return [system_msg] + self.history
+        messages = [system_msg]
+        
+        # Inject memory if any exists
+        if self.memory:
+            memory_items = list(self.memory.values())
+            memory_json = json.dumps(memory_items, indent=2)
+            total_tokens = sum(item["metadata"]["token_size"] for item in memory_items)
+            
+            memory_msg = {
+                "role": "system",
+                "content": f"## Active Memory\n\nYou have {len(memory_items)} memory items ({total_tokens} tokens):\n\n```json\n{memory_json}\n```\n"
+            }
+            messages.append(memory_msg)
+        
+        messages.extend(self.history)
+        return messages
 
     async def get_current_context(self) -> List[Dict[str, Any]]:
         """Get the current conversation context (system + history) without modifying state.
@@ -226,7 +269,22 @@ class Harness:
             context_window=context_window_str
         )
         
-        return [system_msg] + self.history
+        messages = [system_msg]
+        
+        # Inject memory if any exists
+        if self.memory:
+            memory_items = list(self.memory.values())
+            memory_json = json.dumps(memory_items, indent=2)
+            total_tokens = sum(item["metadata"]["token_size"] for item in memory_items)
+            
+            memory_msg = {
+                "role": "system",
+                "content": f"## Active Memory\n\nYou have {len(memory_items)} memory items ({total_tokens} tokens):\n\n```json\n{memory_json}\n```\n"
+            }
+            messages.append(memory_msg)
+        
+        messages.extend(self.history)
+        return messages
 
     async def _stream_llm_response(self, messages: List[Dict[str, Any]]) -> AsyncGenerator[chunks.Chunk, None]:
         """

@@ -6,9 +6,10 @@ Adapts the MinimalToolset to the expected harness interface with:
 - execute() method for tool invocation
 """
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Dict
 
 from pico_chat.harness.tools import MinimalToolset, ToolError
+from pico_chat.harness.memory_tools import MemoryTools
 
 
 class ToolWrapper:
@@ -162,9 +163,67 @@ class RunTool(ToolWrapper):
             return str(e)
 
 
+class MemorizeTool(ToolWrapper):
+    """Store information in memory"""
+    
+    def __init__(self, memory_tools: MemoryTools):
+        super().__init__(
+            name="memorize",
+            description=(
+                "Store or update important information in memory. "
+                "Use this to remember project goals, decisions, file locations, "
+                "patterns discovered, or any information that will be useful later. "
+                "Memory persists across the conversation and survives edits/retries."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "Unique identifier for this memory (e.g., 'project_goal', 'main_config_location')"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Information to store (can be text or structured data)"
+                    }
+                },
+                "required": ["key", "content"]
+            }
+        )
+        self.memory_tools = memory_tools
+    
+    def execute(self, key: str, content: str) -> str:
+        return self.memory_tools.memorize(key, content)
+
+
+class ForgetTool(ToolWrapper):
+    """Remove information from memory"""
+    
+    def __init__(self, memory_tools: MemoryTools):
+        super().__init__(
+            name="forget",
+            description="Remove a memory item that is no longer needed or was incorrect",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "Unique identifier of the memory to remove"
+                    }
+                },
+                "required": ["key"]
+            }
+        )
+        self.memory_tools = memory_tools
+    
+    def execute(self, key: str) -> str:
+        return self.memory_tools.forget(key)
+
+
 def create_minimal_tools(
     workspace_path: str | Path,
-    confirmation_callback: Optional[Callable[[str], bool]] = None
+    confirmation_callback: Optional[Callable[[str], bool]] = None,
+    memory_store: Optional[Dict[str, Dict]] = None
 ) -> dict[str, ToolWrapper]:
     """
     Create the minimal toolset with harness-compatible wrappers.
@@ -172,15 +231,24 @@ def create_minimal_tools(
     Args:
         workspace_path: Root directory for all operations
         confirmation_callback: Function to prompt user for command confirmation
+        memory_store: Reference to harness memory dict (for memory tools)
         
     Returns:
         Dict of tool name to tool wrapper
     """
     toolset = MinimalToolset(workspace_path, confirmation_callback)
     
-    return {
+    tools = {
         "read": ReadTool(toolset),
         "write": WriteTool(toolset),
         "patch": PatchTool(toolset),
         "run": RunTool(toolset),
     }
+    
+    # Add memory tools if memory store is provided
+    if memory_store is not None:
+        memory_tools = MemoryTools(memory_store)
+        tools["memorize"] = MemorizeTool(memory_tools)
+        tools["forget"] = ForgetTool(memory_tools)
+    
+    return tools
