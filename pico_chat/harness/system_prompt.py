@@ -13,13 +13,7 @@ Instructions:
 - Break complex tasks into smaller, logical steps.
 - Follow existing codebase styles and best practices.
 - State clearly if you are uncertain or missing information.
-
-Memory Management:
-- Store important observations, decisions, file locations, and patterns in memory using the memorize tool.
-- Update or correct existing memory entries when you discover new information.
-- Memory persists across the conversation and survives edits/retries.
-- Be aware that memory may become outdated; verify important details when necessary.
-- Use memory to maintain context across long conversations and complex tasks.
+- Store important observations, decisions, and actions in memory. Update or correct existing entries as needed, and be aware that memory may be outdated; verify when necessary.
 """
 
 MODEL_CONTEXT_PROMPT = """

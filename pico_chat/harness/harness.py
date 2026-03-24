@@ -231,15 +231,15 @@ class Harness:
         
         messages = [system_msg]
         
-        # Inject memory if any exists
+        # Inject memory if any exists (compact format)
         if self.memory:
             memory_items = list(self.memory.values())
-            memory_json = json.dumps(memory_items, indent=2)
-            total_tokens = sum(item["metadata"]["token_size"] for item in memory_items)
+            # Compact JSON - no pretty printing, keeps metadata
+            memory_json = json.dumps(memory_items, separators=(',', ':'), ensure_ascii=False)
             
             memory_msg = {
                 "role": "system",
-                "content": f"## Active Memory\n\nYou have {len(memory_items)} memory items ({total_tokens} tokens):\n\n```json\n{memory_json}\n```\n"
+                "content": f"MEMORY:{memory_json}"
             }
             messages.append(memory_msg)
         
@@ -271,15 +271,15 @@ class Harness:
         
         messages = [system_msg]
         
-        # Inject memory if any exists
+        # Inject memory if any exists (compact format)
         if self.memory:
             memory_items = list(self.memory.values())
-            memory_json = json.dumps(memory_items, indent=2)
-            total_tokens = sum(item["metadata"]["token_size"] for item in memory_items)
+            # Compact JSON - no pretty printing, keeps metadata
+            memory_json = json.dumps(memory_items, separators=(',', ':'), ensure_ascii=False)
             
             memory_msg = {
                 "role": "system",
-                "content": f"## Active Memory\n\nYou have {len(memory_items)} memory items ({total_tokens} tokens):\n\n```json\n{memory_json}\n```\n"
+                "content": f"MEMORY:{memory_json}"
             }
             messages.append(memory_msg)
         
