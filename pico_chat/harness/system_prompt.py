@@ -13,17 +13,18 @@ Instructions:
 - Break complex tasks into smaller, logical steps.
 - Follow existing codebase styles and best practices.
 - State clearly if you are uncertain or missing information.
+- Store important observations, decisions, and actions in memory. Update or correct existing entries as needed, and be aware that memory may be outdated; verify when necessary.
 """
 
 MODEL_CONTEXT_PROMPT = """
 Model Context:
-Model: {model_name}
+Model used: {model_name}
 Context window: {context_window} max tokens
 """
 
 CONTEXT_PROMPT_TEMPLATE = """
 Project Context:
-The following is an overview of the current project structure. 
+The following is an overview of the project structure. 
 
 {context_tree}
 """
