@@ -7,6 +7,8 @@
     [x] /retry
     [ ] /connect - connect to a different LLM server (prompt for URL, API key, etc)
 
+[ ] Context Builder Switch to tree for token efficiency
+
 [ ] Better implicit focus of input 
     [ ] when new messages arrive (e.g. when the user is not actively scrolling up in the history)
     [ ] when nothing focused ?

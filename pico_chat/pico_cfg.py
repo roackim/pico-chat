@@ -37,6 +37,9 @@ class Config:
         self.ui_box_style_focused: str = style # NOTE: currently unplugged; Box border style when focused: ("square", "double", "rounded")
         
         self.target_fps: int = 60
+        
+        # Context building settings
+        self.context_format: Literal["tree", "flat"] = "tree"  # Tree format saves tokens by avoiding path repetition
 
         # TODO: Load config from file if exists
 

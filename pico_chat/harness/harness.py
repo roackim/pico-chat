@@ -63,7 +63,7 @@ class Harness:
         Returns:
             The generated message ID
         """
-        msg_id = str(uuid.uuid4())
+        msg_id = uuid.uuid4().hex[:8]  # 8-char short ID instead of full UUID
         msg = {
             "id": msg_id,
             "role": role,
