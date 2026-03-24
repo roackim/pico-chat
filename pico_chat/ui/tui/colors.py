@@ -42,10 +42,12 @@ class _theme:
     name: str
     BACKGROUND: RGB
     DEFAULT: RGB
-    SKY: RGB
+    
     MUTED: RGB
     ERROR: RGB
     WARNING: RGB
+    SUCCESS: RGB
+    
     USER: RGB
     PICO: RGB
     FOCUSED: RGB
@@ -72,17 +74,17 @@ class _theme:
 
 default = _theme(
     name="default",
-    BACKGROUND  = RGB("#B21ECF"),       # Black
+    BACKGROUND  = RGB("#B21ECF"),   # Black
     DEFAULT     = RGB("#F7F4EA"),   # White
-    SKY         = RGB("#87CEEB"), # Color for the non UI elements
-    MUTED       = RGB("#7D7D7D"), # Muted gray
+    
+    MUTED       = RGB("#7D7D7D"),   # Muted gray
     ERROR       = RGB("#FF6060"),   # Red
-    WARNING     = RGB("#FFC760"),  # Orange
-    USER        = RGB("#7ADA92"),  # Blue
-    PICO        = RGB("#66C0F4"),  # Green
-    FOCUSED     = RGB("#F4CE66"),  # Yellow
+    WARNING     = RGB("#FFC760"),   # Orange
+    SUCCESS     = RGB("#7ADA92"),   # Green
+    
+    USER        = RGB("#7ADA92"),   # Blue
+    PICO        = RGB("#66C0F4"),   # Green
+    FOCUSED     = RGB("#F4CE66"),   # Yellow
 )
 
 theme: _theme = default
-
-
