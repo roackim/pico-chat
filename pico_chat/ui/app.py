@@ -244,6 +244,10 @@ class chatTUI:
                 # Ensure we scroll to bottom if needed
                 if self.chat_history_panel.auto_scroll:
                     self.chat_history_panel.scroll_offset = 0
+                    # Auto-focus input when new messages arrive (if at bottom)
+                    if self._last_focus_id != "input":
+                        self._last_focus_id = "input"
+                        self._update_focus_states()
 
                 # Yield to let the compositor render the update
                 await asyncio.sleep(0)
@@ -522,7 +526,6 @@ class chatTUI:
                 # Resubmit the user message
                 user_text = user_msg.base_text
                 self.chat_history_panel.auto_scroll = True
-                self.chat_history_panel.anchored_start_y = None  # Clear anchor for retry
                 self.message_queue.put_nowait(user_text)
                 logger.info(f"Retrying with message: {user_text[:50]}...")
             else:
@@ -657,11 +660,8 @@ class chatTUI:
             else:
                 logger.info(f"User submitted: {text[:50]}...")
             
-            # Enable auto-scroll when user submits their own message
-            # They expect to see their message and the response
+            # Enable auto-scroll to show the new message
             self.chat_history_panel.auto_scroll = True
-            self.chat_history_panel.scroll_offset = 0
-            self.chat_history_panel.anchored_start_y = None  # Clear anchor
             
             # Add user message to UI (skip if retrying - already exists)
             if not self.is_retrying:
@@ -676,6 +676,10 @@ class chatTUI:
 
     def _update_focus_states(self):
         """Update focus states of components based on _last_focus_id."""
+        # Default to input focus if nothing is focused
+        if self._last_focus_id is None:
+            self._last_focus_id = "input"
+        
         is_input_focused = (self._last_focus_id == "input")
         is_history_focused = (self._last_focus_id == "history")
         
@@ -688,14 +692,23 @@ class chatTUI:
         # Update chat history keyboard focus
         self.chat_history_panel.set_keyboard_focus(is_history_focused)
         
-        # Don't auto-scroll when focusing input - let user stay where they scrolled
-        # Only scroll when they explicitly submit a message
+        # Auto-scroll to bottom when input field is focused
+        if is_input_focused:
+            self.chat_history_panel.auto_scroll = True
+            self.chat_history_panel.scroll_offset = 0
 
     def handle_global_input(self, event: Any) -> bool:
         """Handle focus logging and input dispatch with navigation between input and history."""
         
         # Handle keyboard navigation between input and history
         if isinstance(event, str):
+            # Shortcuts to focus input: 'i' or Enter (when not already in input)
+            if (event == 'i' or event == '\r') and self._last_focus_id != "input":
+                self.chat_history_panel.clear_focus()
+                self._last_focus_id = "input"
+                self._update_focus_states()
+                return True
+            
             if event == '\x1b[A':  # Up arrow
                 # If input has focus and cursor is on first line, move to history
                 if self._last_focus_id == "input" and self.input_component.is_cursor_on_first_line():
