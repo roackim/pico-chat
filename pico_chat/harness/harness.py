@@ -173,7 +173,8 @@ class Harness:
 
     def list_files_and_folders(self) -> List[str]:
         """Returns a list of all files and folders in the workspace, respecting .gitignore."""
-        context = build_harness_context(self.workspace)
+        # Always use flat format for file/folder listing (needed for @file completion)
+        context = build_harness_context(self.workspace, format="flat")
         # build_harness_context returns a string with "Project Root: ...", "Files ...", and then the paths
         lines = context.split('\n')
         # Skip the first two lines (Project Root and Files header)
