@@ -81,13 +81,24 @@ class StatusCommand(Command):
         super().__init__("status", "Show system and connection status")
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        # Show placeholder while checking status
+        placeholder = ui.chat_history_panel.add_message(
+            "Checking server status...",
+            msg_type=SysMsg(),
+            title="status",
+        )
+        
+        # Get actual status (may take time if server is unreachable)
         status = await ui.agent.get_status()
- 
-        ui.chat_history_panel.add_message(
+        
+        # Replace placeholder with actual status
+        status_msg = ui.chat_history_panel.new_message(
             self.format_status(status),
             msg_type=SysMsg(),
             title="status",
         )
+        ui.chat_history_panel.replace_message(placeholder, status_msg)
+        
         logger = logging.getLogger("tui")
         logger.info(f"Server status online: {status['online']}")
         
@@ -106,6 +117,23 @@ class StatusCommand(Command):
         if status_text == "online":
             msg += color + f"Model            : {reset}{status['model']}\n"
             msg += color + f"Context Window   : {reset}{status['context_window']}\n"
+            
+            # Add context pressure info if available
+            if status.get('context_used') is not None and status.get('context_max') is not None:
+                used = status['context_used']
+                max_tokens = status['context_max']
+                percentage = status.get('context_percentage', 0.0)
+                
+                # Color code the percentage based on pressure
+                if percentage < 50:
+                    pressure_color = "\x1b[32m"  # Green
+                elif percentage < 75:
+                    pressure_color = "\x1b[33m"  # Yellow
+                else:
+                    pressure_color = "\x1b[31m"  # Red
+                
+                msg += color + f"Context Usage    : {reset}{used:,} / {max_tokens:,} tokens "
+                msg += f"({pressure_color}{percentage:.1f}%\033[0m)\n"
         
         return msg
 

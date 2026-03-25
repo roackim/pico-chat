@@ -584,14 +584,24 @@ class chatTUI(ChatActionHandlers):
         
         # Start background server status check (non-blocking)
         async def background_startup_check():
-            status = await self.agent.get_status()
-
+            # Show placeholder while checking status
+            placeholder = self.chat_history_panel.add_message(
+                "Checking server status...",
+                msg_type=SysMsg(),
+                title="status"
+            )
             
-            self.chat_history_panel.add_message(
+            # Get actual status (may take time if server is unreachable)
+            status = await self.agent.get_status()
+            
+            # Replace placeholder with actual status
+            status_msg = self.chat_history_panel.new_message(
                 StatusCommand.format_status(status),
                 msg_type=SysMsg(),
                 title="status"
             )
+            self.chat_history_panel.replace_message(placeholder, status_msg)
+            
             logger.info(f"Server status online: {status['online']}")
             
 

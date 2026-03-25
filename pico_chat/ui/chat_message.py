@@ -6,6 +6,7 @@ from pico_chat.ui.tui.colors import theme, RGB
 from pico_chat.ui.tui.components import TextComponent, Box
 from pico_chat.ui.tui.layout_utils import wrap_text
 from pico_chat.ui.tui.msg_types import MsgType, MsgAction
+from pico_chat.ui.tui import msg_types
 
 
 class Message:
@@ -84,11 +85,15 @@ class Message:
         actions = list(self.type.actions)
         
         # Remove STOP action if message is finalized
-        if self.finalized:
-            actions = [a for a in actions if a != MsgAction.STOP]
         
-        if not self.finalized:
-            actions = [a for a in actions if a != MsgAction.DELETE]
+        if isinstance(self.type, msg_types.PicoMsg): # Pico logic
+            if self.finalized:
+                actions = [a for a in actions if a != MsgAction.STOP]
+        
+            if not self.finalized:
+                actions = [a for a in actions if a != MsgAction.DELETE]
+        
+        
         
         return actions
     

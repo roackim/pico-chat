@@ -184,17 +184,20 @@ class Harness:
         Estimate current context usage in tokens.
         Returns: (current_tokens, max_tokens, percentage)
         """
-        # Simple estimation: 1 token ~= 4 characters for English text
-        total_chars = 0
-        for msg in self.history:
-            content = msg.get("content")
-            if content:
-                total_chars += len(content)
-            
-        # Add system prompt estimation (approx 500 chars)
-        total_chars += 500
+        from pico_chat.harness.token_estimation import estimate_messages_tokens, estimate_tokens
         
-        current_tokens = total_chars // 4
+        # Estimate tokens for all history messages
+        current_tokens = estimate_messages_tokens(self.history)
+        
+        # Add system prompt estimation (system message is added during _build_messages)
+        # Rough estimate: project context + base system prompt + memory
+        system_estimate = estimate_tokens(self.project_context) + 500
+        if self.memory:
+            memory_json = json.dumps(list(self.memory.values()), separators=(',', ':'), ensure_ascii=False)
+            system_estimate += estimate_tokens(memory_json)
+        
+        current_tokens += system_estimate
+        
         # Get max context from server's cached value (will be queried on first use)
         max_tokens = self.server._cached_context_window or 32768
         
@@ -584,6 +587,9 @@ class Harness:
             "base_url": self.server.config.base_url,
             "model": "unknown",
             "context_window": "unknown",
+            "context_used": 0,
+            "context_max": 0,
+            "context_percentage": 0.0,
         }
         
         # Check connection
@@ -601,6 +607,15 @@ class Harness:
                 status["context_window"] = f"{ctx // 1024}k" if isinstance(ctx, int) else str(ctx)
             except Exception as e:
                 logger.warning(f"Failed to query context window: {e}")
+            
+            # Estimate context usage
+            try:
+                current_tokens, max_tokens, percentage = self.estimate_context_usage()
+                status["context_used"] = current_tokens
+                status["context_max"] = max_tokens
+                status["context_percentage"] = percentage
+            except Exception as e:
+                logger.warning(f"Failed to estimate context usage: {e}")
         
         return status
 
