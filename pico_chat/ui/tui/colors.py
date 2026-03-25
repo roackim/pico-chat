@@ -77,9 +77,9 @@ default = _theme(
     MUTED       = RGB("#7D7D7D"),   # Muted gray
     ERROR       = RGB("#FF6060"),   # Red
     WARNING     = RGB("#FFC760"),   # Orange
-    SUCCESS     = RGB("#7ADA92"),   # Green
+    SUCCESS     = RGB("#5AEA7C"),   # Green
     
-    USER        = RGB("#7ADA92"),   # Blue
+    USER        = RGB("#5AEA7C"),   # Blue
     PICO        = RGB("#66C0F4"),   # Green
     FOCUSED     = RGB("#FF60BD"),   # Yellow
 )

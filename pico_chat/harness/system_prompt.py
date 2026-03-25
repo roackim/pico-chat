@@ -13,7 +13,14 @@ Instructions:
 - Break complex tasks into smaller, logical steps.
 - Follow existing codebase styles and best practices.
 - State clearly if you are uncertain or missing information.
-- Store usefull observations, TODOS, decisions, and actions in memory (short term).
+
+Memory Usage:
+- Use 'memorize' as a scratchpad for the current conversation session.
+- Store important observations, TODOs, decisions, and facts to keep them near the system prompt.
+- Only memorize concrete information - never store placeholders like "unknown".
+- After calling memory tools, ALWAYS provide a text response to the user - never end with just tool calls.
+- Examples: active tasks, user preferences given in this session, project goals, key decisions.
+- Use 'forget' to clean up completed tasks or outdated information.
 """
 
 MODEL_CONTEXT_PROMPT = """

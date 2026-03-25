@@ -210,8 +210,10 @@ class Harness:
         for i, msg in enumerate(self.history):
             if msg.get("id") == message_id:
                 # Restore memory to this snapshot (if user message)
+                # Use clear() + update() to preserve the dict reference that MemoryTools holds
                 if message_id in self.memory_snapshots:
-                    self.memory = self.memory_snapshots[message_id].copy()
+                    self.memory.clear()
+                    self.memory.update(self.memory_snapshots[message_id])
                 
                 # Collect deleted messages for snapshot cleanup
                 delete_from = i if inclusive else i + 1
