@@ -36,8 +36,20 @@
         [ ] key, desc, content for heavier info like documents, long term memory, etc
             [ ] provide all key, desc
             [ ] provide recall(key) tool to access the heavy content 
+
+
+[ ] Better tool UI feedback especially non shell tools.
+    move approved | completed bellow
     
+    > memorize random_number_session_1
+    > status approved, completed
+    > output:
+    ...
     
+    > run bash cat | grep | sed etc
+    > status approved, completed
+    > output:
+    ...
     
 [x] Context Builder Switch to tree for token efficiency
 
@@ -59,11 +71,15 @@
             - code block (without md rendering, maybe with syntax highlighting, no line wrapping ?, etc)
             - md
             
-[ ] When scrolling up in the history, anchor the hist to not scroll down 
+[x] When scrolling up in the history, anchor the hist to not scroll down 
     when new messages come in until the user scrolls back to the bottom (like in slack, discord, etc)
     and when a message is being written
 
-[ ] Add an indicator for down message like "+3 messages"
+
+[ ] add a status line on top of input field 
+    [ ] Copied to clipboard ! (with timeout ? / overwrite)
+    [ ] Add an indicator for down message like "+3 messages"
+    
 
 [x] When focusing a message scroll to see it
 [x] When focused add message footer with commands
@@ -71,8 +87,10 @@
     [x] add said commands
     [ ] allow / deny prompt
 
+[ ] split harness.py
 
-[ ] check for different thinking tags for different models
+[x] check for different thinking tags for different models
+
 [?] split command:
     - splits the terminal in 2 vertical panels, seperate conversations in each panel ?
         [?] think more about the use case for this. Should not be so difficult to implement.
@@ -146,6 +164,10 @@
     [ ] Extremely out of scope for now
 
 BUGS:
+
+[ ] Sending a message while waiting for [a] allow -> bad order queue
+
+[x] Fuzzy search broken by Tree repr of context builder
 
 [x] /status does not show context_pressure info !! -> use token_estimation.py
 [x] AFTER RETRY the next user message gets eaten (disappears from the history BUT sent to the LLM)
