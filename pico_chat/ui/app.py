@@ -23,7 +23,7 @@ from pico_chat.ui.tui.layout_utils import strip_ansi
 import logging
 from pico_chat.ui.commands import StatusCommand
 from pico_chat.ui.tui.colors import theme
-from pico_chat.ui.tui.msg_types import PicoMsg, ThinkingMsg, UserMsg, SysMsg, SysMsgError, ToolPermissionMsg
+from pico_chat.ui.tui.msg_types import PicoMsg, ThinkingMsg, UserMsg, SysMsg, SysMsgError, ToolPermissionMsg, ToolCallMsg
 
 from pico_chat import pico_cfg
 from pico_chat.ui.logging_handlers import setup_tui_logging
@@ -123,7 +123,7 @@ class chatTUI(ChatActionHandlers):
         chat = self.chat_history_panel
         current_msg = chat.add_message("Sending request...", msg_type=SysMsg())
         
-        mode = "request"
+        current_msg_type = SysMsg  # Track the type of current message
         current_harness_ids = []  # Track harness message IDs for current UI message
         
         # Process streaming response from Harness
@@ -141,35 +141,62 @@ class chatTUI(ChatActionHandlers):
                             user_msg.harness_message_ids = [chunk.message_id]
                             logger.debug(f"Linked user message to harness ID {chunk.message_id}")
                     
-                elif isinstance(chunk, chunks.Thinking): # Special chunk type for "thinking" content
-                    
-                    if mode == "request":
-                        # Start a new message for thinking content
-                        new_msg = chat.new_message("", msg_type=ThinkingMsg(), harness_message_ids=current_harness_ids)
-                        chat.replace_message(current_msg, new_msg) # Replace the "Sending request..." message with the new thinking message
-                        current_msg = new_msg
-                        mode = "thinking"
+                elif isinstance(chunk, chunks.Thinking):
+                    # If not currently in a thinking message, create one
+                    if current_msg_type != ThinkingMsg:
+                        if current_msg_type == SysMsg:
+                            # Replace "Sending request..." with thinking
+                            new_msg = chat.new_message("", msg_type=ThinkingMsg(), harness_message_ids=current_harness_ids)
+                            chat.replace_message(current_msg, new_msg)
+                            current_msg = new_msg
+                        else:
+                            # Finalize previous and create new
+                            current_msg.finalize()
+                            current_msg = chat.add_message("", msg_type=ThinkingMsg(), harness_message_ids=current_harness_ids)
+                        current_msg_type = ThinkingMsg
                     
                     current_msg.append(chunk.content)
                 
-                elif isinstance(chunk, chunks.Content): # Regular content chunk
+                elif isinstance(chunk, chunks.Content):
+                    # If not currently in a content message, create one
+                    if current_msg_type != PicoMsg:
+                        if current_msg_type == SysMsg:
+                            # Replace "Sending request..." with content
+                            new_msg = chat.new_message("", msg_type=PicoMsg(), harness_message_ids=current_harness_ids)
+                            chat.replace_message(current_msg, new_msg)
+                            current_msg = new_msg
+                        else:
+                            # Finalize previous and create new
+                            current_msg.finalize()
+                            current_msg = chat.add_message("", msg_type=PicoMsg(), harness_message_ids=current_harness_ids)
+                        current_msg_type = PicoMsg
                     
-                    text = chunk.content
-                    if mode == "thinking":
-                        current_msg.set_title("thoughts") # Update title for thinking content
-                        current_msg.finalize()
-                        current_msg = chat.add_message("", msg_type=PicoMsg(), harness_message_ids=current_harness_ids) # Create a new message for regular content
-                        mode = "answering"
-                    
-                    # Render regular content
-                    current_msg.append(text)
+                    current_msg.append(chunk.content)
                 
                 elif isinstance(chunk, chunks.ToolStart):
-                    # Show which tool is being called
-                    current_msg.append(f"{theme.WARNING}> running tool::{chunk.name}{theme.reset()} ")
+                    # Always create a new tool message
+                    if current_msg and current_msg_type != SysMsg:
+                        current_msg.finalize()
+                    
+                    if current_msg_type == SysMsg:
+                        # Replace "Sending request..."
+                        new_msg = chat.new_message(
+                            f"{theme.WARNING}> running tool::{chunk.name}{theme.reset()} ",
+                            msg_type=ToolCallMsg(),
+                            harness_message_ids=current_harness_ids
+                        )
+                        chat.replace_message(current_msg, new_msg)
+                        current_msg = new_msg
+                    else:
+                        current_msg = chat.add_message(
+                            f"{theme.WARNING}> running tool::{chunk.name}{theme.reset()} ",
+                            msg_type=ToolCallMsg(),
+                            harness_message_ids=current_harness_ids
+                        )
+                    current_msg_type = ToolCallMsg
                 
                 elif isinstance(chunk, chunks.ToolComplete):
-                    # Show tool completion using status field
+                    # Append to current tool message
                     if chunk.status == "denied":
                         status_text = f"{theme.ERROR}status DENIED {theme.reset()}"
                     elif chunk.status == "error":
@@ -189,7 +216,8 @@ class chatTUI(ChatActionHandlers):
                 
                 elif isinstance(chunk, chunks.GenerationMetrics):
                     # Update message metrics (for live display in footer)
-                    if mode in ("thinking", "answering"):
+                    # Only update for thinking/content messages, not tool messages
+                    if current_msg_type in (ThinkingMsg, PicoMsg):
                         current_msg.update_metrics(
                             tokens=chunk.tokens,
                             tokens_per_second=chunk.tokens_per_second,
