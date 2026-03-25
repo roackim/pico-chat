@@ -1,7 +1,7 @@
 [project]
 name = "pico_chat"
-version = "0.7.0"
-description = "Local AI assistant in the command line"
+version = "0.8.0"
+description = "Local llm cli agent"
 requires-python = ">= 3.10"
 authors = [{name = "Joackim Orciere", email = "joackim.orciere@proton.me"}]
 dependencies = [
