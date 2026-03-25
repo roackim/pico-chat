@@ -229,20 +229,15 @@ class Harness:
             context_window=context_window_str
         )
         
-        messages = [system_msg]
-        
-        # Inject memory if any exists (compact format)
+        # Inject memory into system message content if any exists (single system message for compatibility)
         if self.memory:
             memory_items = list(self.memory.values())
             # Compact JSON - no pretty printing, keeps metadata
             memory_json = json.dumps(memory_items, separators=(',', ':'), ensure_ascii=False)
-            
-            memory_msg = {
-                "role": "system",
-                "content": f"MEMORY:{memory_json}"
-            }
-            messages.append(memory_msg)
+            # Append memory to system message content with clear delimiter
+            system_msg["content"] += f"\n\nMEMORY:{memory_json}"
         
+        messages = [system_msg]
         messages.extend(self.history)
         return messages
 
@@ -269,20 +264,15 @@ class Harness:
             context_window=context_window_str
         )
         
-        messages = [system_msg]
-        
-        # Inject memory if any exists (compact format)
+        # Inject memory into system message content if any exists
         if self.memory:
             memory_items = list(self.memory.values())
             # Compact JSON - no pretty printing, keeps metadata
             memory_json = json.dumps(memory_items, separators=(',', ':'), ensure_ascii=False)
-            
-            memory_msg = {
-                "role": "system",
-                "content": f"MEMORY:{memory_json}"
-            }
-            messages.append(memory_msg)
+            # Append memory to system message content with clear delimiter
+            system_msg["content"] += f"\n\nMEMORY:{memory_json}"
         
+        messages = [system_msg]
         messages.extend(self.history)
         return messages
 
