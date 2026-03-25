@@ -37,6 +37,13 @@
             [ ] provide all key, desc
             [ ] provide recall(key) tool to access the heavy content 
 
+[ ] UI tool improvement: 
+    [ ] drafting when writing content of tool call (UI hangs up currently)
+    [ ] writing / patch -> just the number of lines not full in UI
+
+[ ] Inject current window size ?
+    [ ] Properly compute it ? Seems overstated (taking things into account that is not passed to the LLM ?)
+[ ] Memory should maybe not need feedback / waiting ? 
 
 [ ] Better tool UI feedback especially non shell tools.
     move approved | completed bellow
