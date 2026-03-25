@@ -165,6 +165,10 @@ class ChatActionHandlers:
             self.agent.set_user_response("approve")
             self.pending_permission_prompt = None
             
+            # Focus input field
+            self._last_focus_id = "input"
+            self._update_focus_states()
+            
             # Don't update the message - it will be replaced by ToolStart
             logger.info("Permission granted, waiting for tool execution")
         else:
@@ -185,7 +189,27 @@ class ChatActionHandlers:
             self.agent.set_user_response("deny")
             self.pending_permission_prompt = None
             
+            # Focus input field
+            self._last_focus_id = "input"
+            self._update_focus_states()
+            
             # Don't update the message - it will be replaced by ToolStart with DENIED status
             logger.info("Permission denied, waiting for tool result")
         else:
             logger.warning("Deny action called on non-permission message")
+    
+    def handle_output_action(self, message):
+        """Handle output action for tool messages - toggle output visibility."""
+        logger = logging.getLogger("tui")
+        logger.info("Output toggle action triggered")
+        
+        from pico_chat.ui.tui.msg_types import ToolCallMsg
+        
+        # Check if this is a tool message
+        if isinstance(message.type, ToolCallMsg):
+            # Toggle output visibility
+            message.show_output = not message.show_output
+            message.rebuild_tool_display()
+            logger.info(f"Tool output {'shown' if message.show_output else 'hidden'}")
+        else:
+            logger.warning("Output action called on non-tool message")

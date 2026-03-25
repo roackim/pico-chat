@@ -104,9 +104,7 @@ class FileTools:
         if permission == "deny":
             location = "inside repo" if is_inside else "outside repo"
             raise ToolError(f"Permission denied: read {location} is not allowed")
-        elif permission == "ask":
-            # TODO: Implement user confirmation callback
-            raise ToolError(f"Permission required: read {path} requires user confirmation (not yet implemented)")
+        # Note: "ask" permission is handled by harness before calling tool
         
         if not target.exists():
             raise ToolError(f"File not found: {path}")
@@ -146,9 +144,7 @@ class FileTools:
         if permission == "deny":
             location = "inside repo" if is_inside else "outside repo"
             raise ToolError(f"Permission denied: write {location} is not allowed")
-        elif permission == "ask":
-            # TODO: Implement user confirmation callback
-            raise ToolError(f"Permission required: write {path} requires user confirmation (not yet implemented)")
+        # Note: "ask" permission is handled by harness before calling tool
         
         # Create parent directories if needed
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -195,9 +191,7 @@ class FileTools:
         if permission == "deny":
             location = "inside repo" if is_inside else "outside repo"
             raise ToolError(f"Permission denied: patch {location} is not allowed")
-        elif permission == "ask":
-            # TODO: Implement user confirmation callback
-            raise ToolError(f"Permission required: patch {patch.filename} requires user confirmation (not yet implemented)")
+        # Note: "ask" permission is handled by harness before calling tool
         
         # Read current file
         try:

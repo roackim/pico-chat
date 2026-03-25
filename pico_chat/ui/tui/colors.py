@@ -81,7 +81,7 @@ default = _theme(
     
     USER        = RGB("#7ADA92"),   # Blue
     PICO        = RGB("#66C0F4"),   # Green
-    FOCUSED     = RGB("#FFC760"),   # Yellow
+    FOCUSED     = RGB("#FF60BD"),   # Yellow
 )
 
 theme: _theme = default

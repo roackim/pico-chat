@@ -83,6 +83,10 @@ class ToolPermissionsProfile:
     # Shell execution
     run: RunPermissions
     
+    # Memory operations (memorize/forget)
+    # These are safe in-memory operations, typically allowed
+    memory: Permission = "allow"
+    
     def get_read_permission(self, is_inside_repo: bool) -> Permission:
         """Get read permission for a path."""
         return self.read.get(is_inside_repo)
@@ -98,6 +102,10 @@ class ToolPermissionsProfile:
     def get_run_permission(self) -> RunPermissions:
         """Get run permissions."""
         return self.run
+    
+    def get_memory_permission(self) -> Permission:
+        """Get memory operation permission."""
+        return self.memory
 
 
 # --- Predefined Profiles ---
@@ -115,6 +123,7 @@ strict = ToolPermissionsProfile(
         others="ask",
         use_container=False
     ),
+    memory="ask",
 )
 
 # Permissive profile: allow operations inside repo, ask for outside/commands
@@ -124,6 +133,7 @@ permissive = ToolPermissionsProfile(
     write=FilePermissions(inside_repo="allow", outside_repo="deny"),
     patch=FilePermissions(inside_repo="allow", outside_repo="deny"),
     run=RunPermissions(use_container=False),
+    memory="allow",  # Memory operations are safe
 )
 
 # Unrestricted profile: allow everything (use with caution!)
@@ -139,6 +149,7 @@ unrestricted = ToolPermissionsProfile(
         others="allow", # allow all commands
         use_container=False
     ),
+    memory="allow",
 )
 
 # Locked profile: deny everything
@@ -154,9 +165,10 @@ locked = ToolPermissionsProfile(
         others="deny",
         use_container=False
     ),
+    memory="deny",  # Even memory operations are denied
 )
 
-askall = ToolPermissionsProfile(
+TESTING = ToolPermissionsProfile(
     name="askall",
     read=FilePermissions(inside_repo="ask", outside_repo="ask"),
     write=FilePermissions(inside_repo="ask", outside_repo="ask"),
@@ -168,7 +180,8 @@ askall = ToolPermissionsProfile(
         others="ask",
         use_container=False
     ),
+    memory="allow",  # Ask for memory operations too
 )
 
 # Global permissions profile (can be changed at runtime)
-permissions: ToolPermissionsProfile = askall # permissive
+permissions: ToolPermissionsProfile = TESTING # permissive

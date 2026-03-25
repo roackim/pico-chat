@@ -70,6 +70,13 @@ class Message:
         self.component = TextComponent(self.formatted_text, fg=content_color)
         self.finalized = False  # Whether this message is finalized
         
+        # Tool-specific metadata
+        self.tool_name: Optional[str] = None
+        self.tool_args: Optional[str] = None
+        self.tool_output: Optional[str] = None
+        self.tool_status: Optional[str] = None  # "approved", "denied", "completed", etc.
+        self.show_output: bool = False  # Toggle for output visibility
+        
         # Generation metrics
         self.metrics_tokens: int = 0
         self.metrics_tokens_per_second: float = 0.0
@@ -194,6 +201,65 @@ class Message:
         if not self.base_text.strip():
             text = text.lstrip()
         self.base_text += text
+        self.reformat(self.max_width)
+    
+    def rebuild_tool_display(self):
+        """Rebuild tool message display text based on current metadata and show_output state."""
+        if not self.tool_name:
+            return
+        
+        from pico_chat.ui.tui.colors import theme
+        
+        # Build status line with colors
+        status_parts = []
+        if self.tool_status:
+            # Split status by | and color each part
+            parts = self.tool_status.split(' | ')
+            colored_parts = []
+            for part in parts:
+                part = part.strip()
+                if part in ['approved', 'completed']:
+                    colored_parts.append(f"{theme.SUCCESS}{part}{theme.reset()}")
+                elif part in ['denied', 'error']:
+                    colored_parts.append(f"{theme.ERROR}{part}{theme.reset()}")
+                elif part in ['executing']:
+                    colored_parts.append(f"{theme.MUTED}{part}{theme.reset()}")
+                else:
+                    colored_parts.append(f"{theme.MUTED}{part}{theme.reset()}")
+            status_parts = [' | '.join(colored_parts)]
+        
+        # Build header line - simpler format: "> toolname"
+        header = f"{theme.WARNING}> {self.tool_name}{theme.reset()}"
+        if status_parts:
+            header += f" {status_parts[0]}"
+        
+        # Build text
+        lines = [header]
+        
+        # Add command/args if available - extract command value directly
+        if self.tool_args:
+            # Try to parse as JSON to show nicely
+            import json
+            try:
+                args_dict = json.loads(self.tool_args)
+                if len(args_dict) == 1:
+                    # Single arg - show the value with cmd: prefix
+                    key, value = list(args_dict.items())[0]
+                    if isinstance(value, str):
+                        lines.append(f"{theme.MUTED}cmd:{theme.reset()} {value}")
+                    else:
+                        lines.append(f"{theme.MUTED}cmd:{theme.reset()} {json.dumps(value)}")
+                else:
+                    lines.append(f"{theme.MUTED}cmd:{theme.reset()} {json.dumps(args_dict)}")
+            except:
+                # Not JSON or parse error - show raw
+                lines.append(f"{theme.MUTED}cmd:{theme.reset()} {self.tool_args}")
+        
+        # Add output if show_output is True
+        if self.show_output and self.tool_output:
+            lines.append(f"{theme.MUTED}out: {self.tool_output}{theme.reset()}")
+        
+        self.base_text = '\n'.join(lines)
         self.reformat(self.max_width)
     
     def update_metrics(self, tokens: int, tokens_per_second: float, ttft_ms: Optional[float] = None, duration_ms: Optional[float] = None):

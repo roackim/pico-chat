@@ -145,6 +145,10 @@ class Harness:
             else:
                 return "allow"
         
+        elif tool_name in ["memorize", "forget"]:
+            # Memory operations
+            return permissions.get_memory_permission()
+        
         return "ask"  # Default to asking
     
     def _build_permission_prompt(self, tool_name: str, args: dict) -> str:
@@ -161,6 +165,12 @@ class Harness:
             if len(command) > 100:
                 command = command[:97] + "..."
             return f"Allow running command: {command}?"
+        elif tool_name == "memorize":
+            key = args.get('key', 'unknown')
+            return f"Allow memorizing: {key}?"
+        elif tool_name == "forget":
+            key = args.get('key', 'unknown')
+            return f"Allow forgetting: {key}?"
         return f"Allow {tool_name}?"
     
     def _request_user_confirmation(self, command: str) -> bool:

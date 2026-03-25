@@ -53,6 +53,7 @@ class ChatHistoryPanel(TextComponent):
         self.on_stop_action: Optional[callable] = None
         self.on_allow_action: Optional[callable] = None
         self.on_deny_action: Optional[callable] = None
+        self.on_output_action: Optional[callable] = None
 
     def set_compositor(self, compositor):
         """Set the compositor for updates."""
@@ -408,6 +409,12 @@ class ChatHistoryPanel(TextComponent):
                 elif event == 'x' and MsgAction.DENY in focused_msg.type.actions:
                     if self.on_deny_action:
                         self.on_deny_action(focused_msg)
+                    return True
+                
+                # Output toggle action
+                elif event == 'o' and MsgAction.OUTPUT in focused_msg.type.actions:
+                    if self.on_output_action:
+                        self.on_output_action(focused_msg)
                     return True
         
         # Handle mouse input

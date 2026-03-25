@@ -170,10 +170,7 @@ class MemorizeTool(ToolWrapper):
         super().__init__(
             name="memorize",
             description=(
-                "Store or update important information in memory. "
-                "Use this to remember project goals, decisions, file locations, "
-                "patterns discovered, or any information that will be useful later. "
-                "Memory persists across the conversation and survives edits/retries."
+                "Store, update or forget information in memory. "
             ),
             parameters={
                 "type": "object",

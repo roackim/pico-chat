@@ -12,6 +12,7 @@ class MsgAction(Enum):
     STOP = ("s", "stop")
     ALLOW = ("a", "allow")
     DENY = ("x", "deny")
+    OUTPUT = ("o", "output")
     
     def __init__(self, key: str, label: str):
         self.key = key
@@ -20,7 +21,6 @@ class MsgAction(Enum):
     def format(self) -> str:
         """Format action as [key] label."""
         return f"[{self.key}] {self.label}"
-        # return f"{self.key}: {self.label}"
 
 class MsgType:
     """Base class for message types."""
@@ -73,7 +73,7 @@ class ToolCallMsg(MsgType):
     title = "tool"
     frame_color = "WARNING"
     content_color = None
-    actions = [MsgAction.COPY, MsgAction.DELETE]
+    actions = [MsgAction.OUTPUT, MsgAction.COPY, MsgAction.DELETE]
 
 class AskPermissionMsg(MsgType):
     name = "permission"

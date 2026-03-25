@@ -184,19 +184,34 @@ class chatTUI(ChatActionHandlers):
                     tool_id = chunk.tool_call_id
                     
                     if chunk.status == chunks.ToolStatus.PERMISSION_REQUESTED:
-                        # Create new tool message
+                        # Create new tool message with metadata
                         if chunk.auto_decision:
-                            # Auto-decision: show immediately
-                            decision = "auto-approved" if chunk.auto_decision else "auto-denied"
-                            msg_text = f"{theme.WARNING}> tool::{chunk.tool_name}{theme.reset()}\n{chunk.permission_prompt}\n{theme.MUTED}({decision}){theme.reset()}\n"
+                            # Auto-decision: start with tool name and status marker
                             msg = chat.add_message(
-                                msg_text,
+                                "",  # Will be built by rebuild_tool_display
                                 msg_type=ToolCallMsg(),
                                 harness_message_ids=current_harness_ids
                             )
+                            msg.tool_name = chunk.tool_name
+                            msg.tool_args = chunk.tool_args
+                            msg.tool_status = "auto-approved"
+                            msg.rebuild_tool_display()
                         else:
                             # Need user permission - show request
-                            msg_text = f"{theme.WARNING}> tool::{chunk.tool_name}{theme.reset()}\n{chunk.permission_prompt}"
+                            # Extract command for cleaner display
+                            try:
+                                import json
+                                args_dict = json.loads(chunk.tool_args)
+                                if 'command' in args_dict:
+                                    command = args_dict['command']
+                                elif len(args_dict) == 1:
+                                    command = list(args_dict.values())[0]
+                                else:
+                                    command = json.dumps(args_dict)
+                            except:
+                                command = chunk.tool_args
+                            
+                            msg_text = f"{theme.WARNING}> {chunk.tool_name}{theme.reset()}\n{theme.MUTED}cmd:{theme.reset()} {command}"
                             msg = chat.add_message(
                                 msg_text,
                                 msg_type=AskPermissionMsg(),
@@ -208,6 +223,10 @@ class chatTUI(ChatActionHandlers):
                             self._last_focus_id = "history"
                             self._update_focus_states()
                             
+                            # Force compositor render to show actions immediately
+                            if self.compositor:
+                                self.compositor.render()
+                            
                             # Store prompt for handler
                             self.pending_permission_prompt = chunk.permission_prompt
                         
@@ -218,35 +237,70 @@ class chatTUI(ChatActionHandlers):
                     elif chunk.status == chunks.ToolStatus.APPROVED:
                         msg = self.active_tool_messages.get(tool_id)
                         if msg:
-                            msg.append(f"\n{theme.SUCCESS}✓ approved{theme.reset()}\n")
+                            # Change message type from permission to tool
+                            msg.type = ToolCallMsg()
+                            msg.title = "tool"
+                            msg.box.title = "tool"
+                            # Update status
+                            msg.tool_name = chunk.tool_name
+                            msg.tool_args = chunk.tool_args
+                            msg.tool_status = "approved"
+                            msg.rebuild_tool_display()
                     
                     elif chunk.status == chunks.ToolStatus.DENIED:
                         msg = self.active_tool_messages.get(tool_id)
                         if msg:
-                            msg.append(f"\n{theme.ERROR}✗ denied: {chunk.denial_reason}{theme.reset()}\n")
+                            # Change to tool message type
+                            msg.type = ToolCallMsg()
+                            msg.title = "tool"
+                            msg.box.title = "tool"
+                            msg.tool_name = chunk.tool_name
+                            msg.tool_args = chunk.tool_args
+                            msg.tool_status = "denied"
+                            msg.tool_output = chunk.denial_reason
+                            msg.show_output = True  # Always show denial reason
+                            msg.rebuild_tool_display()
                             msg.finalize()
                             del self.active_tool_messages[tool_id]
                     
                     elif chunk.status == chunks.ToolStatus.EXECUTING:
                         msg = self.active_tool_messages.get(tool_id)
                         if msg:
-                            msg.append(f"{theme.MUTED}> executing...{theme.reset()}\n")
+                            # Ensure message type is tool (in case we skipped APPROVED for auto-approved)
+                            if not isinstance(msg.type, ToolCallMsg):
+                                msg.type = ToolCallMsg()
+                                msg.title = "tool"
+                                msg.box.title = "tool"
+                            # Update status to show executing
+                            msg.tool_status = "approved | executing"
+                            msg.rebuild_tool_display()
                     
                     elif chunk.status == chunks.ToolStatus.COMPLETED:
                         msg = self.active_tool_messages.get(tool_id)
                         if msg:
-                            # Truncate result if too long
-                            result = chunk.result or ""
-                            if len(result) > 500:
-                                result = result[:497] + "..."
-                            msg.append(f"{theme.SUCCESS}✓ completed{theme.reset()}\n{theme.MUTED}{result}{theme.reset()}\n")
+                            # Ensure message type is tool
+                            if not isinstance(msg.type, ToolCallMsg):
+                                msg.type = ToolCallMsg()
+                                msg.title = "tool"
+                                msg.box.title = "tool"
+                            # Store output and update to completed
+                            msg.tool_status = "approved | completed"
+                            msg.tool_output = chunk.result or ""
+                            msg.rebuild_tool_display()
                             msg.finalize()
                             del self.active_tool_messages[tool_id]
                     
                     elif chunk.status == chunks.ToolStatus.ERROR:
                         msg = self.active_tool_messages.get(tool_id)
                         if msg:
-                            msg.append(f"{theme.ERROR}✗ error: {chunk.error}{theme.reset()}\n")
+                            # Change to tool message type
+                            msg.type = ToolCallMsg()
+                            msg.title = "tool"
+                            msg.box.title = "tool"
+                            msg.tool_status = "error"
+                            msg.tool_output = chunk.error
+                            msg.show_output = True  # Always show errors
+                            msg.rebuild_tool_display()
                             msg.finalize()
                             del self.active_tool_messages[tool_id]
                 
@@ -652,6 +706,7 @@ class chatTUI(ChatActionHandlers):
         self.chat_history_panel.on_stop_action = self.handle_stop_action
         self.chat_history_panel.on_allow_action = self.handle_allow_action
         self.chat_history_panel.on_deny_action = self.handle_deny_action
+        self.chat_history_panel.on_output_action = self.handle_output_action
         
         # Set initial focus states
         self._update_focus_states()
