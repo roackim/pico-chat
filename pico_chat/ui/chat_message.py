@@ -69,6 +69,13 @@ class Message:
         self.formatted_text = self._format_line_wrap()
         self.component = TextComponent(self.formatted_text, fg=content_color)
         self.finalized = False  # Whether this message is finalized
+        
+        # Generation metrics
+        self.metrics_tokens: int = 0
+        self.metrics_tokens_per_second: float = 0.0
+        self.metrics_ttft_ms: Optional[float] = None
+        self.metrics_duration_ms: Optional[float] = None
+        
         self.box = Box(
             self.component,
             parent_msg=self
@@ -188,3 +195,41 @@ class Message:
             text = text.lstrip()
         self.base_text += text
         self.reformat(self.max_width)
+    
+    def update_metrics(self, tokens: int, tokens_per_second: float, ttft_ms: Optional[float] = None, duration_ms: Optional[float] = None):
+        """Update generation metrics for this message."""
+        self.metrics_tokens = tokens
+        self.metrics_tokens_per_second = tokens_per_second
+        if ttft_ms is not None:
+            self.metrics_ttft_ms = ttft_ms
+        if duration_ms is not None:
+            self.metrics_duration_ms = duration_ms
+    
+    def get_metrics_string(self) -> Optional[str]:
+        """Get formatted metrics string based on config."""
+        from pico_chat import pico_cfg
+        
+        if not pico_cfg.config.ui_show_metrics:
+            return None
+        
+        # Only show metrics if we have data
+        if self.metrics_tokens == 0 and self.metrics_tokens_per_second == 0:
+            return None
+        
+        parts = []
+        
+        if pico_cfg.config.ui_metrics_show_tokens and self.metrics_tokens > 0:
+            parts.append(f"{self.metrics_tokens} t")
+        
+        if pico_cfg.config.ui_metrics_show_speed and self.metrics_tokens_per_second > 0:
+            parts.append(f"{self.metrics_tokens_per_second:.1f} t/s")
+        
+        if pico_cfg.config.ui_metrics_show_ttft and self.metrics_ttft_ms is not None:
+            parts.append(f"ttft {self.metrics_ttft_ms:.0f}ms")
+        
+        return " │ ".join(parts) if parts else None
+    
+    def should_show_metrics(self) -> bool:
+        """Check if metrics should be displayed for this message."""
+        # Show if focused OR if generating (not finalized)
+        return self.box.focused or not self.finalized

@@ -55,3 +55,12 @@ class ToolError(Chunk):
     """A tool execution failed."""
     name: str
     error: str
+
+
+@dataclass
+class GenerationMetrics(Chunk):
+    """Live generation metrics for performance monitoring."""
+    tokens: int
+    tokens_per_second: float
+    ttft_ms: Optional[float] = None  # Time to first token
+    duration_ms: Optional[float] = None  # Total duration

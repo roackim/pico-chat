@@ -608,9 +608,24 @@ class ChatHistoryPanel(TextComponent):
         """
         try:
             index = self.messages.index(current)
+            
+            # Check if the current message is focused
+            was_focused = (self.focused_message_index == index)
+            
+            # Clear focus from the old message if it was focused
+            if was_focused:
+                current.set_focused(False)
+            
+            # Replace the message
             self.messages[index] = new
             self.msg_container.children[index] = new.get_component()
             # sizes remain the same ("auto")
+            
+            # Transfer focus to the new message if the old one was focused
+            if was_focused:
+                new.set_focused(True)
+                # focused_message_index stays the same (same index, different message)
+            
         except ValueError:
             # Message not found, ignore
             pass

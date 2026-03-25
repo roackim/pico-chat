@@ -186,6 +186,16 @@ class chatTUI(ChatActionHandlers):
                 elif isinstance(chunk, chunks.ToolError):
                     # Show tool error
                     current_msg.append(f"\n{theme.ERROR}status ERROR: \n {theme.WARNING} > {chunk.error}]{theme.reset()}\n")
+                
+                elif isinstance(chunk, chunks.GenerationMetrics):
+                    # Update message metrics (for live display in footer)
+                    if mode in ("thinking", "answering"):
+                        current_msg.update_metrics(
+                            tokens=chunk.tokens,
+                            tokens_per_second=chunk.tokens_per_second,
+                            ttft_ms=chunk.ttft_ms,
+                            duration_ms=chunk.duration_ms
+                        )
 
                 # Ensure we scroll to bottom if needed
                 if self.chat_history_panel.auto_scroll:

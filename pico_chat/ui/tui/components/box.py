@@ -107,33 +107,49 @@ class Box(Component):
         for i in range(1, self.height - 1):
             buffer.set(self.x + self.width - 1, self.y + i, style.v, fg=fg, bg=bg)
 
-        # Bottom border with actions
+        # Bottom border with metrics (above actions) and actions
+        metrics_str = None
+        if self.parent_msg and hasattr(self.parent_msg, 'should_show_metrics') and self.parent_msg.should_show_metrics():
+            metrics_str = self.parent_msg.get_metrics_string()
+        
+        # Build bottom line content: metrics, then actions
+        bottom_content_parts = []
+        if metrics_str:
+            bottom_content_parts.append(f" {metrics_str} ")
         if actions and self.focused:
-            # Format actions string like " [r] remove [c] copy [e] edit "
-            actions_str = " " + " ".join(action.format() for action in actions) + " "
-            actions_width = len(actions_str)
+            actions_str = " ".join(action.format() for action in actions)
+            bottom_content_parts.append(f" {actions_str} ")
+        
+        if bottom_content_parts:
+            # Join metrics and actions with separator if both exist
+            if len(bottom_content_parts) == 2:
+                bottom_str = bottom_content_parts[0] + "│" + bottom_content_parts[1]
+            else:
+                bottom_str = bottom_content_parts[0]
+            
+            bottom_width = len(bottom_str)
             
             # Calculate how much space we have for the bottom border
             # We need at least 2 chars for corners + 1 char border on the right
             available_width = self.width - 3
             
-            if actions_width <= available_width:
+            if bottom_width <= available_width:
                 # Draw left part of bottom border
-                left_border_width = available_width - actions_width
+                left_border_width = available_width - bottom_width
                 for i in range(1, left_border_width + 1):
                     buffer.set(self.x + i, self.y + self.height - 1, style.h, fg=fg, bg=bg)
                 
-                # Draw actions string
-                buffer.write_str(self.x + left_border_width + 1, self.y + self.height - 1, actions_str, fg=fg, bg=bg)
+                # Draw combined string
+                buffer.write_str(self.x + left_border_width + 1, self.y + self.height - 1, bottom_str, fg=fg, bg=bg)
                 
                 # Draw one more border char on the right before the corner
                 buffer.set(self.x + self.width - 2, self.y + self.height - 1, style.h, fg=fg, bg=bg)
             else:
-                # Actions too long, just draw normal border
+                # Content too long, just draw normal border
                 for i in range(1, self.width - 1):
                     buffer.set(self.x + i, self.y + self.height - 1, style.h, fg=fg, bg=bg)
         else:
-            # No actions, draw normal bottom border
+            # No content, draw normal bottom border
             for i in range(1, self.width - 1):
                 buffer.set(self.x + i, self.y + self.height - 1, style.h, fg=fg, bg=bg)
 

@@ -36,6 +36,13 @@ class Config:
         self.ui_box_style: str = style # Box border style: ("square", "double", "rounded", ascii)
         self.ui_box_style_focused: str = style # NOTE: currently unplugged; Box border style when focused: ("square", "double", "rounded")
         
+        # Generation metrics display
+        self.ui_show_metrics: bool = True  # Show generation metrics
+        self.ui_metrics_show_tokens: bool = False
+        self.ui_metrics_show_speed: bool = True
+        self.ui_metrics_show_ttft: bool = False
+        self.ui_metrics_refresh_interval: float = 0.1  # Seconds between metric updates
+        
         self.target_fps: int = 60
         
         # Context building settings

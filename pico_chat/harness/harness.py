@@ -292,17 +292,28 @@ class Harness:
         Yields: chunks.Chunk subclasses:
             - chunks.Thinking: Reasoning content
             - chunks.Content: Regular response content
+            - chunks.GenerationMetrics: Live performance metrics
         
         Sets instance variables:
         - self._last_full_content: Complete response content
         - self._last_tool_calls: Tool calls from the response
         """
+        from pico_chat.harness.token_estimation import estimate_tokens
+        from pico_chat import pico_cfg
+        
         self.state = AgentState.THINKING
         self.debug_stream.log("REQUEST", messages)
         
         # Track time-to-first-token (TTFT)
         request_start_time = time.perf_counter()
         first_chunk_received = False
+        ttft_ms = None
+        
+        # Track generation metrics
+        generation_start_time = None
+        total_tokens = 0
+        last_metrics_update = 0
+        metrics_interval = pico_cfg.config.ui_metrics_refresh_interval
         
         full_content = ""
         tool_calls_buffer: Dict[int, Dict[str, Any]] = {}
@@ -317,8 +328,9 @@ class Harness:
             # Log TTFT on first chunk
             if not first_chunk_received:
                 ttft = time.perf_counter() - request_start_time
-                logger.info(f"Time-to-first-token: {ttft*1000:.0f}ms")
-                self.debug_stream.log("TTFT", f"{ttft*1000:.0f}ms")
+                ttft_ms = ttft * 1000
+                logger.info(f"Time-to-first-token: {ttft_ms:.0f}ms")
+                self.debug_stream.log("TTFT", f"{ttft_ms:.0f}ms")
                 first_chunk_received = True
             
             if not chunk.choices:
@@ -332,15 +344,39 @@ class Harness:
                 if self.state != AgentState.THINKING:
                     self.state = AgentState.THINKING
                 
-                # Yield structured thinking chunk
+                # Start tracking on first content
+                if generation_start_time is None:
+                    generation_start_time = time.perf_counter()
+                
+                # Count tokens and yield content
+                total_tokens += estimate_tokens(reasoning)
                 yield chunks.Thinking(content=reasoning)
+                
+                # Yield metrics update periodically
+                current_time = time.perf_counter()
+                if current_time - last_metrics_update >= metrics_interval:
+                    duration = current_time - generation_start_time
+                    tokens_per_second = total_tokens / duration if duration > 0 else 0
+                    yield chunks.GenerationMetrics(
+                        tokens=total_tokens,
+                        tokens_per_second=tokens_per_second,
+                        ttft_ms=ttft_ms
+                    )
+                    last_metrics_update = current_time
+                
                 continue
 
             # 2. Handle Content (with thinking tag parsing)
             content = delta.content
             if content:
+                # Start tracking on first content
+                if generation_start_time is None:
+                    generation_start_time = time.perf_counter()
+                
                 # Add to buffer for tag parsing
                 content_buffer += content
+                # Count tokens for this content chunk
+                total_tokens += estimate_tokens(content)
                 
                 # Parse for thinking tags
                 while content_buffer:
@@ -364,6 +400,18 @@ class Harness:
                                     self.state = AgentState.ANSWERING
                                 full_content += before_content
                                 yield chunks.Content(content=before_content)
+                                
+                                # Yield metrics update periodically
+                                current_time = time.perf_counter()
+                                if current_time - last_metrics_update >= metrics_interval:
+                                    duration = current_time - generation_start_time
+                                    tokens_per_second = total_tokens / duration if duration > 0 else 0
+                                    yield chunks.GenerationMetrics(
+                                        tokens=total_tokens,
+                                        tokens_per_second=tokens_per_second,
+                                        ttft_ms=ttft_ms
+                                    )
+                                    last_metrics_update = current_time
                             
                             # Enter thinking block
                             in_thinking_block = True
@@ -381,6 +429,19 @@ class Harness:
                                     self.state = AgentState.ANSWERING
                                 full_content += safe_content
                                 yield chunks.Content(content=safe_content)
+                                
+                                # Yield metrics update periodically
+                                current_time = time.perf_counter()
+                                if current_time - last_metrics_update >= metrics_interval:
+                                    duration = current_time - generation_start_time
+                                    tokens_per_second = total_tokens / duration if duration > 0 else 0
+                                    yield chunks.GenerationMetrics(
+                                        tokens=total_tokens,
+                                        tokens_per_second=tokens_per_second,
+                                        ttft_ms=ttft_ms
+                                    )
+                                    last_metrics_update = current_time
+                                
                                 content_buffer = content_buffer[-max_tag_len:]
                             break  # Wait for more content
                     else:
@@ -395,6 +456,18 @@ class Harness:
                                 if self.state != AgentState.THINKING:
                                     self.state = AgentState.THINKING
                                 yield chunks.Thinking(content=thinking_content)
+                                
+                                # Yield metrics update periodically
+                                current_time = time.perf_counter()
+                                if current_time - last_metrics_update >= metrics_interval:
+                                    duration = current_time - generation_start_time
+                                    tokens_per_second = total_tokens / duration if duration > 0 else 0
+                                    yield chunks.GenerationMetrics(
+                                        tokens=total_tokens,
+                                        tokens_per_second=tokens_per_second,
+                                        ttft_ms=ttft_ms
+                                    )
+                                    last_metrics_update = current_time
                             
                             # Exit thinking block
                             in_thinking_block = False
@@ -410,6 +483,19 @@ class Harness:
                                     if self.state != AgentState.THINKING:
                                         self.state = AgentState.THINKING
                                     yield chunks.Thinking(content=safe_content)
+                                    
+                                    # Yield metrics update periodically
+                                    current_time = time.perf_counter()
+                                    if current_time - last_metrics_update >= metrics_interval:
+                                        duration = current_time - generation_start_time
+                                        tokens_per_second = total_tokens / duration if duration > 0 else 0
+                                        yield chunks.GenerationMetrics(
+                                            tokens=total_tokens,
+                                            tokens_per_second=tokens_per_second,
+                                            ttft_ms=ttft_ms
+                                        )
+                                        last_metrics_update = current_time
+                                
                                 content_buffer = content_buffer[-len(close_tag):]
                             break  # Wait for more content
                 
@@ -441,6 +527,17 @@ class Harness:
                     self.state = AgentState.ANSWERING
                 full_content += content_buffer
                 yield chunks.Content(content=content_buffer)
+        
+        # Yield final metrics
+        if generation_start_time is not None:
+            final_duration = time.perf_counter() - generation_start_time
+            final_tokens_per_second = total_tokens / final_duration if final_duration > 0 else 0
+            yield chunks.GenerationMetrics(
+                tokens=total_tokens,
+                tokens_per_second=final_tokens_per_second,
+                ttft_ms=ttft_ms,
+                duration_ms=final_duration * 1000
+            )
 
         # Reconstruct tool calls list
         tool_calls_list = []
