@@ -7,8 +7,8 @@ Interpolates between language and code ratios based on symbol density.
 """
 
 # Token estimation constants
-CHARS_PER_TOKEN_LANGUAGE = 4.0  # Natural language compresses well
-CHARS_PER_TOKEN_CODE = 2.5      # Code with symbols is denser
+CHARS_PER_TOKEN_LANGUAGE = 4.5  # Natural language compresses well
+CHARS_PER_TOKEN_CODE = 2.7      # Code with symbols is denser
 CODE_SYMBOLS = frozenset("{}[]()<>.,;:=+-*/%&|!~^`@#$\\\"'")
 
 
@@ -63,7 +63,8 @@ def estimate_tokens(text: str) -> int:
         CHARS_PER_TOKEN_CODE * code_ratio
     )
     
-    return int(len(text) / chars_per_token) + 1  # Add 1 for safety
+    # Round up with small bias reduction (0.98) to avoid excessive overestimate
+    return int(len(text) / chars_per_token * 0.98) + 1
 
 
 def estimate_message_tokens(message: dict) -> int:
