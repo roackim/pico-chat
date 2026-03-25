@@ -37,6 +37,11 @@
             [ ] provide all key, desc
             [ ] provide recall(key) tool to access the heavy content 
 
+
+[ ] Pico agentic problems
+    [ ] Did not iterate the whole repo
+    [ ] Did not use memory while iterating the repo
+
 [ ] UI tool improvement: 
     [ ] drafting when writing content of tool call (UI hangs up currently)
     [ ] writing / patch -> just the number of lines not full in UI
