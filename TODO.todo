@@ -146,6 +146,10 @@
     [ ] Extremely out of scope for now
 
 BUGS:
+
+[!] /status does not show context_pressure info !! 
+[!] AFTER RETRY the next user message gets eaten (disappears from the history BUT sent to the LLM)
+
 [x] Exception model
 [x] CTRL + V does not work anymore
 
