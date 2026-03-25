@@ -18,6 +18,12 @@ from pico_chat.harness.tool_wrappers import create_minimal_tools
 
 logger = logging.getLogger(__name__)
 
+# Supported thinking tag delimiters
+THINKING_TAGS = [
+    ("<think>", "</think>"),
+    ("<thinking>", "</thinking>"),
+]
+
 class Harness:
     def __init__(self, workspace_path: str | None = None):
         self.debug_stream = get_debug_stream()
@@ -298,6 +304,11 @@ class Harness:
         full_content = ""
         tool_calls_buffer: Dict[int, Dict[str, Any]] = {}
         
+        # State for parsing thinking tags in content
+        content_buffer = ""
+        in_thinking_block = False
+        current_thinking_open_tag = None
+        
         # Use server's create_completion (handles retries automatically)
         async for chunk in self.server.create_completion(messages, tools=self.tool_schemas, stream=True):
             # Log TTFT on first chunk
@@ -322,13 +333,82 @@ class Harness:
                 yield chunks.Thinking(content=reasoning)
                 continue
 
-            # 2. Handle Content
+            # 2. Handle Content (with thinking tag parsing)
             content = delta.content
             if content:
-                if self.state != AgentState.ANSWERING:
-                    self.state = AgentState.ANSWERING
-                full_content += content
-                yield chunks.Content(content=content)
+                # Add to buffer for tag parsing
+                content_buffer += content
+                
+                # Parse for thinking tags
+                while content_buffer:
+                    if not in_thinking_block:
+                        # Look for opening thinking tag
+                        earliest_pos = len(content_buffer)
+                        found_tag = None
+                        
+                        for open_tag, close_tag in THINKING_TAGS:
+                            pos = content_buffer.find(open_tag)
+                            if pos != -1 and pos < earliest_pos:
+                                earliest_pos = pos
+                                found_tag = (open_tag, close_tag)
+                        
+                        if found_tag:
+                            open_tag, close_tag = found_tag
+                            # Yield content before the tag
+                            if earliest_pos > 0:
+                                before_content = content_buffer[:earliest_pos]
+                                if self.state != AgentState.ANSWERING:
+                                    self.state = AgentState.ANSWERING
+                                full_content += before_content
+                                yield chunks.Content(content=before_content)
+                            
+                            # Enter thinking block
+                            in_thinking_block = True
+                            current_thinking_open_tag = open_tag
+                            # Move past the opening tag (but don't include it in output)
+                            content_buffer = content_buffer[earliest_pos + len(open_tag):]
+                        else:
+                            # No opening tag found, check if we might have a partial tag at the end
+                            # Keep the last N characters where N is the length of the longest open tag
+                            max_tag_len = max(len(tag[0]) for tag in THINKING_TAGS)
+                            if len(content_buffer) > max_tag_len:
+                                # Safe to yield everything except potential partial tag
+                                safe_content = content_buffer[:-max_tag_len]
+                                if self.state != AgentState.ANSWERING:
+                                    self.state = AgentState.ANSWERING
+                                full_content += safe_content
+                                yield chunks.Content(content=safe_content)
+                                content_buffer = content_buffer[-max_tag_len:]
+                            break  # Wait for more content
+                    else:
+                        # Look for closing tag matching the current open tag
+                        close_tag = next(close for open_, close in THINKING_TAGS if open_ == current_thinking_open_tag)
+                        close_pos = content_buffer.find(close_tag)
+                        
+                        if close_pos != -1:
+                            # Found closing tag - yield thinking content
+                            thinking_content = content_buffer[:close_pos]
+                            if thinking_content:
+                                if self.state != AgentState.THINKING:
+                                    self.state = AgentState.THINKING
+                                yield chunks.Thinking(content=thinking_content)
+                            
+                            # Exit thinking block
+                            in_thinking_block = False
+                            current_thinking_open_tag = None
+                            # Move past the closing tag (don't include it in output)
+                            content_buffer = content_buffer[close_pos + len(close_tag):]
+                        else:
+                            # No closing tag yet, check if we might have a partial at the end
+                            if len(content_buffer) > len(close_tag):
+                                # Safe to yield as thinking content except potential partial
+                                safe_content = content_buffer[:-len(close_tag)]
+                                if safe_content:
+                                    if self.state != AgentState.THINKING:
+                                        self.state = AgentState.THINKING
+                                    yield chunks.Thinking(content=safe_content)
+                                content_buffer = content_buffer[-len(close_tag):]
+                            break  # Wait for more content
                 
             # 3. Handle Tool Calls
             if delta.tool_calls:
@@ -344,6 +424,20 @@ class Harness:
                         tool_calls_buffer[idx]["function"]["name"] += tc.function.name
                     if tc.function.arguments:
                         tool_calls_buffer[idx]["function"]["arguments"] += tc.function.arguments
+        
+        # Flush any remaining content buffer at the end
+        if content_buffer:
+            if in_thinking_block:
+                # Unclosed thinking block - yield as thinking (model might have been cut off)
+                if self.state != AgentState.THINKING:
+                    self.state = AgentState.THINKING
+                yield chunks.Thinking(content=content_buffer)
+            else:
+                # Regular content
+                if self.state != AgentState.ANSWERING:
+                    self.state = AgentState.ANSWERING
+                full_content += content_buffer
+                yield chunks.Content(content=content_buffer)
 
         # Reconstruct tool calls list
         tool_calls_list = []
