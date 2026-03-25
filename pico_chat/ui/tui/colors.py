@@ -69,13 +69,10 @@ class _theme:
             return self.BACKGROUND
         return None
     
-# TODO: refactor to load colors from theme instead of hardcoding in config
-# NOTE: regex to find them: [\[\(]\s*\d+\s*,\s*\d+\s*,\s*\d+\s*[\]\)]   
-
 default = _theme(
     name="default",
     BACKGROUND  = RGB("#B21ECF"),   # Black
-    DEFAULT     = RGB("#F7F4EA"),   # White
+    DEFAULT     = RGB("#F3EBD1"),   # White
     
     MUTED       = RGB("#7D7D7D"),   # Muted gray
     ERROR       = RGB("#FF6060"),   # Red
@@ -84,7 +81,7 @@ default = _theme(
     
     USER        = RGB("#7ADA92"),   # Blue
     PICO        = RGB("#66C0F4"),   # Green
-    FOCUSED     = RGB("#F4CE66"),   # Yellow
+    FOCUSED     = RGB("#FFC760"),   # Yellow
 )
 
 theme: _theme = default

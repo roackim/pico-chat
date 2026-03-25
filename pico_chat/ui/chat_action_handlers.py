@@ -126,15 +126,10 @@ class ChatActionHandlers:
                 # Clear the user message's harness ID (will get new one)
                 user_msg.harness_message_ids = []
                 
-                # Set retry flag to prevent duplicate in UI
-                self.is_retrying = True
-                # Track which message we're processing so ID gets assigned correctly
-                self.processing_user_msg = user_msg
-                
-                # Resubmit the user message
+                # Resubmit the user message (as tuple to match normal submit)
                 user_text = user_msg.base_text
                 self.chat_history_panel.auto_scroll = True
-                self.message_queue.put_nowait(user_text)
+                self.message_queue.put_nowait((user_text, user_msg))
                 logger.info(f"Retrying with message: {user_text[:50]}...")
             else:
                 self.chat_history_panel.add_message(

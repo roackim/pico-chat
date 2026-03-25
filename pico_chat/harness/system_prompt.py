@@ -13,7 +13,7 @@ Instructions:
 - Break complex tasks into smaller, logical steps.
 - Follow existing codebase styles and best practices.
 - State clearly if you are uncertain or missing information.
-- Store important observations, decisions, and actions in memory.
+- Store usefull observations, TODOS, decisions, and actions in memory (short term).
 """
 
 MODEL_CONTEXT_PROMPT = """
