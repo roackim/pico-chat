@@ -84,9 +84,9 @@ class Harness:
         
         return msg_id
 
-    # def set_user_response(self, text: str):
-        # """Called by the UI when a response to a tool's prompt is ready."""
-        # self._user_response_queue.put_nowait(text)
+    def set_user_response(self, text: str):
+        """Called by the UI when a response to a tool's prompt is ready."""
+        self._user_response_queue.put_nowait(text)
 
     async def _wait_for_user_input(self, prompt: str) -> str:
         """Wait for the user to provide text via the UI."""
@@ -94,21 +94,87 @@ class Harness:
         # and then calling set_user_response.
         return await self._user_response_queue.get()
     
+    def _check_tool_permission(self, tool_name: str, args: dict) -> str:
+        """Check tool permission status.
+        
+        Returns:
+            "allow" - auto-approve
+            "ask" - need user permission
+            "deny" - auto-deny
+        """
+        from pico_chat.harness.tool_permissions import permissions
+        
+        if tool_name == "read":
+            path = args.get("path", "")
+            from pathlib import Path
+            try:
+                if Path(path).is_absolute():
+                    target = Path(path).resolve()
+                else:
+                    target = (Path(self.workspace) / path).resolve()
+                is_inside = target.relative_to(Path(self.workspace).resolve())
+                return permissions.get_read_permission(True)
+            except:
+                return permissions.get_read_permission(False)
+        
+        elif tool_name == "write":
+            path = args.get("path", "")
+            from pathlib import Path
+            try:
+                if Path(path).is_absolute():
+                    target = Path(path).resolve()
+                else:
+                    target = (Path(self.workspace) / path).resolve()
+                is_inside = target.relative_to(Path(self.workspace).resolve())
+                return permissions.get_write_permission(True)
+            except:
+                return permissions.get_write_permission(False)
+        
+        elif tool_name == "patch":
+            # Patch permission checked via patch content parsing
+            return permissions.get_patch_permission(True)  # Default to inside repo
+        
+        elif tool_name == "run":
+            # Run command permission - for now return ask if configured
+            run_perms = permissions.get_run_permission()
+            # Simplified: if others is ask or ask list not empty, return ask
+            if run_perms.others == "ask" or len(run_perms.ask) > 0:
+                return "ask"
+            elif run_perms.others == "deny":
+                return "deny"
+            else:
+                return "allow"
+        
+        return "ask"  # Default to asking
+    
+    def _build_permission_prompt(self, tool_name: str, args: dict) -> str:
+        """Build a human-readable permission prompt for a tool call."""
+        if tool_name == "read":
+            return f"Allow reading file: {args.get('path', 'unknown')}?"
+        elif tool_name == "write":
+            return f"Allow writing to file: {args.get('path', 'unknown')}?"
+        elif tool_name == "patch":
+            return f"Allow patching file?"
+        elif tool_name == "run":
+            command = args.get('command', 'unknown')
+            # Truncate long commands
+            if len(command) > 100:
+                command = command[:97] + "..."
+            return f"Allow running command: {command}?"
+        return f"Allow {tool_name}?"
+    
     def _request_user_confirmation(self, command: str) -> bool:
         """
         Request user confirmation for a command.
         
-        NOTE: This is a synchronous callback used by the security checker,
-        but actual confirmation happens in the async chat loop.
-        For now, we return False (deny) as the async mechanism handles it.
-        
-        TODO: Consider refactoring security checker to be async.
+        NOTE: This is a synchronous callback used by the security checker.
+        Since we handle permissions asynchronously via ToolWaitInput chunks,
+        we return True here to pass the security check, and handle the actual
+        user confirmation in the async tool execution flow.
         """
-        # This is called during security checking which is synchronous
-        # The actual user confirmation should happen in the async chat loop
-        # For now, we return False to indicate "needs confirmation"
-        # The chat loop will detect this and handle it appropriately
-        return False
+        # Return True to pass security check - actual permission handling
+        # happens via ToolWaitInput in the async chat loop
+        return True
 
 
     def get_state(self) -> AgentState:
@@ -570,106 +636,170 @@ class Harness:
         messages: List[Dict[str, Any]]
     ) -> AsyncGenerator[chunks.Chunk, None]:
         """
-        Execute all tool calls and update history.
+        Execute all tool calls following the state machine flow.
         
-        Yields: chunks.Chunk subclasses:
-            - chunks.ToolStart: Individual tool execution begins
-            - chunks.ToolComplete: Tool finished successfully
-            - chunks.ToolWaitInput: Waiting for user input
-            - chunks.ToolError: Tool execution failed
+        Yields: chunks.ToolStatusChange for each state transition
         """
         self.state = AgentState.THINKING
         
         for tc in tool_calls_list:
-            func_name = tc["function"]["name"]
-            args_str = tc["function"]["arguments"]
-            call_id = tc["id"]
+            tool_name = tc["function"]["name"]
+            tool_args = tc["function"]["arguments"]
+            tool_call_id = tc["id"]
             
-            result = ""
+            self.debug_stream.log("TOOL_EXEC", {"name": tool_name, "args": tool_args})
+            
+            # STEP 1: Check permissions (without executing)
             try:
-                self.debug_stream.log("TOOL_EXEC", {"name": func_name, "args": args_str})
+                args = json.loads(tool_args)
+            except json.JSONDecodeError:
+                # Invalid JSON - treat as error
+                error_msg = f"Invalid JSON arguments: {tool_args}"
+                yield chunks.ToolStatusChange(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    status=chunks.ToolStatus.ERROR,
+                    error=error_msg
+                )
+                self._add_message_to_history(
+                    role="tool",
+                    content=f"Error: {error_msg}",
+                    tool_call_id=tool_call_id
+                )
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": f"Error: {error_msg}"
+                })
+                continue
+            
+            permission_decision = self._check_tool_permission(tool_name, args)
+            prompt = self._build_permission_prompt(tool_name, args)
+            
+            # Emit permission request state
+            if permission_decision == "ask":
+                # Need user input
+                yield chunks.ToolStatusChange(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    status=chunks.ToolStatus.PERMISSION_REQUESTED,
+                    permission_prompt=prompt,
+                    auto_decision=False
+                )
                 
-                # Yield tool start chunk
-                yield chunks.ToolStart(name=func_name, args=args_str)
-                
-                if func_name in self.tools_map:
-                    try:
-                        # Parse args
-                        args = json.loads(args_str)
-                        
-                        func = self.tools_map[func_name]
-                        
-                        if hasattr(func, "is_blocking") and func.is_blocking:
-                            # Handle blocking tools (e.g. user input)
-                            prompt = args.get("prompt", "Please provide input:")
-                            yield chunks.ToolWaitInput(prompt=prompt)
-                            
-                            user_resp = await self._wait_for_user_input(prompt)
-                            result = f"User responded with: {user_resp}"
-                        else:
-                            # Execute normally (sync or async)
-                            if asyncio.iscoroutinefunction(func.execute):
-                                result = await func.execute(**args)
-                            else:
-                                result = func.execute(**args)
-                        
-                        if not isinstance(result, str):
-                            result = str(result)
-
-                    except json.JSONDecodeError:
-                        result = f"Error: Invalid JSON arguments: {args_str}"
-                    except Exception as e:
-                        result = f"Error executing {func_name}: {str(e)}"
-                else:
-                    result = f"Error: Tool '{func_name}' not found"
-                
-                # Log tool result
-                self.debug_stream.log("TOOL_RESULT", {"call_id": call_id, "result": result})
-                    
-                # Append tool result to history
+                # Wait for user response
+                user_response = await self._wait_for_user_input(prompt)
+                approved = user_response.lower() in ["approve", "yes", "y", "allow"]
+            else:
+                # Auto-approve or auto-deny
+                approved = (permission_decision == "allow")
+                yield chunks.ToolStatusChange(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    status=chunks.ToolStatus.PERMISSION_REQUESTED,
+                    permission_prompt=prompt,
+                    auto_decision=True
+                )
+            
+            # STEP 2: Emit approval/denial
+            if approved:
+                yield chunks.ToolStatusChange(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    status=chunks.ToolStatus.APPROVED
+                )
+            else:
+                denial_reason = "User denied" if permission_decision == "ask" else "Auto-denied by security policy"
+                yield chunks.ToolStatusChange(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    status=chunks.ToolStatus.DENIED,
+                    denial_reason=denial_reason
+                )
+                # Add to history and continue to next tool
+                result = f"Permission denied: {denial_reason}"
                 self._add_message_to_history(
                     role="tool",
                     content=result,
-                    tool_call_id=call_id
+                    tool_call_id=tool_call_id
                 )
-                
-                # Also add to messages for current request
                 messages.append({
                     "role": "tool",
-                    "tool_call_id": call_id,
+                    "tool_call_id": tool_call_id,
+                    "content": result
+                })
+                continue
+            
+            # STEP 3: Execute tool
+            yield chunks.ToolStatusChange(
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                tool_args=tool_args,
+                status=chunks.ToolStatus.EXECUTING
+            )
+            
+            try:
+                # Execute the tool
+                if tool_name not in self.tools_map:
+                    raise Exception(f"Tool '{tool_name}' not found")
+                
+                func = self.tools_map[tool_name]
+                
+                # Execute normally (sync or async)
+                if asyncio.iscoroutinefunction(func.execute):
+                    result = await func.execute(**args)
+                else:
+                    result = func.execute(**args)
+                
+                if not isinstance(result, str):
+                    result = str(result)
+                
+                # STEP 4: Success
+                self.debug_stream.log("TOOL_RESULT", {"call_id": tool_call_id, "result": result})
+                yield chunks.ToolStatusChange(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    status=chunks.ToolStatus.COMPLETED,
+                    result=result
+                )
+                self._add_message_to_history(
+                    role="tool",
+                    content=result,
+                    tool_call_id=tool_call_id
+                )
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
                     "content": result
                 })
                 
-                # Yield tool complete chunk with status
-                # Detect status from result content
-                if "[DENIED]" in result or "[WARNING] User denied" in result:
-                    status = "denied"
-                elif result.startswith("[ERROR]"):
-                    status = "error"
-                else:
-                    status = "ok"
-                yield chunks.ToolComplete(name=func_name, result=result, status=status)
-
             except Exception as e:
-                # Fallback for system errors during tool processing
-                err_msg = f"System Error processing tool call: {str(e)}"
-                self.debug_stream.log("TOOL_SYSTEM_ERROR", {"call_id": call_id, "error": err_msg})
-                
-                # Ensure we append SOMETHING to history so LLM doesn't hang
-                if not self.history or self.history[-1].get("tool_call_id") != call_id:
-                    self._add_message_to_history(
-                        role="tool",
-                        content=err_msg,
-                        tool_call_id=call_id
-                    )
-                    
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": call_id,
-                        "content": err_msg
-                    })
-                
-                yield chunks.ToolError(name=func_name, error=str(e))
+                # STEP 4: Error
+                error_msg = str(e)
+                self.debug_stream.log("TOOL_ERROR", {"call_id": tool_call_id, "error": error_msg})
+                yield chunks.ToolStatusChange(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    status=chunks.ToolStatus.ERROR,
+                    error=error_msg
+                )
+                self._add_message_to_history(
+                    role="tool",
+                    content=f"Error: {error_msg}",
+                    tool_call_id=tool_call_id
+                )
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": f"Error: {error_msg}"
+                })
 
     async def get_status(self) -> Dict[str, Any]:
         """

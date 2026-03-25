@@ -155,19 +155,37 @@ class ChatActionHandlers:
         logger = logging.getLogger("tui")
         logger.info("Allow action triggered")
         
-        # TODO: Implement tool permission system
-        self.chat_history_panel.add_message(
-            "Tool permission system not yet implemented",
-            msg_type=SysMsg()
-        )
+        from pico_chat.ui.tui.msg_types import AskPermissionMsg
+        from pico_chat.ui.tui.colors import theme
+        
+        # Check if this is a permission request message
+        if isinstance(message.type, AskPermissionMsg):
+            # Send approval to harness
+            logger.info("Sending approve to harness")
+            self.agent.set_user_response("approve")
+            self.pending_permission_prompt = None
+            
+            # Don't update the message - it will be replaced by ToolStart
+            logger.info("Permission granted, waiting for tool execution")
+        else:
+            logger.warning("Allow action called on non-permission message")
     
     def handle_deny_action(self, message):
         """Handle deny action for tool permission requests."""
         logger = logging.getLogger("tui")
         logger.info("Deny action triggered")
         
-        # TODO: Implement tool permission system
-        self.chat_history_panel.add_message(
-            "Tool permission system not yet implemented",
-            msg_type=SysMsg()
-        )
+        from pico_chat.ui.tui.msg_types import AskPermissionMsg
+        from pico_chat.ui.tui.colors import theme
+        
+        # Check if this is a permission request message
+        if isinstance(message.type, AskPermissionMsg):
+            # Send denial to harness
+            logger.info("Sending deny to harness")
+            self.agent.set_user_response("deny")
+            self.pending_permission_prompt = None
+            
+            # Don't update the message - it will be replaced by ToolStart with DENIED status
+            logger.info("Permission denied, waiting for tool result")
+        else:
+            logger.warning("Deny action called on non-permission message")

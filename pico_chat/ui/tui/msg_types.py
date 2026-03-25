@@ -75,9 +75,9 @@ class ToolCallMsg(MsgType):
     content_color = None
     actions = [MsgAction.COPY, MsgAction.DELETE]
 
-class ToolPermissionMsg(MsgType):
-    name = "tool_permission"
-    title = "tool permission"
+class AskPermissionMsg(MsgType):
+    name = "permission"
+    title = "permission"
     frame_color = "WARNING"
     content_color = None
     actions = [MsgAction.ALLOW, MsgAction.DENY, MsgAction.COPY]

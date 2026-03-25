@@ -27,11 +27,11 @@ DEFAULT_ASK = {
     'python', 'python3',      # Code execution
     'node', 'npm', 'npx',     # JavaScript
     'rm', 'rmdir',            # Deletion
+    'bash', 'sh', 'zsh', 'fish',  # Shell spawning
+    'eval', 'exec',               # Code injection vectors
 }
 
 DEFAULT_DENY = {
-    'bash', 'sh', 'zsh', 'fish',  # Shell spawning
-    'eval', 'exec',               # Code injection vectors
     'dd', 'mkfs',                 # Low-level operations
     'sudo', 'su', 'doas',         # Privilege escalation
     'reboot', 'shutdown',         # System control
@@ -156,5 +156,19 @@ locked = ToolPermissionsProfile(
     ),
 )
 
+askall = ToolPermissionsProfile(
+    name="askall",
+    read=FilePermissions(inside_repo="ask", outside_repo="ask"),
+    write=FilePermissions(inside_repo="ask", outside_repo="ask"),
+    patch=FilePermissions(inside_repo="ask", outside_repo="ask"),
+    run=RunPermissions(
+        allow=set(),
+        deny=set(),
+        ask=set(),
+        others="ask",
+        use_container=False
+    ),
+)
+
 # Global permissions profile (can be changed at runtime)
-permissions: ToolPermissionsProfile = permissive
+permissions: ToolPermissionsProfile = askall # permissive

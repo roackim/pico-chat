@@ -23,7 +23,7 @@ from pico_chat.ui.tui.layout_utils import strip_ansi
 import logging
 from pico_chat.ui.commands import StatusCommand
 from pico_chat.ui.tui.colors import theme
-from pico_chat.ui.tui.msg_types import PicoMsg, ThinkingMsg, UserMsg, SysMsg, SysMsgError, ToolPermissionMsg, ToolCallMsg
+from pico_chat.ui.tui.msg_types import PicoMsg, ThinkingMsg, UserMsg, SysMsg, SysMsgError, ToolCallMsg, AskPermissionMsg
 
 from pico_chat import pico_cfg
 from pico_chat.ui.logging_handlers import setup_tui_logging
@@ -84,6 +84,12 @@ class chatTUI(ChatActionHandlers):
         
         # Track which message is being edited (for edit-then-submit workflow)
         self.editing_message_index: Optional[int] = None
+        
+        # Track pending permission requests
+        self.pending_permission_prompt: Optional[str] = None
+        
+        # Track active tool messages by call_id
+        self.active_tool_messages = {}  # tool_call_id -> Message
         
         # Command queue for structured execution
         self.command_queue = asyncio.Queue()
@@ -173,46 +179,76 @@ class chatTUI(ChatActionHandlers):
                     
                     current_msg.append(chunk.content)
                 
-                elif isinstance(chunk, chunks.ToolStart):
-                    # Always create a new tool message
-                    if current_msg and current_msg_type != SysMsg:
-                        current_msg.finalize()
+                elif isinstance(chunk, chunks.ToolStatusChange):
+                    # Handle tool status change
+                    tool_id = chunk.tool_call_id
                     
-                    if current_msg_type == SysMsg:
-                        # Replace "Sending request..."
-                        new_msg = chat.new_message(
-                            f"{theme.WARNING}> running tool::{chunk.name}{theme.reset()} ",
-                            msg_type=ToolCallMsg(),
-                            harness_message_ids=current_harness_ids
-                        )
-                        chat.replace_message(current_msg, new_msg)
-                        current_msg = new_msg
-                    else:
-                        current_msg = chat.add_message(
-                            f"{theme.WARNING}> running tool::{chunk.name}{theme.reset()} ",
-                            msg_type=ToolCallMsg(),
-                            harness_message_ids=current_harness_ids
-                        )
-                    current_msg_type = ToolCallMsg
-                
-                elif isinstance(chunk, chunks.ToolComplete):
-                    # Append to current tool message
-                    if chunk.status == "denied":
-                        status_text = f"{theme.ERROR}status DENIED {theme.reset()}"
-                    elif chunk.status == "error":
-                        status_text = f"{theme.ERROR}status REJECTED {theme.reset()}"
-                    else:  # "ok"
-                        status_text = f"{theme.SUCCESS}status OK {theme.reset()}"
+                    if chunk.status == chunks.ToolStatus.PERMISSION_REQUESTED:
+                        # Create new tool message
+                        if chunk.auto_decision:
+                            # Auto-decision: show immediately
+                            decision = "auto-approved" if chunk.auto_decision else "auto-denied"
+                            msg_text = f"{theme.WARNING}> tool::{chunk.tool_name}{theme.reset()}\n{chunk.permission_prompt}\n{theme.MUTED}({decision}){theme.reset()}\n"
+                            msg = chat.add_message(
+                                msg_text,
+                                msg_type=ToolCallMsg(),
+                                harness_message_ids=current_harness_ids
+                            )
+                        else:
+                            # Need user permission - show request
+                            msg_text = f"{theme.WARNING}> tool::{chunk.tool_name}{theme.reset()}\n{chunk.permission_prompt}"
+                            msg = chat.add_message(
+                                msg_text,
+                                msg_type=AskPermissionMsg(),
+                                harness_message_ids=current_harness_ids
+                            )
+                            # Auto-focus for user action
+                            msg_index = len(chat.messages) - 1
+                            chat.set_focused_message(msg_index)
+                            self._last_focus_id = "history"
+                            self._update_focus_states()
+                            
+                            # Store prompt for handler
+                            self.pending_permission_prompt = chunk.permission_prompt
+                        
+                        self.active_tool_messages[tool_id] = msg
+                        current_msg = msg
+                        current_msg_type = type(msg.type)
                     
-                    current_msg.append(f"{status_text}\n")
-                
-                elif isinstance(chunk, chunks.ToolWaitInput):
-                    # Show waiting for user input
-                    current_msg.append(f"\n{theme.WARNING}status WAIT: [Waiting for input: {chunk.prompt}]{theme.reset()}\n")
-                
-                elif isinstance(chunk, chunks.ToolError):
-                    # Show tool error
-                    current_msg.append(f"\n{theme.ERROR}status ERROR: \n {theme.WARNING} > {chunk.error}]{theme.reset()}\n")
+                    elif chunk.status == chunks.ToolStatus.APPROVED:
+                        msg = self.active_tool_messages.get(tool_id)
+                        if msg:
+                            msg.append(f"\n{theme.SUCCESS}✓ approved{theme.reset()}\n")
+                    
+                    elif chunk.status == chunks.ToolStatus.DENIED:
+                        msg = self.active_tool_messages.get(tool_id)
+                        if msg:
+                            msg.append(f"\n{theme.ERROR}✗ denied: {chunk.denial_reason}{theme.reset()}\n")
+                            msg.finalize()
+                            del self.active_tool_messages[tool_id]
+                    
+                    elif chunk.status == chunks.ToolStatus.EXECUTING:
+                        msg = self.active_tool_messages.get(tool_id)
+                        if msg:
+                            msg.append(f"{theme.MUTED}> executing...{theme.reset()}\n")
+                    
+                    elif chunk.status == chunks.ToolStatus.COMPLETED:
+                        msg = self.active_tool_messages.get(tool_id)
+                        if msg:
+                            # Truncate result if too long
+                            result = chunk.result or ""
+                            if len(result) > 500:
+                                result = result[:497] + "..."
+                            msg.append(f"{theme.SUCCESS}✓ completed{theme.reset()}\n{theme.MUTED}{result}{theme.reset()}\n")
+                            msg.finalize()
+                            del self.active_tool_messages[tool_id]
+                    
+                    elif chunk.status == chunks.ToolStatus.ERROR:
+                        msg = self.active_tool_messages.get(tool_id)
+                        if msg:
+                            msg.append(f"{theme.ERROR}✗ error: {chunk.error}{theme.reset()}\n")
+                            msg.finalize()
+                            del self.active_tool_messages[tool_id]
                 
                 elif isinstance(chunk, chunks.GenerationMetrics):
                     # Update message metrics (for live display in footer)
