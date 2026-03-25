@@ -40,7 +40,7 @@ class chatTUI(ChatActionHandlers):
 
     def __init__(self, agent):
         self.agent = agent
-        self.message_queue = asyncio.Queue()
+        self.message_queue: asyncio.Queue[tuple[str, Message]] = asyncio.Queue()  # Queue of (text, user_message)
         self.compositor: Optional[Compositor] = None
         self._last_focus_id: Optional[str] = "input"  # Start with input focused
         
@@ -85,11 +85,6 @@ class chatTUI(ChatActionHandlers):
         # Track which message is being edited (for edit-then-submit workflow)
         self.editing_message_index: Optional[int] = None
         
-        # Track if we're in a retry (to avoid duplicate user message in UI)
-        self.is_retrying: bool = False
-        # Track the specific user message being processed (for harness ID assignment)
-        self.processing_user_msg: Optional[Message] = None
-        
         # Command queue for structured execution
         self.command_queue = asyncio.Queue()
         
@@ -113,8 +108,13 @@ class chatTUI(ChatActionHandlers):
         """Convert RGB to ANSI foreground color code."""
         return f"\033[38;2;{r};{g};{b}m"
 
-    async def _process_generation(self, user_input: str):
-        """Process a single generation request."""
+    async def _process_generation(self, user_input: str, user_msg: Message):
+        """Process a single generation request.
+        
+        Args:
+            user_input: The text input from the user
+            user_msg: The UI message object representing the user's message
+        """
         import logging
         logger = logging.getLogger("tui")
         logger.info(f"Starting generation for user input: {user_input[:50]}...")
@@ -136,19 +136,10 @@ class chatTUI(ChatActionHandlers):
                     logger.debug(f"MessageStart: {chunk.role} with ID {chunk.message_id}")
                     
                     if chunk.role == "user":
-                        # Find the specific user message being processed or last one without ID
-                        target_msg = self.processing_user_msg if self.processing_user_msg else None
-                        if target_msg and not target_msg.harness_message_ids:
-                            target_msg.harness_message_ids = [chunk.message_id]
-                            logger.debug(f"Updated tracked user message with harness ID {chunk.message_id}")
-                            self.processing_user_msg = None
-                        else:
-                            # Fallback: find last user message without ID
-                            for msg in reversed(chat.messages):
-                                if isinstance(msg.type, UserMsg) and not msg.harness_message_ids:
-                                    msg.harness_message_ids = [chunk.message_id]
-                                    logger.debug(f"Updated user message with harness ID {chunk.message_id}")
-                                    break
+                        # Link the user message that was passed through the queue
+                        if not user_msg.harness_message_ids:
+                            user_msg.harness_message_ids = [chunk.message_id]
+                            logger.debug(f"Linked user message to harness ID {chunk.message_id}")
                     
                 elif isinstance(chunk, chunks.Thinking): # Special chunk type for "thinking" content
                     
@@ -259,13 +250,13 @@ class chatTUI(ChatActionHandlers):
                     logger.debug(f"Processing command: {command}")
                     await handle_command(self, command)  # exceptions propagate → crash
                 else:
-                    user_input = completed.result()
+                    user_input, user_msg = completed.result()
                     import logging
                     logger = logging.getLogger("tui")
                     logger.debug(f"Agent worker received user input")
 
                     self.current_generation_task = asyncio.create_task(
-                        self._process_generation(user_input)
+                        self._process_generation(user_input, user_msg)
                     )
 
                     # Wait for generation to complete, but keep checking for commands
@@ -424,31 +415,20 @@ class chatTUI(ChatActionHandlers):
                 for _ in range(messages_to_remove):
                     self.chat_history_panel.remove_last_message()
                 
-                # Set flag to prevent duplicate user message
-                self.is_retrying = True
-                # Track which message we're processing
-                self.processing_user_msg = edited_msg
-                
                 # Clear editing state
                 self.editing_message_index = None
                 
-                # Fall through to add the edited message and resubmit
+                # Queue the edited message for processing
+                self.message_queue.put_nowait((text, edited_msg))
             else:
                 logger.info(f"User submitted: {text[:50]}...")
+                
+                # Create user message and queue it
+                user_msg = self.chat_history_panel.add_message(text, msg_type=UserMsg())
+                self.message_queue.put_nowait((text, user_msg))
             
             # Enable auto-scroll to show the new message
             self.chat_history_panel.auto_scroll = True
-            
-            # Add user message to UI (skip if retrying - already exists)
-            if not self.is_retrying:
-                # Track the new message for harness ID assignment
-                new_msg = self.chat_history_panel.add_message(text, msg_type=UserMsg())
-                self.processing_user_msg = new_msg
-            else:
-                self.is_retrying = False
-            
-            # Add to processing queue for agent
-            self.message_queue.put_nowait(text)
 
     def _update_focus_states(self):
         """Update focus states of components based on _last_focus_id."""
