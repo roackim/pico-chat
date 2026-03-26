@@ -28,6 +28,8 @@
             [ ] Support for global instructions ? 
                 - kinda on the territory of custom system prompts
 
+[ ] Cache component rasterization result for performance optimization
+
 [x] Memory / Context management:
     [x] Tools: memorize / forget important info, events, etc
         Currently key: content based
