@@ -116,7 +116,7 @@ class Terminal:
                 # Potential escape sequence
                 seq = char
                 start_time = time.time()
-                while time.time() - start_time < 0.1:  # Increased timeout for paste detection
+                while time.time() - start_time < 0.1:  # Timeout for paste detection
                     try:
                         c = sys.stdin.read(1)
                         if c:
@@ -133,7 +133,8 @@ class Terminal:
                                     return self._read_bracketed_paste()
                                 break
                         else:
-                            time.sleep(0.001)
+                            # Sleep longer to reduce polling frequency
+                            time.sleep(0.005)
                     except EOFError:
                         break
                     except:

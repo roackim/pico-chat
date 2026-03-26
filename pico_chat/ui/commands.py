@@ -185,13 +185,20 @@ class SetFpsCommand(Command):
 
 class GetFpsCommand(Command):
     def __init__(self):
-        super().__init__("fps", "Get current target FPS")
+        super().__init__("fps", "Get current target FPS and actual measured FPS")
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         if ui.compositor:
-            fps = ui.compositor.fps
+            target_fps = ui.compositor.fps
+            actual_fps = ui.compositor.get_actual_fps()
+            
+            color = str(theme.WARNING)
+            reset = theme.reset()
+            msg = color + f"Target FPS       : {reset}{target_fps}\n"
+            msg += color + f"Actual FPS       : {reset}{actual_fps:.2f}"
+            
             ui.chat_history_panel.add_message(
-                f"Target FPS: {fps}",
+                msg,
                 msg_type=SysMsg()
             )
         else:

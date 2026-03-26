@@ -2,6 +2,7 @@ import sys
 import time
 import asyncio
 from typing import Optional, Dict, Any
+from collections import deque
 from pico_chat.ui.tui.terminal import ANSI, Terminal, MouseEvent
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.components import Component
@@ -19,6 +20,10 @@ class Compositor:
         self.shutdown_event = shutdown_event
         self.padding = 0  # Global app padding
         self.overlays = []  # Floating components rendered on top
+        
+        # Performance tracking - use rolling window for accurate current FPS
+        self.render_times = deque(maxlen=10)  # Track last 10 render times for recent FPS
+        self.last_render_time = 0  # Track when we last actually rendered for FPS limiting
 
     def _collect_ids(self, component: Component):
         if component.id:
@@ -55,20 +60,14 @@ class Compositor:
         self.running = True
         with self.terminal:
             self._update_size()
-            
-            last_render = 0
-            frame_time = 1.0 / self.fps
 
             while self.running:
-                now = time.time()
-                
                 if self.terminal.resized:
                     # Debounce resize events
                     await asyncio.sleep(0.05)
                     self.terminal.resized = False
                     self._update_size()
                     self.render(force_full=True)
-                    last_render = now
 
                 # Handle input
                 event = self.terminal.get_input()
@@ -79,15 +78,15 @@ class Compositor:
                             self.shutdown_event.set()
                         break
                     self.root.handle_input(event)
-                    # Force immediate render on input
-                    self.render()
-                    last_render = now
                 
-                if now - last_render >= frame_time:
-                    self.render()
-                    last_render = now
+                # Try to render (will be throttled by FPS limit in render() method)
+                self.render()
                 
-                await asyncio.sleep(0.001) # Yield to other tasks
+                # Sleep for a short time to yield control and reduce CPU usage
+                # Cap at 5ms for input responsiveness, but scale with FPS
+                frame_time = 1.0 / self.fps
+                sleep_time = min(0.005, frame_time / 2)
+                await asyncio.sleep(sleep_time)
 
     def _update_size(self):
         w, h = self.terminal.get_size()
@@ -97,6 +96,21 @@ class Compositor:
     def render(self, force_full=False):
         if self.width == 0 or self.height == 0:
             return
+        
+        # Enforce FPS limit (unless force_full is True)
+        now = time.time()
+        if not force_full:
+            frame_time = 1.0 / self.fps
+            time_since_last_render = now - self.last_render_time
+            
+            if time_since_last_render < frame_time:
+                # Too soon, skip this render
+                return
+            
+            self.last_render_time = now
+        
+        # Track this render time for FPS calculation
+        self.render_times.append(now)
 
         self.buffer.clear()
         # Apply global padding to root component layout
@@ -114,3 +128,17 @@ class Compositor:
         output = self.buffer.render()
         sys.stdout.write(output)
         sys.stdout.flush()
+    
+    def get_actual_fps(self) -> float:
+        """Calculate actual measured FPS based on recent render times."""
+        if len(self.render_times) < 2:
+            return 0.0
+        
+        # Calculate FPS from time difference between first and last render in window
+        time_span = self.render_times[-1] - self.render_times[0]
+        if time_span == 0:
+            return 0.0
+        
+        # Number of frames in the time span (frames - 1 intervals)
+        frame_count = len(self.render_times) - 1
+        return frame_count / time_span

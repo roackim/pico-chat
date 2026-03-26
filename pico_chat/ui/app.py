@@ -32,8 +32,7 @@ from pico_chat.ui.chat_action_handlers import ChatActionHandlers
 # Import chunks module for type checking
 from pico_chat.harness import chunks
 
-TARGET_FPS = 60
-# TARGET_FPS = pico_cfg.target_fps
+TARGET_FPS = pico_cfg.config.target_fps
 
 class chatTUI(ChatActionHandlers):
     """Terminal UI for the agent."""
