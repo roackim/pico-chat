@@ -470,9 +470,6 @@ class chatTUI(ChatActionHandlers):
 
     def on_command_submit(self, text: str):
         """Handle execution of commands."""
-        import logging
-        logger = logging.getLogger("tui")
-        logger.info(f"Command submitted: {text}")
         self.command_queue.put_nowait(text)
         
     def toggle_debug_console(self):

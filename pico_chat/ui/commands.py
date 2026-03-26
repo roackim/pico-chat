@@ -137,6 +137,117 @@ class StatusCommand(Command):
         
         return msg
 
+class SetFpsCommand(Command):
+    def __init__(self):
+        super().__init__("fps", "Set target FPS (frames per second)")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if not args:
+            ui.chat_history_panel.add_message(
+                "Usage: /set fps <number>\nExample: /set fps 60",
+                msg_type=SysMsgError()
+            )
+            return
+        
+        try:
+            fps = int(args[0])
+            if fps < 1:
+                ui.chat_history_panel.add_message(
+                    "FPS must be at least 1",
+                    msg_type=SysMsgError()
+                )
+                return
+            
+            if fps > 120:
+                ui.chat_history_panel.add_message(
+                    "Warning: FPS values above 120 may cause high CPU usage",
+                    msg_type=SysMsg()
+                )
+            
+            # Update compositor FPS
+            if ui.compositor:
+                ui.compositor.fps = fps
+                ui.chat_history_panel.add_message(
+                    f"Target FPS set to {fps}",
+                    msg_type=SysMsg()
+                )
+            else:
+                ui.chat_history_panel.add_message(
+                    "Compositor not available",
+                    msg_type=SysMsgError()
+                )
+                
+        except ValueError:
+            ui.chat_history_panel.add_message(
+                f"Invalid number: {args[0]}",
+                msg_type=SysMsgError()
+            )
+
+class GetFpsCommand(Command):
+    def __init__(self):
+        super().__init__("fps", "Get current target FPS")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if ui.compositor:
+            fps = ui.compositor.fps
+            ui.chat_history_panel.add_message(
+                f"Target FPS: {fps}",
+                msg_type=SysMsg()
+            )
+        else:
+            ui.chat_history_panel.add_message(
+                "Compositor not available",
+                msg_type=SysMsgError()
+            )
+
+class SetCommand(Command):
+    def __init__(self):
+        subcommands = {
+            "fps": SetFpsCommand(),
+        }
+        super().__init__("set", "Set configuration parameters", subcommands=subcommands)
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if not args:
+            # Show available subcommands
+            help_text = "Usage: /set <parameter> <value>\n\nAvailable parameters:\n"
+            for name, cmd in sorted(self.subcommands.items()):
+                help_text += f"  {name.ljust(15)} - {cmd.description}\n"
+            ui.chat_history_panel.add_message(help_text.rstrip(), msg_type=SysMsgError())
+        else:
+            subcmd_name = args[0].lower()
+            if subcmd_name in self.subcommands:
+                await self.subcommands[subcmd_name].execute(ui, args[1:])
+            else:
+                ui.chat_history_panel.add_message(
+                    f"Unknown parameter: {subcmd_name}",
+                    msg_type=SysMsgError()
+                )
+
+class GetCommand(Command):
+    def __init__(self):
+        subcommands = {
+            "fps": GetFpsCommand(),
+        }
+        super().__init__("get", "Get configuration parameters", subcommands=subcommands)
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if not args:
+            # Show available subcommands
+            help_text = "Usage: /get <parameter>\n\nAvailable parameters:\n"
+            for name, cmd in sorted(self.subcommands.items()):
+                help_text += f"  {name.ljust(15)} - {cmd.description}\n"
+            ui.chat_history_panel.add_message(help_text.rstrip(), msg_type=SysMsgError())
+        else:
+            subcmd_name = args[0].lower()
+            if subcmd_name in self.subcommands:
+                await self.subcommands[subcmd_name].execute(ui, args[1:])
+            else:
+                ui.chat_history_panel.add_message(
+                    f"Unknown parameter: {subcmd_name}",
+                    msg_type=SysMsgError()
+                )
+
 class DebugPanelCommand(Command):
     def __init__(self):
         super().__init__("panel", "Toggle debug console visibility")
@@ -336,6 +447,8 @@ COMMANDS: Dict[str, Command] = {
     "exit":     ExitCommand(),
     "stop":     StopCommand(),
     "status":   StatusCommand(),
+    "set":      SetCommand(),
+    "get":      GetCommand(),
     "debug":    DebugCommand(),
 }
 

@@ -15,7 +15,7 @@ class Config:
 
         # Other settings
         self.render_thinking: bool = False
-        self.log_file: str = "pico_chat.log"
+        self.log_file: str = "pico_chat.log" # TODO PLUG not currently used
         self.max_file_size: int = 1_000_000
         self.max_search_results: int = 50
         self.command_timeout: int = 30

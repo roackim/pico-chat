@@ -88,6 +88,14 @@ class SubcommandCompletion:
             self.hide()
             return
         
+        # Check if user has completed subcommand and is typing arguments
+        # (e.g., "fps 5" where "fps" is a valid subcommand)
+        first_word = subcommand_text.split()[0] if subcommand_text.split() else ""
+        if first_word in subcommands and ' ' in subcommand_text:
+            # User has typed a valid subcommand followed by space and more text (arguments)
+            self.hide()
+            return
+        
         # Update menu with fuzzy filtering (no prefix, just subcommand names)
         self.menu.update(subcommands, subcommand_trimmed, display_prefix="")
         self.is_active = self.menu.is_visible
