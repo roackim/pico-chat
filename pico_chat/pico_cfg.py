@@ -42,7 +42,7 @@ class Config:
         self.ui_metrics_show_ttft: bool = False
         self.ui_metrics_refresh_interval: float = 0.1  # Seconds between metric updates
         
-        self.target_fps: int = 1
+        self.target_fps: int = 60
         
         # Context building settings
         self.context_format: Literal["tree", "flat"] = "tree"  # Tree format saves tokens by avoiding path repetition
