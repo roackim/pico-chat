@@ -44,8 +44,8 @@ class LLMServerConfig:
 llamacpp = LLMServerConfig(
     name="llamacpp",
     type="llamacpp",
-    # base_url="http://clank:3344/v1",
-    base_url="http://gpu4.hygeos.com:8080/v1",
+    base_url="http://clank:3344/v1",
+    # base_url="http://gpu4.hygeos.com:8080/v1",
     api_key="EMPTY",
     model=None,         # Will be queried from server
     max_context=None,   # Will be queried from server
