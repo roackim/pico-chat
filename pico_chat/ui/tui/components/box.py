@@ -86,7 +86,7 @@ class Box(Component):
             self.subbuffer.has_changed = False
         
         # Phase 2: Blit SubBuffer to main buffer (always happens, position updates are free!)
-        self.subbuffer.blit(buffer)
+        self.subbuffer.blit(buffer, clip_rect=getattr(buffer, 'clip_rect', None))
         
         # Phase 3: Render cursor overlay for InputComponent (outside SubBuffer caching)
         if hasattr(self.child, 'render_cursor'):

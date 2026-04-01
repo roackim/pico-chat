@@ -323,9 +323,8 @@ class ChatHistoryPanel(TextComponent):
         # Clear background first (to prevent artifacts from previous frames/scrolls)
         buffer.fill(self.x, self.y, self.width, self.height, " ", bg=theme.get_bg())
 
-        # Build line map for efficient coordinate mapping
-        line_map = self._build_line_map()
-        total_height = len(line_map)
+        # Avoid building full per-line map on every render (expensive for long streams)
+        total_height = self._get_all_rows()
         
         gap = pico_cfg.config.ui_msg_v_margin
         
@@ -353,6 +352,8 @@ class ChatHistoryPanel(TextComponent):
         
         # Reset any previous layout of the container children to prevent stale rendering
         curr_y = self.y - start_y
+        viewport_top = self.y
+        viewport_bottom = self.y + self.height
         for i, msg in enumerate(self.messages):
             # Add gap before this message (skip for the first message)
             if i > 0:
@@ -361,8 +362,16 @@ class ChatHistoryPanel(TextComponent):
             child = msg.get_component()
             child_w = self.width - msg.left_margin - msg.right_margin
             child_h = child.get_preferred_height(child_w)
-            
-            child.set_layout(self.x + msg.left_margin, curr_y, child_w, child_h)
+
+            child_y = curr_y
+            child_bottom = child_y + child_h
+
+            # Skip fully offscreen messages (vertical culling)
+            if child_bottom <= viewport_top or child_y >= viewport_bottom:
+                curr_y += child_h
+                continue
+
+            child.set_layout(self.x + msg.left_margin, child_y, child_w, child_h)
             child.render(buffer)
             
             curr_y += child_h

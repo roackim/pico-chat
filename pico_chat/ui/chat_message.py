@@ -183,7 +183,7 @@ class Message:
         """
         self.max_width = max_width
         self.formatted_text = self._format_line_wrap()
-        self.component.text = self.formatted_text
+        self.component.update(self.formatted_text)
         self.box.mark_changed()  # Content changed, need to re-render
         return self.formatted_text
     

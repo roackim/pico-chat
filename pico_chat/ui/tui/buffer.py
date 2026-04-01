@@ -387,7 +387,13 @@ class SubBuffer:
         """Mark this buffer as needing re-rendering."""
         self.has_changed = True
     
-    def blit(self, target: Buffer, x_offset: Optional[int] = None, y_offset: Optional[int] = None):
+    def blit(
+        self,
+        target: Buffer,
+        x_offset: Optional[int] = None,
+        y_offset: Optional[int] = None,
+        clip_rect: Optional[tuple[int, int, int, int]] = None,
+    ):
         """
         Copy cells from this SubBuffer to the target Buffer.
         Uses stored position or provided offsets.
@@ -395,21 +401,42 @@ class SubBuffer:
         """
         blit_x = x_offset if x_offset is not None else self.x
         blit_y = y_offset if y_offset is not None else self.y
-        
-        # Calculate clipping boundaries
-        src_start_y = max(0, -blit_y)  # Skip rows above target
-        src_start_x = max(0, -blit_x)  # Skip columns before target
-        src_end_y = min(self.height, target.height - blit_y)
-        src_end_x = min(self.width, target.width - blit_x)
-        
-        # Copy cells that fit within target bounds
+
+        # Visible rect in target coordinates = intersection of:
+        # target bounds, blit bounds, and optional clip rect.
+        visible_x0 = max(0, blit_x)
+        visible_y0 = max(0, blit_y)
+        visible_x1 = min(target.width, blit_x + self.width)
+        visible_y1 = min(target.height, blit_y + self.height)
+
+        if clip_rect is not None:
+            cx, cy, cw, ch = clip_rect
+            visible_x0 = max(visible_x0, cx)
+            visible_y0 = max(visible_y0, cy)
+            visible_x1 = min(visible_x1, cx + cw)
+            visible_y1 = min(visible_y1, cy + ch)
+
+        if visible_x0 >= visible_x1 or visible_y0 >= visible_y1:
+            return
+
+        # Map visible target rect back to source rect
+        src_start_x = visible_x0 - blit_x
+        src_end_x = visible_x1 - blit_x
+        src_start_y = visible_y0 - blit_y
+        src_end_y = visible_y1 - blit_y
+
         for src_y in range(src_start_y, src_end_y):
-            for src_x in range(src_start_x, src_end_x):
-                target_x = blit_x + src_x
-                target_y = blit_y + src_y
-                
-                if 0 <= target_x < target.width and 0 <= target_y < target.height:
-                    cell = self.cells[src_y][src_x]
-                    target.set(target_x, target_y, cell.char, 
-                             fg=cell.fg, bg=cell.bg, 
-                             bold=cell.bold, reverse=cell.reverse)
+            target_y = blit_y + src_y
+            row_slice = self.cells[src_y][src_start_x:src_end_x]
+            target_x = visible_x0
+            for cell in row_slice:
+                target.set(
+                    target_x,
+                    target_y,
+                    cell.char,
+                    fg=cell.fg,
+                    bg=cell.bg,
+                    bold=cell.bold,
+                    reverse=cell.reverse,
+                )
+                target_x += 1

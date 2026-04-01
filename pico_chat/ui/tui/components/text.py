@@ -8,6 +8,7 @@ class TextComponent(Component):
     def __init__(self, text: str, id: Optional[str] = None, fg=None, bg=None, auto_scroll_bottom: bool = False):
         super().__init__(id)
         self.text = text
+        self._lines = text.splitlines()
         self.fg = fg
         self.bg = bg
         self.auto_scroll_bottom = auto_scroll_bottom
@@ -21,7 +22,7 @@ class TextComponent(Component):
         Uses Buffer.write_str which handles absolute positioning and ensures
         ANSI sequences don't corrupt the grid layout.
         """
-        lines = self.text.splitlines()
+        lines = self._lines
         
         # If auto_scroll_bottom is enabled and there are more lines than height,
         # show the last lines that fit
@@ -37,9 +38,9 @@ class TextComponent(Component):
         """Calculate height needed for wrapped text."""
         # Note: If this TextComponent doesn't wrap itself (like ChatHistoryPanel currently does),
         # we still consider splitlines() count.
-        lines = self.text.splitlines()
-        return len(lines)
+        return len(self._lines)
 
     def update(self, text: str):
         self.text = text
+        self._lines = text.splitlines()
         self.mark_changed((self.x, self.y, self.width, self.height))
