@@ -75,6 +75,9 @@ class InputComponent(Component):
     def text(self, value: str):
         """Set text (for backward compatibility)."""
         self.buffer.text = value
+        # Mark parent for re-render
+        if hasattr(self, 'parent') and self.parent and hasattr(self.parent, 'mark_changed'):
+            self.parent.mark_changed()
     
     @property
     def cursor_pos(self) -> int:
@@ -143,7 +146,11 @@ class InputComponent(Component):
         self.compositor_ref = compositor
     
     def _on_text_changed(self):
-        """Called whenever text changes - updates completion menus."""
+        """Called whenever text changes - updates completion menus and marks parent for re-render."""
+        # Mark parent Box as changed for visual update
+        if hasattr(self, 'parent') and self.parent and hasattr(self.parent, 'mark_changed'):
+            self.parent.mark_changed()
+        
         # Try command completion first (has priority at line start, no space)
         if self.command_list:
             self._ensure_command_menu()
@@ -440,8 +447,14 @@ class InputComponent(Component):
         """Update the input field text programmatically."""
         self.buffer.text = text
         self.buffer.cursor_pos = len(text)
+        # Mark parent for re-render
+        if hasattr(self, 'parent') and self.parent and hasattr(self.parent, 'mark_changed'):
+            self.parent.mark_changed()
 
     def clear(self):
         """Clear the input field."""
         self.buffer.clear()
         self.scroll_manager.reset()
+        # Mark parent for re-render
+        if hasattr(self, 'parent') and self.parent and hasattr(self.parent, 'mark_changed'):
+            self.parent.mark_changed()

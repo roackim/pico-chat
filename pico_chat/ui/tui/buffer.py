@@ -1,8 +1,11 @@
 from dataclasses import dataclass
 from typing import Optional
+import re
 from wcwidth import wcwidth
 
-from pico_chat.ui.tui.colors import RGB
+from pico_chat.ui.tui.colors import RGB, theme
+from pico_chat.ui.tui.terminal import ANSI
+from pico_chat import pico_cfg
 
 @dataclass
 class Cell:
@@ -17,10 +20,6 @@ class Buffer:
     def __init__(self, width: int, height: int):
         self.width = width
         self.height = height
-        # Import theme and config to get default background color for empty cells
-        from pico_chat.ui.tui.colors import theme
-        from pico_chat import pico_cfg
-        
         # Only use theme background if config allows it
         if pico_cfg.config.ui_use_bg_color:
             self.default_bg = (theme.BACKGROUND.r, theme.BACKGROUND.g, theme.BACKGROUND.b)
@@ -72,7 +71,6 @@ class Buffer:
         horizontal space in the grid.
         Properly handles emoji and wide character widths using wcwidth.
         """
-        import re
         # Regex for standard ANSI escape sequences
         ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
         
@@ -154,8 +152,6 @@ class Buffer:
         Always performs a full redraw from the top-left corner.
         Properly handles wide characters (emojis) that span multiple columns.
         """
-        from pico_chat.ui.tui.terminal import ANSI
-        
         res = [ANSI.MOVE_HOME]
         
         # Initialize background based on whether we're using theme colors
@@ -244,3 +240,165 @@ class Buffer:
         res.append(ANSI.HIDE_CURSOR)
         res.append(ANSI.RESET)
         return "".join(res)
+
+
+class SubBuffer:
+    """
+    A sub-surface buffer for efficient component rendering.
+    Components can render to their SubBuffer once and blit it multiple times,
+    avoiding expensive re-rendering. Position can be updated independently for
+    efficient scrolling.
+    """
+    
+    def __init__(self, width: int, height: int):
+        self.width = width
+        self.height = height
+        self.x = 0  # Blit position (can be updated independently)
+        self.y = 0
+        self.has_changed = True  # Needs re-rendering
+        
+        if pico_cfg.config.ui_use_bg_color:
+            self.default_bg = (theme.BACKGROUND.r, theme.BACKGROUND.g, theme.BACKGROUND.b)
+        else:
+            self.default_bg = None
+        
+        # 2D list of cells for elegant growing
+        self.cells = [[Cell(bg=self.default_bg) for _ in range(width)] for _ in range(height)]
+    
+    def set(self, x: int, y: int, char: str, fg=None, bg=None, bold=False, reverse=False):
+        """Set a single cell in the buffer."""
+        if 0 <= x < self.width and 0 <= y < self.height:
+            # Convert RGB objects to tuples
+            if fg is not None and hasattr(fg, 'r'):
+                fg = (fg.r, fg.g, fg.b)
+            if bg is not None and hasattr(bg, 'r'):
+                bg = (bg.r, bg.g, bg.b)
+            self.cells[y][x] = Cell(char, fg, bg, bold, reverse)
+    
+    def fill(self, x: int, y: int, width: int, height: int, char: str = " ", fg=None, bg=None):
+        """Fill a rectangular area with a character."""
+        for iy in range(y, min(y + height, self.height)):
+            for ix in range(x, min(x + width, self.width)):
+                self.set(ix, iy, char, fg=fg, bg=bg)
+    
+    def write_str(self, x: int, y: int, s: str, fg=None, bg=None, bold=False, reverse=False, max_width: Optional[int] = None):
+        """
+        Write a string to the buffer starting at (x, y).
+        ANSI-aware and handles wide characters (emoji) properly.
+        """
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        
+        curr_x = x
+        pending_ansi = ""
+        i = 0
+        count = 0
+        
+        while i < len(s):
+            if max_width is not None and count >= max_width:
+                break
+                
+            match = ansi_escape.match(s, i)
+            if match:
+                pending_ansi += match.group()
+                i = match.end()
+            else:
+                char = s[i]
+                if char == '\n':
+                    break
+                
+                char_width = wcwidth(char)
+                if char_width < 0:
+                    char_width = 1
+                
+                if max_width is not None and count + char_width > max_width:
+                    break
+                
+                if char_width == 2:
+                    if 0 <= curr_x < self.width and 0 <= y < self.height:
+                        self.set(curr_x, y, pending_ansi + char, fg, bg, bold, reverse)
+                    
+                    if 0 <= curr_x + 1 < self.width and 0 <= y < self.height:
+                        fg_tuple = (fg.r, fg.g, fg.b) if fg is not None and hasattr(fg, 'r') else fg
+                        bg_tuple = (bg.r, bg.g, bg.b) if bg is not None and hasattr(bg, 'r') else bg
+                        self.cells[y][curr_x + 1] = Cell(
+                            char="",
+                            fg=fg_tuple,
+                            bg=bg_tuple,
+                            bold=bold,
+                            reverse=reverse,
+                            is_wide_char_continuation=True
+                        )
+                    curr_x += 2
+                else:
+                    if 0 <= curr_x < self.width and 0 <= y < self.height:
+                        self.set(curr_x, y, pending_ansi + char, fg, bg, bold, reverse)
+                    curr_x += 1
+                
+                pending_ansi = ""
+                i += 1
+                count += char_width
+        
+        # Handle trailing ANSI
+        if pending_ansi and (max_width is None or count < max_width):
+            if curr_x > x and 0 <= y < self.height:
+                prev_cell = self.cells[y][curr_x - 1]
+                prev_cell.char += pending_ansi
+            elif 0 <= curr_x < self.width and 0 <= y < self.height:
+                self.set(curr_x, y, pending_ansi + " ", fg, bg, bold, reverse)
+    
+    def clear(self):
+        """Clear all cells in the buffer."""
+        for y in range(self.height):
+            for x in range(self.width):
+                self.cells[y][x] = Cell(bg=self.default_bg)
+    
+    def grow(self, new_height: int):
+        """
+        Grow the buffer by appending lines to the bottom.
+        Useful for streaming content that grows over time.
+        Marks the buffer as changed.
+        """
+        if new_height > self.height:
+            for _ in range(new_height - self.height):
+                self.cells.append([Cell(bg=self.default_bg) for _ in range(self.width)])
+            self.height = new_height
+            self.has_changed = True
+    
+    def set_position(self, x: int, y: int):
+        """
+        Update the blit position without marking as changed.
+        Perfect for scrolling - position updates are free!
+        """
+        self.x = x
+        self.y = y
+    
+    def mark_changed(self):
+        """Mark this buffer as needing re-rendering."""
+        self.has_changed = True
+    
+    def blit(self, target: Buffer, x_offset: Optional[int] = None, y_offset: Optional[int] = None):
+        """
+        Copy cells from this SubBuffer to the target Buffer.
+        Uses stored position or provided offsets.
+        Handles clipping gracefully - only copies cells that fit in target.
+        """
+        blit_x = x_offset if x_offset is not None else self.x
+        blit_y = y_offset if y_offset is not None else self.y
+        
+        # Calculate clipping boundaries
+        src_start_y = max(0, -blit_y)  # Skip rows above target
+        src_start_x = max(0, -blit_x)  # Skip columns before target
+        src_end_y = min(self.height, target.height - blit_y)
+        src_end_x = min(self.width, target.width - blit_x)
+        
+        # Copy cells that fit within target bounds
+        for src_y in range(src_start_y, src_end_y):
+            for src_x in range(src_start_x, src_end_x):
+                target_x = blit_x + src_x
+                target_y = blit_y + src_y
+                
+                if 0 <= target_x < target.width and 0 <= target_y < target.height:
+                    cell = self.cells[src_y][src_x]
+                    target.set(target_x, target_y, cell.char, 
+                             fg=cell.fg, bg=cell.bg, 
+                             bold=cell.bold, reverse=cell.reverse)

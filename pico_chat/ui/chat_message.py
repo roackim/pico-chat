@@ -90,6 +90,7 @@ class Message:
     
     def finalize(self):
         self.finalized = True
+        self.box.mark_changed()  # Finalization affects actions display
     
     def get_active_actions(self):
         """Get the list of active actions based on message state.
@@ -123,15 +124,18 @@ class Message:
         """Update the title of the message box."""
         self.title = title
         self.box.title = title
+        self.box.mark_changed()  # Title changed
 
     def set_frame_color(self, color: RGB):
         """Update the frame color of the message box."""
         self.frame_color = color
         self.box.fg = color
+        self.box.mark_changed()  # Color changed
 
     def set_content_color(self, color: RGB):
         """Update the content color of the message."""
         self.component.fg = color
+        self.box.mark_changed()  # Color changed
     
     def set_focused(self, focused: bool):
         """Set the focused state of this message."""
@@ -180,6 +184,7 @@ class Message:
         self.max_width = max_width
         self.formatted_text = self._format_line_wrap()
         self.component.text = self.formatted_text
+        self.box.mark_changed()  # Content changed, need to re-render
         return self.formatted_text
     
     def get_formatted(self) -> str:
@@ -270,6 +275,7 @@ class Message:
             self.metrics_ttft_ms = ttft_ms
         if duration_ms is not None:
             self.metrics_duration_ms = duration_ms
+        self.box.mark_changed()  # Metrics changed, affects bottom border
     
     def get_metrics_string(self) -> Optional[str]:
         """Get formatted metrics string based on config."""
