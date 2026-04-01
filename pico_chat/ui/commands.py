@@ -139,21 +139,21 @@ class StatusCommand(Command):
 
 class SetFpsCommand(Command):
     def __init__(self):
-        super().__init__("fps", "Set target FPS (frames per second)")
+        super().__init__("fps", "Set target FPS (frames per second, 0 = uncapped)")
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         if not args:
             ui.chat_history_panel.add_message(
-                "Usage: /set fps <number>\nExample: /set fps 60",
+                "Usage: /set fps <number>\nExamples: /set fps 60, /set fps 0 (uncapped)",
                 msg_type=SysMsgError()
             )
             return
         
         try:
             fps = int(args[0])
-            if fps < 1:
+            if fps < 0:
                 ui.chat_history_panel.add_message(
-                    "FPS must be at least 1",
+                    "FPS must be 0 or greater",
                     msg_type=SysMsgError()
                 )
                 return
@@ -167,8 +167,10 @@ class SetFpsCommand(Command):
             # Update compositor FPS
             if ui.compositor:
                 ui.compositor.fps = fps
+                if hasattr(ui.compositor, "render_times"):
+                    ui.compositor.render_times.clear()
                 ui.chat_history_panel.add_message(
-                    f"Target FPS set to {fps}",
+                    "Target FPS set to uncapped" if fps == 0 else f"Target FPS set to {fps}",
                     msg_type=SysMsg()
                 )
             else:
@@ -194,7 +196,8 @@ class GetFpsCommand(Command):
             
             color = str(theme.WARNING)
             reset = theme.reset()
-            msg = color + f"Target FPS       : {reset}{target_fps}\n"
+            target_label = "uncapped" if target_fps == 0 else str(target_fps)
+            msg = color + f"Target FPS       : {reset}{target_label}\n"
             msg += color + f"Actual FPS       : {reset}{actual_fps:.2f}"
             
             ui.chat_history_panel.add_message(

@@ -23,7 +23,6 @@ class Compositor:
         
         # Performance tracking - use rolling window for accurate current FPS
         self.render_times = deque(maxlen=10)  # Track last 10 render times for recent FPS
-        self.last_render_time = 0  # Track when we last actually rendered for FPS limiting
 
     def _collect_ids(self, component: Component):
         if component.id:
@@ -61,15 +60,30 @@ class Compositor:
         with self.terminal:
             self._update_size()
 
+            # Track absolute target time for next frame (prevents drift)
+            current_fps = self.fps
+            frame_time = (1.0 / current_fps) if current_fps > 0 else 0.0
+            now = time.perf_counter()
+            next_frame_time = now
+
             while self.running:
+                # Pick up runtime FPS changes immediately
+                new_fps = self.fps
+                if new_fps != current_fps:
+                    current_fps = new_fps
+                    frame_time = (1.0 / current_fps) if current_fps > 0 else 0.0
+                    next_frame_time = time.perf_counter()
+
                 if self.terminal.resized:
                     # Debounce resize events
                     await asyncio.sleep(0.05)
                     self.terminal.resized = False
                     self._update_size()
-                    self.render(force_full=True)
+                    self.render()
+                    # Reset frame timing after resize
+                    next_frame_time = time.perf_counter()
 
-                # Handle input
+                # Handle input first (non-blocking)
                 event = self.terminal.get_input()
                 if event:
                     if event == '\x03': # Ctrl-C
@@ -79,36 +93,39 @@ class Compositor:
                         break
                     self.root.handle_input(event)
                 
-                # Try to render (will be throttled by FPS limit in render() method)
+                # Render once per scheduled frame
                 self.render()
-                
-                # Sleep for a short time to yield control and reduce CPU usage
-                # Cap at 5ms for input responsiveness, but scale with FPS
-                frame_time = 1.0 / self.fps
-                sleep_time = min(0.005, frame_time / 2)
-                await asyncio.sleep(sleep_time)
+
+                # Uncapped mode (fps <= 0): render as fast as possible while yielding.
+                if current_fps <= 0:
+                    await asyncio.sleep(0)
+                else:
+                    # Advance schedule in absolute time (no cumulative drift)
+                    next_frame_time += frame_time
+                    now = time.perf_counter()
+                    sleep_time = next_frame_time - now
+
+                    if sleep_time > 0:
+                        await asyncio.sleep(sleep_time)
+                    else:
+                        # Behind schedule: skip ahead to avoid sustained lag
+                        frames_behind = int((-sleep_time) / frame_time) + 1
+                        next_frame_time += frames_behind * frame_time
+                        # Always yield so other tasks don't starve at very high target FPS
+                        await asyncio.sleep(0)
 
     def _update_size(self):
         w, h = self.terminal.get_size()
         self.width, self.height = w, h
         self.buffer = Buffer(w, h)
 
-    def render(self, force_full=False):
+    def render(self):
+        """Render the compositor."""
         if self.width == 0 or self.height == 0:
             return
-        
-        # Enforce FPS limit (unless force_full is True)
-        now = time.time()
-        if not force_full:
-            frame_time = 1.0 / self.fps
-            time_since_last_render = now - self.last_render_time
-            
-            if time_since_last_render < frame_time:
-                # Too soon, skip this render
-                return
-            
-            self.last_render_time = now
-        
+
+        now = time.perf_counter()
+
         # Track this render time for FPS calculation
         self.render_times.append(now)
 
