@@ -86,6 +86,10 @@ class Box(Component):
         
         # Phase 2: Blit SubBuffer to main buffer (always happens, position updates are free!)
         self.subbuffer.blit(buffer)
+        
+        # Phase 3: Render cursor overlay for InputComponent (outside SubBuffer caching)
+        if hasattr(self.child, 'render_cursor'):
+            self.child.render_cursor(buffer)
     
     def _render_to_subbuffer(self):
         """Render box content to its SubBuffer using local coordinates (0,0)."""

@@ -282,18 +282,13 @@ class InputComponent(Component):
         self.focused = focused
 
     def render(self, buffer: Buffer):
-        """Render the input field with prompt, text, scrolling, and menus."""
+        """Render the input field with prompt, text, and scrolling (cursor rendered separately)."""
         # Clear background
         buffer.fill(self.x, self.y, self.width, self.height, " ", bg=self.bg)
         
         # Get wrapped lines
         lines = self.coord_mapper.get_wrapped_lines(self.buffer.text)
         prompt_width = display_width(self.prompt)
-        
-        # Get cursor position
-        cursor_row, cursor_col = self.coord_mapper.get_cursor_coords(
-            self.buffer.text, self.buffer.cursor_pos
-        )
         
         # Ensure cursor is visible and scroll is constrained
         self.scroll_manager.ensure_cursor_visible()
@@ -320,14 +315,32 @@ class InputComponent(Component):
             
             buffer.write_str(self.x, self.y + line_idx, display_line, fg=self.content_color, bg=self.bg, max_width=self.width)
         
-        # Render cursor only if focused
-        if self.focused:
-            self.cursor_renderer.render(
-                buffer, cursor_row, cursor_col,
-                self.x, self.y, scroll_y, self.height
-            )
+        # Note: Cursor is rendered separately via render_cursor() called after SubBuffer blit
         
         # Menu is rendered by compositor as overlay (not here)
+    
+    def render_cursor(self, buffer: Buffer):
+        """Render cursor as an overlay (called outside SubBuffer caching).
+        
+        This is called by Box after blitting SubBuffer to main buffer,
+        ensuring cursor blinks even when content hasn't changed.
+        """
+        if not self.focused:
+            return
+        
+        # Get cursor position
+        cursor_row, cursor_col = self.coord_mapper.get_cursor_coords(
+            self.buffer.text, self.buffer.cursor_pos
+        )
+        
+        scroll_y = self.scroll_manager.scroll_y
+        
+        # Render cursor and let it mark parent if it blinked
+        self.cursor_renderer.render(
+            buffer, cursor_row, cursor_col,
+            self.x, self.y, scroll_y, self.height,
+            parent_box=self.parent
+        )
 
     def handle_input(self, event: Any) -> bool:
         """Handle input events by delegating to appropriate handlers."""
