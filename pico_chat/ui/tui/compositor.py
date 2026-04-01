@@ -20,6 +20,11 @@ class Compositor:
         self.shutdown_event = shutdown_event
         self.padding = 0  # Global app padding
         self.overlays = []  # Floating components rendered on top
+        self._render_requested = True
+        self._full_redraw = True
+        self.idle_sleep_seconds = 0.0
+        self._wake_event = asyncio.Event()
+        self.streaming_active = False
         
         # Performance tracking - use rolling window for accurate current FPS
         self.render_times = deque(maxlen=10)  # Track last 10 render times for recent FPS
@@ -55,6 +60,16 @@ class Compositor:
         if component in self.overlays:
             self.overlays.remove(component)
 
+    def request_render(self):
+        """Request a repaint on the next loop iteration."""
+        self._render_requested = True
+        self._wake_event.set()
+
+    def set_streaming_active(self, active: bool):
+        """Mark whether high-frequency LLM streaming is in progress."""
+        self.streaming_active = active
+        self.request_render()
+
     async def run(self):
         self.running = True
         with self.terminal:
@@ -79,7 +94,8 @@ class Compositor:
                     await asyncio.sleep(0.05)
                     self.terminal.resized = False
                     self._update_size()
-                    self.render()
+                    self._full_redraw = True
+                    self.request_render()
                     # Reset frame timing after resize
                     next_frame_time = time.perf_counter()
 
@@ -92,6 +108,19 @@ class Compositor:
                             self.shutdown_event.set()
                         break
                     self.root.handle_input(event)
+                    self.request_render()
+
+                has_dirty = self.root.is_dirty() if hasattr(self.root, 'is_dirty') else True
+                should_render = self.streaming_active or self._render_requested or has_dirty
+
+                if not should_render:
+                    idle_timeout = (1.0 / current_fps) if current_fps > 0 else (self.idle_sleep_seconds or 0.016)
+                    try:
+                        await asyncio.wait_for(self._wake_event.wait(), timeout=idle_timeout)
+                        self._wake_event.clear()
+                    except asyncio.TimeoutError:
+                        pass
+                    continue
                 
                 # Render once per scheduled frame
                 self.render()
@@ -129,22 +158,56 @@ class Compositor:
         # Track this render time for FPS calculation
         self.render_times.append(now)
 
-        self.buffer.clear()
         # Apply global padding to root component layout
         pad = self.padding
         inner_width = max(0, self.width - 2 * pad)
         inner_height = max(0, self.height - 2 * pad)
         self.root.set_layout(pad, pad, inner_width, inner_height)
-        self.root.render(self.buffer)
-        
-        # Render overlays on top (not clipped by parents)
-        for overlay in self.overlays:
-            overlay.render(self.buffer)
+
+        if self._full_redraw:
+            self.buffer.clear()
+            self.root.render(self.buffer)
+            for overlay in self.overlays:
+                overlay.render(self.buffer)
+        else:
+            dirty_rects: list[tuple[int, int, int, int]] = []
+            if hasattr(self.root, 'collect_dirty_rects'):
+                self.root.collect_dirty_rects(dirty_rects)
+
+            valid_dirty_rects = [
+                (x, y, width, height)
+                for x, y, width, height in dirty_rects
+                if width > 0 and height > 0
+            ]
+
+            # If a repaint was explicitly requested but no valid dirty rects exist
+            # (e.g. before first stable layout), fall back to a full redraw.
+            if self._render_requested and not valid_dirty_rects:
+                self.buffer.clear()
+                self.root.render(self.buffer)
+                for overlay in self.overlays:
+                    overlay.render(self.buffer)
+            elif not valid_dirty_rects:
+                self._render_requested = False
+                return
+            else:
+                for x, y, width, height in valid_dirty_rects:
+                    self.buffer.clear_rect(x, y, width, height)
+                    self.buffer.set_clip(x, y, width, height)
+                    self.root.render(self.buffer)
+                    for overlay in self.overlays:
+                        overlay.render(self.buffer)
+                    self.buffer.clear_clip()
         
         # Use Buffer's built-in render method
         output = self.buffer.render()
         sys.stdout.write(output)
         sys.stdout.flush()
+
+        self._render_requested = False
+        self._full_redraw = False
+        if hasattr(self.root, 'clear_dirty'):
+            self.root.clear_dirty()
     
     def get_actual_fps(self) -> float:
         """Calculate actual measured FPS based on recent render times."""

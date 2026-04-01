@@ -146,6 +146,17 @@ class Buffer:
             for x in range(self.width):
                 self.cells[y][x] = Cell(bg=self.default_bg)
 
+    def clear_rect(self, x: int, y: int, width: int, height: int):
+        """Clear a rectangular area to default background."""
+        start_x = max(0, x)
+        start_y = max(0, y)
+        end_x = min(self.width, x + width)
+        end_y = min(self.height, y + height)
+
+        for iy in range(start_y, end_y):
+            for ix in range(start_x, end_x):
+                self.cells[iy][ix] = Cell(bg=self.default_bg)
+
     def render(self) -> str:
         """
         Renders the entire buffer to a single ANSI string.

@@ -64,8 +64,9 @@ class Box(Component):
         # Otherwise fall back to a reasonable default or 0
         return 0
     
-    def mark_changed(self):
+    def mark_changed(self, rect: Optional[tuple[int, int, int, int]] = None):
         """Mark this box as needing re-rendering."""
+        super().mark_changed(rect if rect is not None else (self.x, self.y, self.width, self.height))
         if self.subbuffer:
             self.subbuffer.mark_changed()
 

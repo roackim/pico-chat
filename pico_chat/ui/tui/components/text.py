@@ -42,3 +42,4 @@ class TextComponent(Component):
 
     def update(self, text: str):
         self.text = text
+        self.mark_changed((self.x, self.y, self.width, self.height))

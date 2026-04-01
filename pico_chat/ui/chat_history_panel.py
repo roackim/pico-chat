@@ -58,6 +58,17 @@ class ChatHistoryPanel(TextComponent):
     def set_compositor(self, compositor):
         """Set the compositor for updates."""
         self.compositor = compositor
+
+    def mark_changed(self, rect: Optional[tuple[int, int, int, int]] = None):
+        """Mark panel dirty and wake compositor for immediate repaint."""
+        super().mark_changed(rect)
+        if self.compositor and hasattr(self.compositor, 'request_render'):
+            self.compositor.request_render()
+
+    def _request_repaint(self):
+        self.mark_changed((self.x, self.y, self.width, self.height))
+        if self.compositor and hasattr(self.compositor, 'request_render'):
+            self.compositor.request_render()
     
     def set_focused_message(self, index: Optional[int]):
         """Set the focused message by index.
@@ -77,6 +88,7 @@ class ChatHistoryPanel(TextComponent):
             # (we want to follow the last message's content as it updates)
             if self.focused_message_index < len(self.messages) - 1:
                 self.auto_scroll = False
+        self._request_repaint()
     
     def move_focus_up(self) -> bool:
         """Move focus to the previous message.
@@ -128,6 +140,7 @@ class ChatHistoryPanel(TextComponent):
         if not has_focus:
             # Clear message focus when losing keyboard focus
             self.clear_focus()
+        self._request_repaint()
 
     def set_layout(self, x: int, y: int, width: int, height: int):
         """Override to detect width changes and trigger reformat."""
@@ -156,6 +169,7 @@ class ChatHistoryPanel(TextComponent):
             if msg_inner_width < 1:
                 msg_inner_width = 1
             message.reformat(msg_inner_width)
+        self._request_repaint()
 
     def _get_all_rows(self) -> int:
         """Calculate total number of rows across all message boxes."""
@@ -472,6 +486,7 @@ class ChatHistoryPanel(TextComponent):
                     self.anchored_start_y = new_start_y
                     self.scroll_offset = max_scroll - new_start_y
                     self.auto_scroll = False # Scrolling up disables auto-scroll
+                    self._request_repaint()
                     return True
                     
                 elif event.button == 65: # Scroll Down
@@ -494,6 +509,7 @@ class ChatHistoryPanel(TextComponent):
                     if self.scroll_offset == 0:
                         self.auto_scroll = True
                         self.anchored_start_y = None
+                    self._request_repaint()
                     return True
                     
         return False
@@ -543,12 +559,15 @@ class ChatHistoryPanel(TextComponent):
             self.messages.append(new_message)
             self.msg_container.children.append(new_message.get_component())
             self.msg_container.sizes.append("auto")
+            new_message.get_component().parent = self
         
         # Keep only last max_messages
         if len(self.messages) > self.max_messages:
             self.messages = self.messages[-self.max_messages:]
             self.msg_container.children = [m.get_component() for m in self.messages]
             self.msg_container.sizes = ["auto"] * len(self.messages)
+
+        self._request_repaint()
         
         return new_message
     
@@ -558,6 +577,7 @@ class ChatHistoryPanel(TextComponent):
             self.messages.pop()
             self.msg_container.children.pop()
             self.msg_container.sizes.pop()
+            self._request_repaint()
 
     def remove_message(self, message: Message):
         """Remove a specific message from the chat history.
@@ -605,6 +625,7 @@ class ChatHistoryPanel(TextComponent):
             # Update focus state after deletion
             if self.focused_message_index is not None and self.focused_message_index < len(self.messages):
                 self.messages[self.focused_message_index].set_focused(True)
+            self._request_repaint()
 
     def replace_message(self, current: Message, new: Message):
         """Replace a message with a new message.
@@ -626,12 +647,14 @@ class ChatHistoryPanel(TextComponent):
             # Replace the message
             self.messages[index] = new
             self.msg_container.children[index] = new.get_component()
+            new.get_component().parent = self
             # sizes remain the same ("auto")
             
             # Transfer focus to the new message if the old one was focused
             if was_focused:
                 new.set_focused(True)
                 # focused_message_index stays the same (same index, different message)
+            self._request_repaint()
             
         except ValueError:
             # Message not found, ignore
@@ -663,6 +686,7 @@ class ChatHistoryPanel(TextComponent):
         self.scroll_offset = 0
         self.auto_scroll = True
         self.anchored_start_y = None
+        self._request_repaint()
         
     # def resize(self, new_width: int):
     #     """Resize the panel and reformat all messages.

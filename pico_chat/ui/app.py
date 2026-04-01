@@ -130,10 +130,15 @@ class chatTUI(ChatActionHandlers):
         
         current_msg_type = SysMsg  # Track the type of current message
         current_harness_ids = []  # Track harness message IDs for current UI message
+
+        if self.compositor and hasattr(self.compositor, "set_streaming_active"):
+            self.compositor.set_streaming_active(True)
         
         # Process streaming response from Harness
         try:
             async for chunk in self.agent.chat(user_input):
+                if self.compositor and hasattr(self.compositor, "request_render"):
+                    self.compositor.request_render()
                 
                 if isinstance(chunk, chunks.MessageStart):
                     # New message starting from harness
@@ -336,6 +341,8 @@ class chatTUI(ChatActionHandlers):
             raise e
     
         finally:
+            if self.compositor and hasattr(self.compositor, "set_streaming_active"):
+                self.compositor.set_streaming_active(False)
             if current_msg is not None:
                 current_msg.finalized = True
                 current_msg.update_actions()
