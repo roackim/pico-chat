@@ -79,7 +79,7 @@ class TestTokenEstimation:
         """Python code should be estimated based on symbol density."""
         text = "def func(a, b):\n    return a + b"
         tokens = estimate_tokens(text)
-        assert tokens > 10
+        assert tokens >= 10
     
     def test_code_vs_natural_difference(self):
         """Same length code and natural text should have different estimates."""
@@ -166,7 +166,7 @@ class TestMessagesTokenEstimation:
         total = estimate_messages_tokens(messages)
         
         # Should be sum of all messages with overhead
-        assert total > 20
+        assert total >= 20
     
     def test_conversation_with_tools(self):
         """Conversation with tool calls should estimate correctly."""

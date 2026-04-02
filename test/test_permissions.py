@@ -4,14 +4,20 @@ Test suite for tool permissions system.
 Tests permission enforcement for read/write/patch/run operations
 with inside/outside repo granularity and ask/allow/deny states.
 """
+import asyncio
+import json
 import pytest
 from pathlib import Path
+from pico_chat.harness import chunks
+from pico_chat.harness.harness import Harness
+from pico_chat.harness.llm_status import AgentState
 from pico_chat.harness.tools import MinimalToolset, ToolError
 from pico_chat.harness.tool_permissions import (
     ToolPermissionsProfile,
     FilePermissions,
     RunPermissions,
 )
+import pico_chat.harness.tool_permissions as tool_permissions_module
 
 
 class TestReadPermissions:
@@ -111,12 +117,11 @@ class TestReadPermissions:
         # Assert
         assert result == "external data"
     
-    def test_read_ask_not_implemented(self, tmp_path):
-        """Read with 'ask' should raise not implemented error."""
-        # Setup
+    def test_read_ask_passes_tool_layer(self, tmp_path):
+        """Read with 'ask' should pass in tool layer (harness enforces ask flow)."""
         test_file = tmp_path / "test.txt"
         test_file.write_text("content")
-        
+
         permissions = ToolPermissionsProfile(
             name="test",
             read=FilePermissions(inside_repo="ask", outside_repo="deny"),
@@ -124,12 +129,145 @@ class TestReadPermissions:
             patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
             run=RunPermissions(others="deny"),
         )
-        
+
         tools = MinimalToolset(tmp_path, permissions=permissions)
-        
-        # Execute & Assert
-        with pytest.raises(ToolError, match="not yet implemented"):
-            tools.read("test.txt")
+        assert tools.read("test.txt") == "content"
+
+
+class _NoopDebugStream:
+    def log(self, *args, **kwargs):
+        return None
+
+
+class _StubReadTool:
+    def __init__(self, result: str = "ok"):
+        self.result = result
+        self.called = False
+
+    def execute(self, **kwargs):
+        self.called = True
+        return self.result
+
+
+def _run_harness_tool_call(harness: Harness, tool_call: dict):
+    async def _collect():
+        messages = []
+        events = []
+        async for event in harness._execute_tool_calls([tool_call], messages):
+            events.append(event)
+        return events, messages
+
+    return asyncio.run(_collect())
+
+
+def _build_harness_stub(tmp_path, read_tool):
+    harness = Harness.__new__(Harness)
+    harness.debug_stream = _NoopDebugStream()
+    harness.state = AgentState.IDLE
+    harness.history = []
+    harness.memory = {}
+    harness.memory_snapshots = {}
+    harness.workspace = str(tmp_path)
+    harness.tools_map = {"read": read_tool}
+    harness._user_response_queue = asyncio.Queue()
+    return harness
+
+
+class TestHarnessReadPermissionFlow:
+    """Test read permission ask/allow/deny through harness execution path."""
+
+    def test_auto_deny_enforced_before_execution(self, tmp_path, monkeypatch):
+        profile = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="deny"),
+        )
+        monkeypatch.setattr(tool_permissions_module, "permissions", profile)
+
+        read_tool = _StubReadTool("content")
+        harness = _build_harness_stub(tmp_path, read_tool)
+        tool_call = {
+            "id": "call_1",
+            "function": {
+                "name": "read",
+                "arguments": json.dumps({"path": "test.txt"}),
+            },
+        }
+
+        events, messages = _run_harness_tool_call(harness, tool_call)
+        statuses = [e.status for e in events]
+
+        assert statuses == [chunks.ToolStatus.PERMISSION_REQUESTED, chunks.ToolStatus.DENIED]
+        assert events[0].auto_decision is True
+        assert events[1].denial_reason == "Auto-denied by security policy"
+        assert read_tool.called is False
+        assert messages[-1]["content"] == "Permission denied: Auto-denied by security policy"
+
+    def test_user_deny_enforced_for_ask(self, tmp_path, monkeypatch):
+        profile = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="ask", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="deny"),
+        )
+        monkeypatch.setattr(tool_permissions_module, "permissions", profile)
+
+        read_tool = _StubReadTool("content")
+        harness = _build_harness_stub(tmp_path, read_tool)
+        harness.set_user_response("no")
+        tool_call = {
+            "id": "call_2",
+            "function": {
+                "name": "read",
+                "arguments": json.dumps({"path": "test.txt"}),
+            },
+        }
+
+        events, messages = _run_harness_tool_call(harness, tool_call)
+        statuses = [e.status for e in events]
+
+        assert statuses == [chunks.ToolStatus.PERMISSION_REQUESTED, chunks.ToolStatus.DENIED]
+        assert events[0].auto_decision is False
+        assert events[1].denial_reason == "User denied"
+        assert read_tool.called is False
+        assert messages[-1]["content"] == "Permission denied: User denied"
+
+    def test_allow_executes_tool(self, tmp_path, monkeypatch):
+        profile = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="allow", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="deny"),
+        )
+        monkeypatch.setattr(tool_permissions_module, "permissions", profile)
+
+        read_tool = _StubReadTool("stubbed content")
+        harness = _build_harness_stub(tmp_path, read_tool)
+        tool_call = {
+            "id": "call_3",
+            "function": {
+                "name": "read",
+                "arguments": json.dumps({"path": "test.txt"}),
+            },
+        }
+
+        events, messages = _run_harness_tool_call(harness, tool_call)
+        statuses = [e.status for e in events]
+
+        assert statuses == [
+            chunks.ToolStatus.PERMISSION_REQUESTED,
+            chunks.ToolStatus.APPROVED,
+            chunks.ToolStatus.EXECUTING,
+            chunks.ToolStatus.COMPLETED,
+        ]
+        assert events[0].auto_decision is True
+        assert read_tool.called is True
+        assert events[-1].result == "stubbed content"
+        assert messages[-1]["content"] == "stubbed content"
 
 
 class TestWritePermissions:
