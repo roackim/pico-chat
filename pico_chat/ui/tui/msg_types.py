@@ -75,6 +75,14 @@ class ToolCallMsg(MsgType):
     content_color = None
     actions = [MsgAction.OUTPUT, MsgAction.COPY, MsgAction.DELETE]
 
+
+class ToolDraftMsg(MsgType):
+    name = "tool_draft"
+    title = "tool"
+    frame_color = "MUTED"
+    content_color = "MUTED"
+    actions = []
+
 class AskPermissionMsg(MsgType):
     name = "permission"
     title = "permission"

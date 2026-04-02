@@ -227,7 +227,7 @@ class Message:
                     colored_parts.append(f"{theme.SUCCESS}{part}{theme.reset()}")
                 elif part in ['denied', 'error']:
                     colored_parts.append(f"{theme.ERROR}{part}{theme.reset()}")
-                elif part in ['executing']:
+                elif part in ['executing', 'drafting']:
                     colored_parts.append(f"{theme.MUTED}{part}{theme.reset()}")
                 else:
                     colored_parts.append(f"{theme.MUTED}{part}{theme.reset()}")
@@ -247,7 +247,14 @@ class Message:
             import json
             try:
                 args_dict = json.loads(self.tool_args)
-                if len(args_dict) == 1:
+                if self.tool_name == "patch" and isinstance(args_dict, dict) and "patch_content" in args_dict:
+                    patch_content = args_dict.get("patch_content")
+                    if isinstance(patch_content, str) and patch_content:
+                        patch_lines = len(patch_content.splitlines())
+                    else:
+                        patch_lines = 0
+                    lines.append(f"{theme.MUTED}cmd:{theme.reset()} {patch_lines} lines")
+                elif len(args_dict) == 1:
                     # Single arg - show the value with cmd: prefix
                     key, value = list(args_dict.items())[0]
                     if isinstance(value, str):

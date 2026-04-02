@@ -588,10 +588,21 @@ class Harness:
                             "type": "function",
                             "function": {"name": "", "arguments": ""}
                         }
+                    elif tc.id:
+                        tool_calls_buffer[idx]["id"] = tc.id
+
                     if tc.function.name:
                         tool_calls_buffer[idx]["function"]["name"] += tc.function.name
                     if tc.function.arguments:
                         tool_calls_buffer[idx]["function"]["arguments"] += tc.function.arguments
+
+                    tc_data = tool_calls_buffer[idx]
+                    tool_call_id = tc_data["id"] or f"idx_{idx}"
+                    yield chunks.ToolDraft(
+                        tool_call_id=tool_call_id,
+                        tool_name=tc_data["function"]["name"],
+                        tool_args=tc_data["function"]["arguments"]
+                    )
         
         # Flush any remaining content buffer at the end
         if content_buffer:
@@ -624,7 +635,7 @@ class Harness:
             for idx in sorted(tool_calls_buffer.keys()):
                 tc_data = tool_calls_buffer[idx]
                 tool_calls_list.append({
-                    "id": tc_data["id"],
+                    "id": tc_data["id"] or f"idx_{idx}",
                     "type": "function",
                     "function": {
                         "name": tc_data["function"]["name"],

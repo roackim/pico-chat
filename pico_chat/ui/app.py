@@ -23,7 +23,7 @@ from pico_chat.ui.tui.layout_utils import strip_ansi
 import logging
 from pico_chat.ui.commands import StatusCommand
 from pico_chat.ui.tui.colors import theme
-from pico_chat.ui.tui.msg_types import PicoMsg, ThinkingMsg, UserMsg, SysMsg, SysMsgError, ToolCallMsg, AskPermissionMsg
+from pico_chat.ui.tui.msg_types import MsgType, PicoMsg, ThinkingMsg, UserMsg, SysMsg, SysMsgError, ToolCallMsg, ToolDraftMsg, AskPermissionMsg
 
 from pico_chat import pico_cfg
 from pico_chat.ui.logging_handlers import setup_tui_logging
@@ -131,6 +131,24 @@ class chatTUI(ChatActionHandlers):
         current_msg_type = SysMsg  # Track the type of current message
         current_harness_ids = []  # Track harness message IDs for current UI message
 
+        def ensure_tool_message_type(msg: Message, target_type: MsgType) -> Message:
+            """Replace message with a new one if type differs, preserving tool metadata."""
+            if isinstance(msg.type, type(target_type)):
+                return msg
+
+            new_msg = chat.new_message(
+                "",
+                msg_type=target_type,
+                harness_message_ids=msg.harness_message_ids or current_harness_ids
+            )
+            new_msg.tool_name = msg.tool_name
+            new_msg.tool_args = msg.tool_args
+            new_msg.tool_output = msg.tool_output
+            new_msg.tool_status = msg.tool_status
+            new_msg.show_output = msg.show_output
+            chat.replace_message(msg, new_msg)
+            return new_msg
+
         if self.compositor and hasattr(self.compositor, "set_streaming_active"):
             self.compositor.set_streaming_active(True)
         
@@ -183,47 +201,76 @@ class chatTUI(ChatActionHandlers):
                     
                     current_msg.append(chunk.content)
                 
+                elif isinstance(chunk, chunks.ToolDraft):
+                    tool_id = chunk.tool_call_id
+                    msg = self.active_tool_messages.get(tool_id)
+                    preserve_active_text_stream = current_msg_type in (ThinkingMsg, PicoMsg)
+
+                    if not msg:
+                        if current_msg_type == SysMsg:
+                            msg = chat.new_message("", msg_type=ToolDraftMsg(), harness_message_ids=current_harness_ids)
+                            chat.replace_message(current_msg, msg)
+                        else:
+                            msg = chat.add_message("", msg_type=ToolDraftMsg(), harness_message_ids=current_harness_ids)
+                        self.active_tool_messages[tool_id] = msg
+
+                    msg = ensure_tool_message_type(msg, ToolDraftMsg())
+                    self.active_tool_messages[tool_id] = msg
+                    msg.tool_name = chunk.tool_name or msg.tool_name
+                    msg.tool_args = chunk.tool_args
+                    msg.tool_status = "drafting"
+                    msg.rebuild_tool_display()
+
+                    if not preserve_active_text_stream:
+                        current_msg = msg
+                        current_msg_type = type(msg.type)
+
                 elif isinstance(chunk, chunks.ToolStatusChange):
                     # Handle tool status change
                     tool_id = chunk.tool_call_id
                     
                     if chunk.status == chunks.ToolStatus.PERMISSION_REQUESTED:
-                        # Create new tool message with metadata
+                        msg = self.active_tool_messages.get(tool_id)
+
                         if chunk.auto_decision:
-                            # Auto-decision: start with tool name and status marker
-                            msg = chat.add_message(
-                                "",  # Will be built by rebuild_tool_display
-                                msg_type=ToolCallMsg(),
-                                harness_message_ids=current_harness_ids
-                            )
+                            # Auto-decision: show status marker
+                            if not msg:
+                                msg = chat.add_message(
+                                    "",  # Will be built by rebuild_tool_display
+                                    msg_type=ToolCallMsg(),
+                                    harness_message_ids=current_harness_ids
+                                )
+                                self.active_tool_messages[tool_id] = msg
+
+                            msg = ensure_tool_message_type(msg, ToolCallMsg())
+                            self.active_tool_messages[tool_id] = msg
                             msg.tool_name = chunk.tool_name
                             msg.tool_args = chunk.tool_args
                             msg.tool_status = "auto-approved"
                             msg.rebuild_tool_display()
                         else:
                             # Need user permission - show request
-                            # Extract command for cleaner display
-                            try:
-                                import json
-                                args_dict = json.loads(chunk.tool_args)
-                                if 'command' in args_dict:
-                                    command = args_dict['command']
-                                elif len(args_dict) == 1:
-                                    command = list(args_dict.values())[0]
-                                else:
-                                    command = json.dumps(args_dict)
-                            except:
-                                command = chunk.tool_args
-                            
-                            msg_text = f"{theme.WARNING}> {chunk.tool_name}{theme.reset()}\n{theme.MUTED}cmd:{theme.reset()} {command}"
-                            msg = chat.add_message(
-                                msg_text,
-                                msg_type=AskPermissionMsg(),
-                                harness_message_ids=current_harness_ids
-                            )
+                            if not msg:
+                                msg = chat.add_message(
+                                    "",
+                                    msg_type=AskPermissionMsg(),
+                                    harness_message_ids=current_harness_ids
+                                )
+                                self.active_tool_messages[tool_id] = msg
+
+                            msg = ensure_tool_message_type(msg, AskPermissionMsg())
+                            self.active_tool_messages[tool_id] = msg
+                            msg.tool_name = chunk.tool_name
+                            msg.tool_args = chunk.tool_args
+                            msg.tool_status = None
+                            msg.rebuild_tool_display()
+
                             # Auto-focus for user action
-                            msg_index = len(chat.messages) - 1
-                            chat.set_focused_message(msg_index)
+                            try:
+                                msg_index = chat.messages.index(msg)
+                                chat.set_focused_message(msg_index)
+                            except ValueError:
+                                pass
                             self._last_focus_id = "history"
                             self._update_focus_states()
                             
@@ -233,18 +280,15 @@ class chatTUI(ChatActionHandlers):
                             
                             # Store prompt for handler
                             self.pending_permission_prompt = chunk.permission_prompt
-                        
-                        self.active_tool_messages[tool_id] = msg
+
                         current_msg = msg
                         current_msg_type = type(msg.type)
                     
                     elif chunk.status == chunks.ToolStatus.APPROVED:
                         msg = self.active_tool_messages.get(tool_id)
                         if msg:
-                            # Change message type from permission to tool
-                            msg.type = ToolCallMsg()
-                            msg.title = "tool"
-                            msg.box.title = "tool"
+                            msg = ensure_tool_message_type(msg, ToolCallMsg())
+                            self.active_tool_messages[tool_id] = msg
                             # Update status
                             msg.tool_name = chunk.tool_name
                             msg.tool_args = chunk.tool_args
@@ -254,10 +298,7 @@ class chatTUI(ChatActionHandlers):
                     elif chunk.status == chunks.ToolStatus.DENIED:
                         msg = self.active_tool_messages.get(tool_id)
                         if msg:
-                            # Change to tool message type
-                            msg.type = ToolCallMsg()
-                            msg.title = "tool"
-                            msg.box.title = "tool"
+                            msg = ensure_tool_message_type(msg, ToolCallMsg())
                             msg.tool_name = chunk.tool_name
                             msg.tool_args = chunk.tool_args
                             msg.tool_status = "denied"
@@ -270,11 +311,8 @@ class chatTUI(ChatActionHandlers):
                     elif chunk.status == chunks.ToolStatus.EXECUTING:
                         msg = self.active_tool_messages.get(tool_id)
                         if msg:
-                            # Ensure message type is tool (in case we skipped APPROVED for auto-approved)
-                            if not isinstance(msg.type, ToolCallMsg):
-                                msg.type = ToolCallMsg()
-                                msg.title = "tool"
-                                msg.box.title = "tool"
+                            msg = ensure_tool_message_type(msg, ToolCallMsg())
+                            self.active_tool_messages[tool_id] = msg
                             # Update status to show executing
                             msg.tool_status = "approved | executing"
                             msg.rebuild_tool_display()
@@ -282,11 +320,7 @@ class chatTUI(ChatActionHandlers):
                     elif chunk.status == chunks.ToolStatus.COMPLETED:
                         msg = self.active_tool_messages.get(tool_id)
                         if msg:
-                            # Ensure message type is tool
-                            if not isinstance(msg.type, ToolCallMsg):
-                                msg.type = ToolCallMsg()
-                                msg.title = "tool"
-                                msg.box.title = "tool"
+                            msg = ensure_tool_message_type(msg, ToolCallMsg())
                             # Store output and update to completed
                             msg.tool_status = "approved | completed"
                             msg.tool_output = chunk.result or ""
@@ -297,10 +331,7 @@ class chatTUI(ChatActionHandlers):
                     elif chunk.status == chunks.ToolStatus.ERROR:
                         msg = self.active_tool_messages.get(tool_id)
                         if msg:
-                            # Change to tool message type
-                            msg.type = ToolCallMsg()
-                            msg.title = "tool"
-                            msg.box.title = "tool"
+                            msg = ensure_tool_message_type(msg, ToolCallMsg())
                             msg.tool_status = "error"
                             msg.tool_output = chunk.error
                             msg.show_output = True  # Always show errors

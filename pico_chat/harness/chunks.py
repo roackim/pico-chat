@@ -62,6 +62,14 @@ class ToolStatusChange(Chunk):
 
 
 @dataclass
+class ToolDraft(Chunk):
+    """Streaming draft update for a tool call being constructed by the model."""
+    tool_call_id: str
+    tool_name: str
+    tool_args: str
+
+
+@dataclass
 class GenerationMetrics(Chunk):
     """Live generation metrics for performance monitoring."""
     tokens: int
