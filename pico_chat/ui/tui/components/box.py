@@ -37,11 +37,24 @@ class Box(Component):
             self.mark_changed()  # Focus changes appearance
 
     def set_layout(self, x: int, y: int, width: int, height: int):
-        super().set_layout(x, y, width, height)
-        self.child.set_layout(x + 1, y + 1, width - 2, height - 2)
+        old_size = (self.width, self.height)
+        size_changed = old_size != (width, height)
+
+        if size_changed:
+            super().set_layout(x, y, width, height)
+            self.child.set_layout(x + 1, y + 1, width - 2, height - 2)
+        else:
+            self.x = x
+            self.y = y
+            self.width = width
+            self.height = height
+            self.child.x = x + 1
+            self.child.y = y + 1
+            self.child.width = width - 2
+            self.child.height = height - 2
         
         # Initialize or resize SubBuffer if size changed
-        if (width, height) != self._last_size:
+        if size_changed:
             if self.subbuffer is None:
                 self.subbuffer = SubBuffer(width, height)
             elif width != self.subbuffer.width or height != self.subbuffer.height:
