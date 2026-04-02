@@ -23,6 +23,9 @@ class ToolError(Exception):
 
 class FileTools:
     """File operation tools (read, write, patch)"""
+
+    MAX_PATCH_REPLACEMENT_CHARS = 100_000
+    MAX_PATCH_LINE_DELTA = 500
     
     def __init__(
         self,
@@ -194,6 +197,11 @@ class FileTools:
                 patch = parse_patch(patch_content)
             except PatchParseError as e:
                 raise ToolError(f"Invalid patch format: {e}")
+
+            if path and path != patch.filename:
+                raise ToolError(
+                    f"Invalid patch arguments: path '{path}' does not match patch target '{patch.filename}'"
+                )
         else:
             if not path:
                 raise ToolError("Invalid patch arguments: missing 'path'")
@@ -208,6 +216,21 @@ class FileTools:
                 "=======\n"
                 f"{replace}\n"
                 ">>>>>>> REPLACE"
+            )
+
+        # Guardrails: replacement size and line delta constraints
+        replacement_chars = len(patch.replace_text)
+        if replacement_chars > self.MAX_PATCH_REPLACEMENT_CHARS:
+            raise ToolError(
+                f"Patch rejected: replacement too large ({replacement_chars} chars > {self.MAX_PATCH_REPLACEMENT_CHARS})"
+            )
+
+        search_line_count = patch.search_text.count('\n') + 1 if patch.search_text else 0
+        replace_line_count = patch.replace_text.count('\n') + 1 if patch.replace_text else 0
+        line_delta = abs(replace_line_count - search_line_count)
+        if line_delta > self.MAX_PATCH_LINE_DELTA:
+            raise ToolError(
+                f"Patch rejected: line delta too large ({line_delta} lines > {self.MAX_PATCH_LINE_DELTA})"
             )
         
         # Check permissions before reading

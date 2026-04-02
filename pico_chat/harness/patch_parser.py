@@ -11,7 +11,8 @@ Implements Aider-style search/replace blocks:
     >>>>>>> REPLACE
 """
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Tuple, Callable
+import re
 
 
 @dataclass
@@ -125,27 +126,86 @@ def apply_patch(file_content: str, patch: PatchBlock) -> Tuple[str, str]:
         >>> "return 42" in new
         True
     """
-    # Look for exact match
-    if patch.search_text not in file_content:
-        # Try to find similar content for helpful error message
-        search_lines = patch.search_text.split('\n')
-        if search_lines:
-            first_line = search_lines[0]
-            if first_line in file_content:
-                # Find line number
-                for i, line in enumerate(file_content.split('\n'), start=1):
-                    if first_line in line:
-                        return file_content, f"[ERROR] Search block not found. Similar content at line {i}: '{line.strip()}'"
-        
-        return file_content, "[ERROR] Search block not found in file. Ensure exact match including whitespace."
-    
-    # Count occurrences
-    occurrences = file_content.count(patch.search_text)
-    
-    if occurrences > 1:
-        return file_content, f"[ERROR] Search block matches {occurrences} locations. Add more context to make it unique."
-    
-    # Apply replacement
-    new_content = file_content.replace(patch.search_text, patch.replace_text)
-    
-    return new_content, f"[OK] Applied patch to {patch.filename} (1 replacement)"
+    def _exact_positions(content: str, needle: str) -> list[tuple[int, int]]:
+        if not needle:
+            return []
+        positions: list[tuple[int, int]] = []
+        start = 0
+        while True:
+            idx = content.find(needle, start)
+            if idx == -1:
+                break
+            positions.append((idx, idx + len(needle)))
+            start = idx + 1
+        return positions
+
+    def _line_offsets(text: str) -> list[int]:
+        offsets = [0]
+        for i, ch in enumerate(text):
+            if ch == '\n':
+                offsets.append(i + 1)
+        return offsets
+
+    def _line_spans(
+        content: str,
+        search_text: str,
+        normalizer: Callable[[str], str],
+    ) -> list[tuple[int, int]]:
+        content_lines = content.split('\n')
+        search_lines = search_text.split('\n')
+        if not search_lines:
+            return []
+
+        n = len(search_lines)
+        if n > len(content_lines):
+            return []
+
+        normalized_search = [normalizer(line) for line in search_lines]
+        offsets = _line_offsets(content)
+        spans: list[tuple[int, int]] = []
+
+        for i in range(0, len(content_lines) - n + 1):
+            window = content_lines[i:i + n]
+            normalized_window = [normalizer(line) for line in window]
+            if normalized_window == normalized_search:
+                start_idx = offsets[i]
+                end_line = i + n
+                end_idx = offsets[end_line] if end_line < len(offsets) else len(content)
+                spans.append((start_idx, end_idx))
+        return spans
+
+    def _norm_whitespace(line: str) -> str:
+        return re.sub(r'\s+', ' ', line).strip()
+
+    def _norm_indentation(line: str) -> str:
+        return line.lstrip().rstrip()
+
+    modes: list[tuple[str, list[tuple[int, int]]]] = [
+        ("exact", _exact_positions(file_content, patch.search_text)),
+        ("whitespace-normalized", _line_spans(file_content, patch.search_text, _norm_whitespace)),
+        ("indentation-normalized", _line_spans(file_content, patch.search_text, _norm_indentation)),
+    ]
+
+    for mode, spans in modes:
+        if not spans:
+            continue
+
+        if len(spans) > 1:
+            return file_content, (
+                f"[ERROR] Search block is ambiguous in {mode} mode "
+                f"({len(spans)} matches). Add more unique context."
+            )
+
+        start_idx, end_idx = spans[0]
+        new_content = file_content[:start_idx] + patch.replace_text + file_content[end_idx:]
+        return new_content, f"[OK] Applied patch to {patch.filename} (1 replacement, mode={mode})"
+
+    search_lines = patch.search_text.split('\n')
+    if search_lines:
+        first_line = search_lines[0].strip()
+        if first_line:
+            for i, line in enumerate(file_content.split('\n'), start=1):
+                if first_line in line:
+                    return file_content, f"[ERROR] Search block not found. Similar content at line {i}: '{line.strip()}'"
+
+    return file_content, "[ERROR] Search block not found in file. Tried exact, whitespace-normalized, indentation-normalized."
