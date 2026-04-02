@@ -13,6 +13,8 @@ Instructions:
 - Break complex tasks into smaller, logical steps.
 - Follow existing codebase styles and best practices.
 - State clearly if you are uncertain or missing information.
+- For edits to existing files, prefer the 'patch' tool with path/search/replace.
+- Use 'write' mainly for creating new files or complete file rewrites.
 
 Memory Usage:
 - Use 'memorize' as a scratchpad for the current conversation session.

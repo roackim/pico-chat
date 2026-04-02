@@ -156,12 +156,21 @@ class FileTools:
         except Exception as e:
             raise ToolError(f"Error writing file: {e}")
     
-    def patch(self, patch_content: str) -> str:
+    def patch(
+        self,
+        patch_content: str | None = None,
+        path: str | None = None,
+        search: str | None = None,
+        replace: str | None = None,
+    ) -> str:
         """
-        Apply replace-block patch to file.
+        Apply patch to file.
         
         Args:
-            patch_content: Patch in replace-block format
+            patch_content: Legacy patch in replace-block format
+            path: Target file path (preferred API)
+            search: Exact text to replace (preferred API)
+            replace: Replacement text (preferred API)
             
         Returns:
             Success or error message
@@ -179,11 +188,27 @@ class FileTools:
             ... ''')
             '[OK] Applied patch to app.py (1 replacement)'
         """
-        # Parse patch
-        try:
-            patch = parse_patch(patch_content)
-        except PatchParseError as e:
-            raise ToolError(f"Invalid patch format: {e}")
+        # Parse patch (legacy string format or structured fields)
+        if patch_content:
+            try:
+                patch = parse_patch(patch_content)
+            except PatchParseError as e:
+                raise ToolError(f"Invalid patch format: {e}")
+        else:
+            if not path:
+                raise ToolError("Invalid patch arguments: missing 'path'")
+            if search is None:
+                raise ToolError("Invalid patch arguments: missing 'search'")
+            if replace is None:
+                raise ToolError("Invalid patch arguments: missing 'replace'")
+            patch = parse_patch(
+                f"{path}\n"
+                "<<<<<<< SEARCH\n"
+                f"{search}\n"
+                "=======\n"
+                f"{replace}\n"
+                ">>>>>>> REPLACE"
+            )
         
         # Check permissions before reading
         target, is_inside = self._validate_path(patch.filename)
@@ -335,9 +360,20 @@ class MinimalToolset:
         """Write file content"""
         return self.file_tools.write(path, content)
     
-    def patch(self, patch_content: str) -> str:
-        """Apply replace-block patch"""
-        return self.file_tools.patch(patch_content)
+    def patch(
+        self,
+        patch_content: str | None = None,
+        path: str | None = None,
+        search: str | None = None,
+        replace: str | None = None,
+    ) -> str:
+        """Apply patch (preferred: path/search/replace, legacy: patch_content)."""
+        return self.file_tools.patch(
+            patch_content=patch_content,
+            path=path,
+            search=search,
+            replace=replace,
+        )
     
     def run(self, command: str, timeout: int = 30) -> str:
         """Execute shell command"""

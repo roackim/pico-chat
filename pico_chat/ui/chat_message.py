@@ -247,13 +247,21 @@ class Message:
             import json
             try:
                 args_dict = json.loads(self.tool_args)
-                if self.tool_name == "patch" and isinstance(args_dict, dict) and "patch_content" in args_dict:
-                    patch_content = args_dict.get("patch_content")
-                    if isinstance(patch_content, str) and patch_content:
-                        patch_lines = len(patch_content.splitlines())
+                if self.tool_name == "patch" and isinstance(args_dict, dict):
+                    patch_lines = 0
+                    path = args_dict.get("path")
+                    if "patch_content" in args_dict:
+                        patch_content = args_dict.get("patch_content")
+                        if isinstance(patch_content, str) and patch_content:
+                            patch_lines = len(patch_content.splitlines())
+                    elif "replace" in args_dict:
+                        replace_content = args_dict.get("replace")
+                        if isinstance(replace_content, str) and replace_content:
+                            patch_lines = len(replace_content.splitlines())
+                    if path:
+                        lines.append(f"{theme.MUTED}cmd:{theme.reset()} {path} ({patch_lines} lines)")
                     else:
-                        patch_lines = 0
-                    lines.append(f"{theme.MUTED}cmd:{theme.reset()} {patch_lines} lines")
+                        lines.append(f"{theme.MUTED}cmd:{theme.reset()} {patch_lines} lines")
                 elif len(args_dict) == 1:
                     # Single arg - show the value with cmd: prefix
                     key, value = list(args_dict.items())[0]

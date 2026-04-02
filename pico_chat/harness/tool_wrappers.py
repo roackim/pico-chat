@@ -102,31 +102,38 @@ class PatchTool(ToolWrapper):
         super().__init__(
             name="patch",
             description=(
-                "Apply a replace-block patch to modify an existing file. "
-                "Use the format:\n"
-                "filename.py\n"
-                "<<<<<<< SEARCH\n"
-                "exact code to find\n"
-                "=======\n"
-                "replacement code\n"
-                ">>>>>>> REPLACE"
+                "Modify an existing file by replacing one exact code block. "
+                "Preferred format: provide path + search + replace. "
+                "Use write only for creating new files or full rewrites."
             ),
             parameters={
                 "type": "object",
                 "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "File path relative to workspace"
+                    },
+                    "search": {
+                        "type": "string",
+                        "description": "Exact existing text block to replace (include enough context to be unique)"
+                    },
+                    "replace": {
+                        "type": "string",
+                        "description": "Replacement text block"
+                    },
                     "patch_content": {
                         "type": "string",
-                        "description": "Patch in replace-block format with filename, SEARCH marker, divider, and REPLACE marker"
-                    }
+                        "description": "Legacy replace-block format (backward compatible)"
+                    },
                 },
-                "required": ["patch_content"]
+                "required": ["path", "search", "replace"]
             }
         )
         self.toolset = toolset
     
-    def execute(self, patch_content: str) -> str:
+    def execute(self, path: str = None, search: str = None, replace: str = None, patch_content: str = None) -> str:
         try:
-            return self.toolset.patch(patch_content)
+            return self.toolset.patch(path=path, search=search, replace=replace, patch_content=patch_content)
         except ToolError as e:
             return str(e)
 

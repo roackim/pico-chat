@@ -131,8 +131,17 @@ class Harness:
                 return permissions.get_write_permission(False)
         
         elif tool_name == "patch":
-            # Patch permission checked via patch content parsing
-            return permissions.get_patch_permission(True)  # Default to inside repo
+            path = args.get("path", "")
+            from pathlib import Path
+            try:
+                if Path(path).is_absolute():
+                    target = Path(path).resolve()
+                else:
+                    target = (Path(self.workspace) / path).resolve()
+                target.relative_to(Path(self.workspace).resolve())
+                return permissions.get_patch_permission(True)
+            except Exception:
+                return permissions.get_patch_permission(False)
         
         elif tool_name == "run":
             # Run command permission - for now return ask if configured
@@ -158,7 +167,8 @@ class Harness:
         elif tool_name == "write":
             return f"Allow writing to file: {args.get('path', 'unknown')}?"
         elif tool_name == "patch":
-            return f"Allow patching file?"
+            path = args.get('path', 'unknown')
+            return f"Allow patching file: {path}?"
         elif tool_name == "run":
             command = args.get('command', 'unknown')
             # Truncate long commands
