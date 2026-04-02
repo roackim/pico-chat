@@ -545,6 +545,13 @@ class chatTUI(ChatActionHandlers):
             self.on_command_submit(clean_text)
             return
 
+        if self.pending_permission_prompt:
+            self.chat_history_panel.add_message(
+                "Permission required for pending tool call. Use [a] allow or [x] deny first. Commands like /status are still available.",
+                msg_type=SysMsg()
+            )
+            return
+
         if clean_text.lower() in ["exit", "quit", "q"]:
             if self.compositor:
                 self.compositor.running = False
