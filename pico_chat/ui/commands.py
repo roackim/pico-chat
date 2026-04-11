@@ -53,6 +53,62 @@ class ClearCommand(Command):
             ui.agent.clear_history()
         ui.chat_history_panel.add_message("Conversation cleared.", msg_type=SysMsg())
 
+class CompactCommand(Command):
+    def __init__(self):
+        super().__init__("compact", "Compact context with an LLM summary marker")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if args:
+            ui.chat_history_panel.add_message(
+                "Usage: /compact",
+                msg_type=SysMsgError()
+            )
+            return
+
+        if not hasattr(ui.agent, 'compact_history'):
+            ui.chat_history_panel.add_message(
+                "Compaction is not supported by this agent.",
+                msg_type=SysMsgError()
+            )
+            return
+
+        placeholder = ui.chat_history_panel.add_message(
+            "Compacting history...",
+            msg_type=SysMsg(),
+            title="compact",
+        )
+
+        try:
+            result = await ui.agent.compact_history()
+
+            if not result.get("ok"):
+                compact_msg = ui.chat_history_panel.new_message(
+                    result.get("message", "Compaction skipped."),
+                    msg_type=SysMsg(),
+                    title="compact",
+                )
+                ui.chat_history_panel.replace_message(placeholder, compact_msg)
+                return
+
+            compact_msg = ui.chat_history_panel.new_message(
+                (
+                    f"Compaction complete: {result['compacted_messages']} messages summarized\n"
+                    f"Inserted marker: {result['message_id']}\n"
+                    f"Summary size: {result['summary_chars']:,} chars"
+                ),
+                msg_type=SysMsg(),
+                title="compact",
+            )
+            ui.chat_history_panel.replace_message(placeholder, compact_msg)
+
+        except Exception as e:
+            error_msg = ui.chat_history_panel.new_message(
+                f"Compaction failed: {e}",
+                msg_type=SysMsgError(),
+                title="compact",
+            )
+            ui.chat_history_panel.replace_message(placeholder, error_msg)
+
 class ExitCommand(Command):
     def __init__(self):
         super().__init__("exit", "Close the application")
@@ -495,6 +551,7 @@ class DebugCommand(Command):
 COMMANDS: Dict[str, Command] = {
     "help":     HelpCommand(),
     "clear":    ClearCommand(),
+    "compact":  CompactCommand(),
     "exit":     ExitCommand(),
     "stop":     StopCommand(),
     "status":   StatusCommand(),

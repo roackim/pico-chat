@@ -24,6 +24,8 @@ THINKING_TAGS = [
     ("<thinking>", "</thinking>"),
 ]
 
+COMPACTION_MARKER_PREFIX = "[COMPACTION_SUMMARY]"
+
 class Harness:
     def __init__(self, workspace_path: str | None = None):
         self.debug_stream = get_debug_stream()
@@ -57,6 +59,27 @@ class Harness:
         # Initialize LLM server
         self.server: LLMServer = create_server(server_config)
         self.debug_stream.log("INIT", f"Server initialized: {server_config.name} ({server_config.type}) at {server_config.base_url}")
+
+    def _is_compaction_message(self, msg: Dict[str, Any]) -> bool:
+        """Return True if message is a compaction marker message."""
+        if msg.get("role") != "assistant":
+            return False
+        content = msg.get("content")
+        return isinstance(content, str) and content.startswith(COMPACTION_MARKER_PREFIX)
+
+    def _get_last_compaction_index(self) -> Optional[int]:
+        """Get index of the most recent compaction marker, if any."""
+        for i in range(len(self.history) - 1, -1, -1):
+            if self._is_compaction_message(self.history[i]):
+                return i
+        return None
+
+    def _get_effective_history(self) -> List[Dict[str, Any]]:
+        """Return history slice sent to the LLM, starting from latest compaction marker."""
+        last_compaction_idx = self._get_last_compaction_index()
+        if last_compaction_idx is None:
+            return self.history
+        return self.history[last_compaction_idx:]
 
     def _add_message_to_history(self, role: str, content: Optional[str], **kwargs) -> str:
         """Add a message to history with a unique ID.
@@ -275,8 +298,8 @@ class Harness:
         """
         from pico_chat.harness.token_estimation import estimate_messages_tokens, estimate_tokens
         
-        # Estimate tokens for all history messages
-        current_tokens = estimate_messages_tokens(self.history)
+        # Estimate tokens for effective history (from latest compaction marker onward)
+        current_tokens = estimate_messages_tokens(self._get_effective_history())
         
         # Add system prompt estimation (system message is added during _build_messages)
         # Rough estimate: project context + base system prompt + memory
@@ -292,6 +315,83 @@ class Harness:
         
         percentage = (current_tokens / max_tokens) * 100 if max_tokens > 0 else 0
         return current_tokens, max_tokens, percentage
+
+    async def compact_history(self) -> Dict[str, Any]:
+        """Summarize effective history with one LLM call and insert compaction marker.
+
+        Returns:
+            Summary stats describing the compaction operation.
+        """
+        effective_history = list(self._get_effective_history())
+        if not effective_history:
+            return {
+                "ok": False,
+                "reason": "empty",
+                "message": "No messages to compact.",
+            }
+
+        # Avoid compacting if the effective history is already only one compaction marker.
+        if len(effective_history) == 1 and self._is_compaction_message(effective_history[0]):
+            return {
+                "ok": False,
+                "reason": "already_compacted",
+                "message": "History is already compacted.",
+            }
+
+        model_name = await self.server.get_model_name()
+        context_window = await self.server.get_context_window()
+        context_window_str = f"{context_window // 1024}k" if isinstance(context_window, int) else str(context_window)
+
+        system_msg = get_system_message(
+            project_context=self.project_context,
+            model_name=model_name,
+            context_window=context_window_str
+        )
+
+        summarize_user = {
+            "role": "user",
+            "content": (
+                "Summarize the following conversation for future continuation. "
+                "Return concise plain text with these sections in order: "
+                "Decisions, Constraints, Open Tasks, Important Artifacts, Failed Attempts. "
+                "Be factual and avoid speculation. "
+                "Keep it compact and preserve critical technical details.\n\n"
+                f"Conversation JSON:\n{json.dumps(effective_history, ensure_ascii=False)}"
+            ),
+        }
+
+        summary_text = ""
+        async for response in self.server.create_completion(
+            messages=[system_msg, summarize_user],
+            tools=None,
+            stream=False,
+        ):
+            if not response.choices:
+                continue
+            message = response.choices[0].message
+            content = getattr(message, "content", None)
+            if content:
+                summary_text = content.strip()
+                break
+
+        if not summary_text:
+            raise RuntimeError("Compaction failed: model returned empty summary")
+
+        compact_message = (
+            f"{COMPACTION_MARKER_PREFIX}\n"
+            f"compacted_messages={len(effective_history)}\n\n"
+            f"{summary_text}"
+        )
+
+        compaction_id = self._add_message_to_history("assistant", compact_message)
+        self.debug_stream.log("COMPACT", f"Inserted compaction marker {compaction_id} over {len(effective_history)} messages")
+
+        return {
+            "ok": True,
+            "message_id": compaction_id,
+            "compacted_messages": len(effective_history),
+            "summary_chars": len(summary_text),
+        }
 
     async def check_connection(self) -> bool:
         """Check if the LLM server is reachable."""
@@ -336,7 +436,7 @@ class Harness:
             system_msg["content"] += f"\n\nMEMORY:{memory_json}"
         
         messages = [system_msg]
-        messages.extend(self.history)
+        messages.extend(self._get_effective_history())
         return messages
 
     async def get_current_context(self) -> List[Dict[str, Any]]:
@@ -371,7 +471,7 @@ class Harness:
             system_msg["content"] += f"\n\nMEMORY:{memory_json}"
         
         messages = [system_msg]
-        messages.extend(self.history)
+        messages.extend(self._get_effective_history())
         return messages
 
     async def _stream_llm_response(self, messages: List[Dict[str, Any]]) -> AsyncGenerator[chunks.Chunk, None]:
