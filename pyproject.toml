@@ -7,6 +7,7 @@ authors = [{name = "Joackim Orciere", email = "joackim.orciere@proton.me"}]
 dependencies = [
     "openai",
     "toml",
+    "httpx",  # For OpenRouter model fetching and direct HTTP calls
     
     # Pinned dependencies for stability and avoiding supply-chain issues
     # > Theses packages do not have dependencies of their own so we can safely pin them 

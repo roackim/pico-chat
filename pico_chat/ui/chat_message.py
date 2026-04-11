@@ -83,6 +83,9 @@ class Message:
         self.metrics_ttft_ms: Optional[float] = None
         self.metrics_duration_ms: Optional[float] = None
         
+        # Command error context (for edit action on failed commands)
+        self.command_text: Optional[str] = None
+        
         self.box = Box(
             self.component,
             parent_msg=self

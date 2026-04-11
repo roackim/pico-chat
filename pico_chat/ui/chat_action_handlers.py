@@ -67,7 +67,7 @@ class ChatActionHandlers:
             self.chat_history_panel.add_message(f"Copy failed: {e}", msg_type=SysMsgError())
     
     def handle_edit_action(self, message):
-        """Handle edit action for a focused message (user messages only)."""
+        """Handle edit action for a focused message (user messages or command errors)."""
         logger = logging.getLogger("tui")
         logger.info("Edit action triggered")
         
@@ -78,7 +78,9 @@ class ChatActionHandlers:
             self.editing_message_index = None
         
         # Populate input field with message content
-        self.input_component.update(message.base_text)
+        # For command errors, use the original command text if available
+        text_to_edit = message.command_text if message.command_text else message.base_text
+        self.input_component.update(text_to_edit)
         
         # Switch focus to input
         self._last_focus_id = "input"

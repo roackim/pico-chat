@@ -12,6 +12,7 @@ from .cursor_renderer import CursorRenderer
 from .command_completion import CommandCompletion
 from .subcommand_completion import SubcommandCompletion
 from .context_completion import ContextCompletion
+from .server_completion import ServerCompletion
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.terminal import MouseEvent
 from pico_chat.ui.tui.layout_utils import display_width
@@ -55,6 +56,8 @@ class InputComponent(Component):
         self.subcommand_callback: Optional[Callable[[str], List[str]]] = None
         self.context_completion: Optional[ContextCompletion] = None
         self.context_items_callback: Optional[Callable[[], List[str]]] = None
+        self.server_completion: Optional[ServerCompletion] = None
+        self.server_names_callback: Optional[Callable[[], List[str]]] = None
     
     @property
     def on_submit(self):
@@ -101,6 +104,10 @@ class InputComponent(Component):
         """Initialize context (@file) completion system."""
         self.context_items_callback = get_items_callback
     
+    def setup_servers(self, get_servers_callback: Callable[[], List[str]]):
+        """Initialize server name completion system."""
+        self.server_names_callback = get_servers_callback
+    
     def _ensure_command_menu(self):
         """Lazy-create command menu and completion system on first use."""
         if self.command_completion is None and self.command_list:
@@ -133,6 +140,17 @@ class InputComponent(Component):
                 content_color=self.content_color
             )
             self.context_completion = ContextCompletion(menu, self.context_items_callback)
+    
+    def _ensure_server_menu(self):
+        """Lazy-create server menu and completion system on first use."""
+        if self.server_completion is None and self.server_names_callback:
+            compositor = self.compositor_ref if hasattr(self, 'compositor_ref') else None
+            menu = SelectionMenu(
+                compositor=compositor,
+                frame_color=self.content_color,
+                content_color=self.content_color
+            )
+            self.server_completion = ServerCompletion(menu, self.server_names_callback)
 
     # def setup_menus(self, commands: List[str], get_context_items: Optional[Callable[[], List[str]]] = None,
                     # get_subcommands: Optional[Callable[[str], List[str]]] = None):
@@ -162,6 +180,8 @@ class InputComponent(Component):
                     self.subcommand_completion.hide()
                 if self.context_completion:
                     self.context_completion.hide()
+                if self.server_completion:
+                    self.server_completion.hide()
                 self._position_command_menu()
                 return
         
@@ -171,13 +191,26 @@ class InputComponent(Component):
             self.subcommand_completion.update(self.buffer.text, self.buffer.cursor_pos)
             
             if self.subcommand_completion.is_active:
-                # Subcommand menu is active - hide context and position
+                # Subcommand menu is active - hide others and position
                 if self.context_completion:
                     self.context_completion.hide()
+                if self.server_completion:
+                    self.server_completion.hide()
                 self._position_subcommand_menu()
                 return
         
-        # Try context completion if no command/subcommand menu active
+        # Try server completion (more specific than context)
+        if self.server_names_callback:
+            self._ensure_server_menu()
+            self.server_completion.update(self.buffer.text, self.buffer.cursor_pos)
+            
+            if self.server_completion.is_active:
+                if self.context_completion:
+                    self.context_completion.hide()
+                self._position_server_menu()
+                return
+        
+        # Try context completion if no other menu active
         if self.context_items_callback:
             self._ensure_context_menu()
             self.context_completion.update(self.buffer.text, self.buffer.cursor_pos)
@@ -213,6 +246,29 @@ class InputComponent(Component):
             trigger_pos = leading_ws
         
         self._position_menu_at(self.subcommand_completion.menu, trigger_pos)
+    
+    def _position_server_menu(self):
+        """Position server menu at the server name location."""
+        if not self.server_completion or not self.server_completion.is_active:
+            return
+        
+        text = self.buffer.text.lstrip()
+        leading_ws = len(self.buffer.text) - len(text)
+        
+        # Find position after '/server use ' or '/server remove '
+        if text.startswith('/server '):
+            parts = text.split(' ', 2)
+            if len(parts) >= 2:
+                # Position after the subcommand
+                pos_after_server = text.find(' ') + 1
+                pos_after_subcommand = text.find(' ', pos_after_server) + 1 if ' ' in text[pos_after_server:] else pos_after_server
+                trigger_pos = leading_ws + pos_after_subcommand
+            else:
+                trigger_pos = leading_ws
+        else:
+            trigger_pos = leading_ws
+        
+        self._position_menu_at(self.server_completion.menu, trigger_pos)
     
     def _position_context_menu(self):
         """Position context menu at the '@' character."""
@@ -317,7 +373,71 @@ class InputComponent(Component):
         
         # Note: Cursor is rendered separately via render_cursor() called after SubBuffer blit
         
+        # Render parameter hints in grey after cursor
+        if self.focused and not self.has_active_completion():
+            hint = self._get_parameter_hint()
+            if hint:
+                # Get cursor screen position
+                cursor_row, cursor_col = self.coord_mapper.get_cursor_coords(self.buffer.text, self.buffer.cursor_pos)
+                # Adjust for scroll
+                screen_row = cursor_row - scroll_y
+                
+                # Only show hint if cursor is visible
+                if 0 <= screen_row < self.height:
+                    hint_x = self.x + cursor_col
+                    hint_y = self.y + screen_row
+                    
+                    # Show hint in muted color (limited to available width)
+                    hint_max_width = max(0, self.width - cursor_col)
+                    buffer.write_str(hint_x, hint_y, hint, fg=theme.MUTED, bg=self.bg, max_width=hint_max_width)
+        
         # Menu is rendered by compositor as overlay (not here)
+    
+    def _get_parameter_hint(self) -> str:
+        """Get parameter hint text to show in grey after cursor."""
+        text = self.buffer.text.lstrip()
+        
+        # Only show hints for commands
+        if not text.startswith('/'):
+            return ""
+        
+        # Parse command structure (strip trailing spaces to handle "/server use " case)
+        parts = [p for p in text.split(' ') if p]  # Filter out empty parts from trailing spaces
+        
+        # /server add hints
+        if len(parts) >= 2 and parts[0] == '/server' and parts[1] == 'add':
+            if len(parts) == 2:
+                return " openrouter|llamacpp"
+            elif len(parts) == 3:
+                server_type = parts[2]
+                if server_type == 'openrouter':
+                    return " MODEL_ID [NAME] [PROVIDER]"
+                elif server_type == 'llamacpp':
+                    return " URL [NAME]"
+            elif len(parts) == 4:
+                server_type = parts[2]
+                if server_type == 'openrouter':
+                    return " [NAME] [PROVIDER]"
+                elif server_type == 'llamacpp':
+                    return " [NAME]"
+            elif len(parts) == 5:
+                server_type = parts[2]
+                if server_type == 'openrouter':
+                    return " [PROVIDER]"
+        
+        # /server use/remove hints (though these have completion)
+        elif len(parts) >= 2 and parts[0] == '/server' and parts[1] in ('use', 'remove'):
+            if len(parts) == 2:
+                return " SERVER_NAME"
+        
+        # /set hints
+        elif len(parts) >= 2 and parts[0] == '/set':
+            if len(parts) == 2:
+                return " fps"
+            elif parts[1] == 'fps' and len(parts) == 2:
+                return " 30|60|120"
+        
+        return ""
     
     def render_cursor(self, buffer: Buffer):
         """Render cursor as an overlay (called outside SubBuffer caching).
@@ -342,6 +462,46 @@ class InputComponent(Component):
             parent_box=self.parent
         )
 
+    def _accept_completion(self, completion, add_space=False) -> bool:
+        """Generic completion acceptance handler.
+        
+        Args:
+            completion: The completion object to accept
+            add_space: Whether to add a trailing space after completion
+            
+        Returns:
+            True if completion was accepted, False otherwise
+        """
+        if isinstance(completion, ContextCompletion):
+            result = completion.accept_selection(self.buffer.text, self.buffer.cursor_pos)
+            if result:
+                new_text, new_cursor_pos = result
+                if add_space:
+                    self.buffer.text = new_text + " "
+                    self.buffer.cursor_pos = len(self.buffer.text)
+                else:
+                    self.buffer.text = new_text
+                    self.buffer.cursor_pos = new_cursor_pos
+                completion.hide()
+                if add_space:
+                    self._on_text_changed()
+                return True
+        else:
+            # Generic pattern for Command, Subcommand, and Server completions
+            completed = completion.accept_selection(self.buffer.text)
+            if completed:
+                if add_space:
+                    self.buffer.text = completed + " "
+                    self.buffer.cursor_pos = len(self.buffer.text)
+                else:
+                    self.buffer.text = completed
+                    self.buffer.cursor_pos = len(completed)
+                completion.hide()
+                if add_space:
+                    self._on_text_changed()
+                return True
+        return False
+
     def has_active_completion(self) -> bool:
         """Return True when any completion menu is currently active."""
         return any(
@@ -350,6 +510,7 @@ class InputComponent(Component):
                 self.command_completion,
                 self.subcommand_completion,
                 self.context_completion,
+                self.server_completion,
             )
         )
 
@@ -362,14 +523,17 @@ class InputComponent(Component):
         # Mark input for cursor animation
         self.cursor_renderer.mark_input()
         
-        # Determine which completion is active
+        # Determine which completion is active (generic iteration)
         active_completion = None
-        if self.command_completion and self.command_completion.is_active:
-            active_completion = self.command_completion
-        elif self.subcommand_completion and self.subcommand_completion.is_active:
-            active_completion = self.subcommand_completion
-        elif self.context_completion and self.context_completion.is_active:
-            active_completion = self.context_completion
+        for completion in [
+            self.command_completion,
+            self.subcommand_completion,
+            self.server_completion,
+            self.context_completion,
+        ]:
+            if completion and completion.is_active:
+                active_completion = completion
+                break
         
         # Handle ESC - cancel menu and remember the word
         if event == '\x1b':  # ESC key
@@ -387,59 +551,17 @@ class InputComponent(Component):
                 active_completion.navigate_down()
                 return True
         
-        # Handle Tab - accept selection
+        # Handle Tab - accept selection with trailing space
         if event == '\t':
-            if active_completion:
-                if isinstance(active_completion, CommandCompletion):
-                    completed = active_completion.accept_selection(self.buffer.text)
-                    if completed:
-                        self.buffer.text = completed + " "  # Add space after completion
-                        self.buffer.cursor_pos = len(self.buffer.text)
-                        active_completion.hide()
-                        self._on_text_changed()
-                        return True
-                elif isinstance(active_completion, SubcommandCompletion):
-                    completed = active_completion.accept_selection(self.buffer.text)
-                    if completed:
-                        self.buffer.text = completed + " "  # Add space after completion
-                        self.buffer.cursor_pos = len(self.buffer.text)
-                        active_completion.hide()
-                        self._on_text_changed()
-                        return True
-                elif isinstance(active_completion, ContextCompletion):
-                    result = active_completion.accept_selection(self.buffer.text, self.buffer.cursor_pos)
-                    if result:
-                        new_text, new_cursor_pos = result
-                        self.buffer.text = new_text + " "  # Add space after completion
-                        self.buffer.cursor_pos = len(self.buffer.text)
-                        active_completion.hide()
-                        self._on_text_changed()
-                        return True
+            if active_completion and self._accept_completion(active_completion, add_space=True):
+                return True
             return False  # Let other handlers try
         
-        # Handle Enter - accept selection + submit
+        # Handle Enter - accept selection + submit (no trailing space)
         if event in ('\r', '\n'):
             # Try completion first if menu is visible
             if active_completion:
-                if isinstance(active_completion, CommandCompletion):
-                    completed = active_completion.accept_selection(self.buffer.text)
-                    if completed:
-                        self.buffer.text = completed
-                        self.buffer.cursor_pos = len(completed)
-                        active_completion.hide()
-                elif isinstance(active_completion, SubcommandCompletion):
-                    completed = active_completion.accept_selection(self.buffer.text)
-                    if completed:
-                        self.buffer.text = completed
-                        self.buffer.cursor_pos = len(completed)
-                        active_completion.hide()
-                elif isinstance(active_completion, ContextCompletion):
-                    result = active_completion.accept_selection(self.buffer.text, self.buffer.cursor_pos)
-                    if result:
-                        new_text, new_cursor_pos = result
-                        self.buffer.text = new_text
-                        self.buffer.cursor_pos = new_cursor_pos
-                        active_completion.hide()
+                self._accept_completion(active_completion, add_space=False)
             
 
         

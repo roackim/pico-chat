@@ -54,6 +54,7 @@ class SysMsgError(SysMsg):
     title = "error"
     frame_color = "ERROR"
     content_color = "ERROR"
+    actions = [MsgAction.COPY, MsgAction.EDIT, MsgAction.DELETE]
 
 class SysMsgWarning(SysMsg):
     name = "warning"

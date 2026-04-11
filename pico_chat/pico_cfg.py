@@ -1,9 +1,15 @@
 import os
 import toml
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Dict, Any, Optional
 
 Permission = Literal["allow", "ask", "deny"]
+
+
+def get_config_path() -> Path:
+    """Get the path to the user's config file."""
+    config_dir = Path.home() / ".config" / "pico-chat"
+    return config_dir / "config.toml"
 
 
 class Config:
@@ -12,6 +18,8 @@ class Config:
     def __init__(self, config_path: str | None = None):
         """Initialize configuration, optionally loading from TOML."""
         # LLM settings
+        self.servers: Dict[str, Dict[str, Any]] = {}
+        self.active_server: str = "llamacpp_default"
 
         # Other settings
         self.render_thinking: bool = False
@@ -47,7 +55,91 @@ class Config:
         # Context building settings
         self.context_format: Literal["tree", "flat"] = "tree"  # Tree format saves tokens by avoiding path repetition
 
-        # TODO: Load config from file if exists
+        # Load config from file if path provided or default exists
+        if config_path:
+            self._load_from_file(Path(config_path))
+        else:
+            default_path = get_config_path()
+            if default_path.exists():
+                self._load_from_file(default_path)
+
+    def _load_from_file(self, path: Path):
+        """Load configuration from TOML file."""
+        try:
+            data = toml.load(path)
+            
+            # Load server configurations
+            if "servers" in data:
+                self.servers = data["servers"]
+            
+            # Load active server
+            if "settings" in data and "active_server" in data["settings"]:
+                self.active_server = data["settings"]["active_server"]
+            
+            # Load UI settings
+            if "ui" in data:
+                ui_data = data["ui"]
+                for key, value in ui_data.items():
+                    attr_name = f"ui_{key}"
+                    if hasattr(self, attr_name):
+                        setattr(self, attr_name, value)
+            
+            # Load other settings
+            if "settings" in data:
+                settings = data["settings"]
+                for key in ["render_thinking", "max_file_size", "max_search_results", 
+                           "command_timeout", "target_fps", "context_format"]:
+                    if key in settings:
+                        setattr(self, key, settings[key])
+                        
+        except Exception as e:
+            # Silently fail if config doesn't exist or is invalid
+            # This allows the app to run with defaults
+            pass
+
+    def save_server(self, name: str, server_config: Dict[str, Any], set_active: bool = True):
+        """
+        Save a server configuration to the config file.
+        
+        Args:
+            name: Server name/identifier
+            server_config: Server configuration dict
+            set_active: Whether to set this as the active server
+        """
+        config_path = get_config_path()
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Load existing config or create new
+        if config_path.exists():
+            data = toml.load(config_path)
+        else:
+            data = {"servers": {}, "settings": {}}
+        
+        # Update server config
+        if "servers" not in data:
+            data["servers"] = {}
+        data["servers"][name] = server_config
+        
+        # Update active server if requested
+        if set_active:
+            if "settings" not in data:
+                data["settings"] = {}
+            data["settings"]["active_server"] = name
+        
+        # Save back to file
+        with open(config_path, "w") as f:
+            toml.dump(data, f)
+        
+        # Update runtime config
+        self.servers[name] = server_config
+        if set_active:
+            self.active_server = name
+
+    def get_active_server_config(self) -> Optional[Dict[str, Any]]:
+        """Get the configuration for the currently active server."""
+        if self.active_server in self.servers:
+            return self.servers[self.active_server]
+        return None
 
 
     def get_permission(self, tool: str, is_inside_repo: bool = True) -> Permission:

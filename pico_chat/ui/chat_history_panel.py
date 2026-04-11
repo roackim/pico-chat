@@ -669,7 +669,7 @@ class ChatHistoryPanel(TextComponent):
             # Message not found, ignore
             pass
 
-    def add_message(self, message: str, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None, left_margin: int = 0, right_margin: int = 0, harness_message_ids: list = None) -> Message:
+    def add_message(self, message: str, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None, left_margin: int = 0, right_margin: int = 0, harness_message_ids: list = None, command_text: str = None) -> Message:
         """Add a message to chat history and update UI.
         
         Args:
@@ -680,11 +680,15 @@ class ChatHistoryPanel(TextComponent):
             left_margin: Optional override for the box left margin
             right_margin: Optional override for the box right margin
             harness_message_ids: List of harness message IDs this UI message references
+            command_text: Original command text (for edit action on command errors)
         
         Returns:
             The created Message object.
         """
-        return self.new_message(message, msg_type=msg_type, title=title, frame_color=frame_color, content_color=content_color, left_margin=left_margin, right_margin=right_margin, harness_message_ids=harness_message_ids, append=True)
+        msg = self.new_message(message, msg_type=msg_type, title=title, frame_color=frame_color, content_color=content_color, left_margin=left_margin, right_margin=right_margin, harness_message_ids=harness_message_ids, append=True)
+        if command_text:
+            msg.command_text = command_text
+        return msg
 
 
     def clear(self):

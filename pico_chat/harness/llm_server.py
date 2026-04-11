@@ -139,12 +139,25 @@ class LLMServer(ABC):
         
         for attempt in range(max_retries):
             try:
-                response = await self.client.chat.completions.create(
-                    model=model_name,
-                    messages=messages,
-                    tools=tools,
-                    stream=stream
-                )
+                # Build request parameters
+                kwargs = {
+                    "model": model_name,
+                    "messages": messages,
+                    "stream": stream,
+                }
+                
+                if tools:
+                    kwargs["tools"] = tools
+                
+                # Add provider routing for OpenRouter
+                if self.config.type == "openrouter" and self.config.provider:
+                    kwargs["extra_body"] = {
+                        "provider": {
+                            "order": [self.config.provider]
+                        }
+                    }
+                
+                response = await self.client.chat.completions.create(**kwargs)
                 
                 # If streaming, yield chunks
                 if stream:

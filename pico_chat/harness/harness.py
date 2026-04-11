@@ -60,6 +60,19 @@ class Harness:
         self.server: LLMServer = create_server(server_config)
         self.debug_stream.log("INIT", f"Server initialized: {server_config.name} ({server_config.type}) at {server_config.base_url}")
 
+    def switch_server(self, new_config):
+        """Switch to a different LLM server at runtime.
+        
+        Args:
+            new_config: LLMServerConfig instance
+        """
+        from pico_chat.harness.llm_server_config import LLMServerConfig
+        
+        # Create new server instance
+        self.server = create_server(new_config)
+        self.debug_stream.log("SWITCH", f"Server switched to: {new_config.name} ({new_config.type}) at {new_config.base_url}")
+        logger.info(f"Switched to server: {new_config.name} ({new_config.type})")
+
     def _is_compaction_message(self, msg: Dict[str, Any]) -> bool:
         """Return True if message is a compaction marker message."""
         if msg.get("role") != "assistant":
