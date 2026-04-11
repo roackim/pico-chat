@@ -342,6 +342,17 @@ class InputComponent(Component):
             parent_box=self.parent
         )
 
+    def has_active_completion(self) -> bool:
+        """Return True when any completion menu is currently active."""
+        return any(
+            completion and completion.is_active
+            for completion in (
+                self.command_completion,
+                self.subcommand_completion,
+                self.context_completion,
+            )
+        )
+
     def handle_input(self, event: Any) -> bool:
         """Handle input events by delegating to appropriate handlers."""
         # Ignore keyboard input if not focused (but allow mouse events for potential focus change)

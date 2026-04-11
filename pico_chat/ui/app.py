@@ -627,6 +627,10 @@ class chatTUI(ChatActionHandlers):
         
         # Handle keyboard navigation between input and history
         if isinstance(event, str):
+            if self._last_focus_id == "input" and self.input_component.has_active_completion():
+                if event in ('\x1b', '\x1b[A', '\x1b[B', '\t', '\r', '\n'):
+                    return self._original_handle_input(event)
+
             # Shortcuts to focus input: 'i' or Enter (when not already in input)
             if (event == 'i' or event == '\r') and self._last_focus_id != "input":
                 self.chat_history_panel.clear_focus()
