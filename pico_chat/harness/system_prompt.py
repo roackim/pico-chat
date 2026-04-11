@@ -17,6 +17,7 @@ Instructions:
 - Use 'write' mainly for creating new files or complete file rewrites.
 
 Memory Usage:
+- The memory is a work memory. Use it as much as needed.
 - Use 'memorize' as a scratchpad for the current conversation session.
 - Store important observations, TODOs, decisions, and facts to keep them near the system prompt.
 - Only memorize concrete information - never store placeholders like "unknown".
