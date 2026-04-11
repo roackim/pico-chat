@@ -81,6 +81,11 @@ class Harness:
             return self.history
         return self.history[last_compaction_idx:]
 
+    def _memory_json(self) -> str:
+        """Return compact JSON representation of memory, including explicit empty list."""
+        memory_items = list(self.memory.values())
+        return json.dumps(memory_items, separators=(',', ':'), ensure_ascii=False)
+
     def _add_message_to_history(self, role: str, content: Optional[str], **kwargs) -> str:
         """Add a message to history with a unique ID.
         
@@ -304,9 +309,7 @@ class Harness:
         # Add system prompt estimation (system message is added during _build_messages)
         # Rough estimate: project context + base system prompt + memory
         system_estimate = estimate_tokens(self.project_context) + 500
-        if self.memory:
-            memory_json = json.dumps(list(self.memory.values()), separators=(',', ':'), ensure_ascii=False)
-            system_estimate += estimate_tokens(memory_json)
+        system_estimate += estimate_tokens(self._memory_json())
         
         current_tokens += system_estimate
         
@@ -427,13 +430,8 @@ class Harness:
             context_window=context_window_str
         )
         
-        # Inject memory into system message content if any exists (single system message for compatibility)
-        if self.memory:
-            memory_items = list(self.memory.values())
-            # Compact JSON - no pretty printing, keeps metadata
-            memory_json = json.dumps(memory_items, separators=(',', ':'), ensure_ascii=False)
-            # Append memory to system message content with clear delimiter
-            system_msg["content"] += f"\n\nMEMORY:{memory_json}"
+        # Always append memory state so empty memory is explicit as MEMORY:[]
+        system_msg["content"] += f"\n\nMEMORY:{self._memory_json()}"
         
         messages = [system_msg]
         messages.extend(self._get_effective_history())
@@ -462,13 +460,8 @@ class Harness:
             context_window=context_window_str
         )
         
-        # Inject memory into system message content if any exists
-        if self.memory:
-            memory_items = list(self.memory.values())
-            # Compact JSON - no pretty printing, keeps metadata
-            memory_json = json.dumps(memory_items, separators=(',', ':'), ensure_ascii=False)
-            # Append memory to system message content with clear delimiter
-            system_msg["content"] += f"\n\nMEMORY:{memory_json}"
+        # Always append memory state so empty memory is explicit as MEMORY:[]
+        system_msg["content"] += f"\n\nMEMORY:{self._memory_json()}"
         
         messages = [system_msg]
         messages.extend(self._get_effective_history())
@@ -951,6 +944,8 @@ class Harness:
             "context_used": 0,
             "context_max": 0,
             "context_percentage": 0.0,
+            "memory_items": len(self.memory),
+            "memory_tokens": sum(item["metadata"].get("token_size", 0) for item in self.memory.values()),
         }
         
         # Check connection

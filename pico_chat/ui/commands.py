@@ -173,6 +173,13 @@ class StatusCommand(Command):
         if status_text == "online":
             msg += color + f"Model            : {reset}{status['model']}\n"
             msg += color + f"Context Window   : {reset}{status['context_window']}\n"
+
+            memory_items = status.get("memory_items", 0)
+            memory_tokens = status.get("memory_tokens", 0)
+            if memory_items == 0:
+                msg += color + f"Memory           : {reset}empty\n"
+            else:
+                msg += color + f"Memory           : {reset}{memory_items} items ({memory_tokens} tokens)\n"
             
             # Add context pressure info if available
             if status.get('context_used') is not None and status.get('context_max') is not None:
