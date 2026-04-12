@@ -66,8 +66,9 @@ class RunPermissions:
     #   ask: Always ask when operators detected (even in strings)
     #   deny: Block any command with operators
     
-    # Containerization toggle - future feature
+    # Containerization (bubblewrap)
     use_container: bool = False
+    container_network: bool = False  # Allow network access in container
 
 
 @dataclass
@@ -121,7 +122,8 @@ strict = ToolPermissionsProfile(
         deny=set(),
         ask=set(),
         others="ask",
-        use_container=False
+        use_container=False,
+        container_network=False,
     ),
     memory="ask",
 )
@@ -132,7 +134,10 @@ permissive = ToolPermissionsProfile(
     read=FilePermissions(inside_repo="allow", outside_repo="ask"),
     write=FilePermissions(inside_repo="allow", outside_repo="deny"),
     patch=FilePermissions(inside_repo="allow", outside_repo="deny"),
-    run=RunPermissions(use_container=False),
+    run=RunPermissions(
+        use_container=False,
+        container_network=False,
+    ),
     memory="allow",  # Memory operations are safe
 )
 
@@ -147,7 +152,8 @@ unrestricted = ToolPermissionsProfile(
         deny=set(),
         ask=set(),
         others="allow", # allow all commands
-        use_container=False
+        use_container=False,
+        container_network=False,
     ),
     memory="allow",
 )
@@ -163,7 +169,8 @@ locked = ToolPermissionsProfile(
         deny=DEFAULT_ALLOW | DEFAULT_ASK | DEFAULT_DENY,
         ask=set(),
         others="deny",
-        use_container=False
+        use_container=False,
+        container_network=False,
     ),
     memory="deny",  # Even memory operations are denied
 )
@@ -178,7 +185,8 @@ TESTING = ToolPermissionsProfile(
         deny=set(),
         ask=set(),
         others="ask",
-        use_container=False
+        use_container=False,
+        container_network=False,
     ),
     memory="allow",  # Ask for memory operations too
 )

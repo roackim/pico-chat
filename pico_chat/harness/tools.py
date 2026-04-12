@@ -8,6 +8,7 @@ Provides 4 core tools:
 - run: Execute shell command (sandboxed)
 """
 import subprocess
+import shlex
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -285,6 +286,95 @@ class ShellTool:
                 permissions=self.permissions.run,
                 confirmation_callback=confirmation_callback
             )
+        
+        # Check bwrap availability if containerization is enabled
+        self._bwrap_available = None
+        if self.permissions.run.use_container:
+            self._bwrap_available = self._check_bwrap_available()
+    
+    @staticmethod
+    def _check_bwrap_available() -> bool:
+        """Check if bubblewrap (bwrap) is available on the system."""
+        try:
+            result = subprocess.run(
+                ['bwrap', '--version'],
+                capture_output=True,
+                timeout=2
+            )
+            return result.returncode == 0
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
+    
+    def _build_bwrap_command(self, command: str) -> list[str]:
+        """
+        Build bubblewrap command for containerized execution.
+        
+        Filesystem access:
+        - READ-WRITE: Workspace directory only
+        - READ-ONLY: Home directory and system directories
+        - Network: Controlled by container_network flag
+        
+        Args:
+            command: Shell command to execute
+            
+        Returns:
+            List of command arguments for bwrap execution
+        """
+        home = str(Path.home())
+        workspace = str(self.workspace)
+        
+        bwrap_args = [
+            'bwrap',
+            '--unshare-all',      # Start with full isolation
+            '--die-with-parent',  # Cleanup if parent process dies
+            
+            # System directories (read-only)
+            '--ro-bind', '/usr', '/usr',
+            '--ro-bind', '/lib', '/lib',
+            '--ro-bind', '/bin', '/bin',
+            '--ro-bind', '/sbin', '/sbin',
+            '--ro-bind', '/etc', '/etc',
+        ]
+        
+        # Add lib64 if it exists (not on all systems)
+        if Path('/lib64').exists():
+            bwrap_args.extend(['--ro-bind', '/lib64', '/lib64'])
+        
+        # Home directory (read-only)
+        bwrap_args.extend(['--ro-bind', home, home])
+        
+        # Handle /tmp carefully - if workspace is under /tmp, bind it; otherwise use tmpfs
+        workspace_under_tmp = str(self.workspace).startswith('/tmp')
+        if workspace_under_tmp:
+            # Workspace is under /tmp (e.g., pytest temp dirs)
+            # Bind /tmp as-is to preserve workspace path
+            bwrap_args.extend(['--bind', '/tmp', '/tmp'])
+        else:
+            # Workspace is elsewhere, use isolated tmpfs for /tmp
+            bwrap_args.extend(['--tmpfs', '/tmp'])
+        
+        # Workspace (read-write) - if not already bound via /tmp
+        if not workspace_under_tmp:
+            bwrap_args.extend(['--bind', workspace, workspace])
+        
+        # Virtual filesystems
+        bwrap_args.extend([
+            '--proc', '/proc',     # Process information
+            '--dev', '/dev',       # Device files
+        ])
+        
+        # Network access
+        if self.permissions.run.container_network:
+            bwrap_args.append('--share-net')
+        # Note: --unshare-all already includes --unshare-net
+        
+        # Set working directory
+        bwrap_args.extend(['--chdir', workspace])
+        
+        # Execute command via shell
+        bwrap_args.extend(['--', 'sh', '-c', command])
+        
+        return bwrap_args
     
     def run(self, command: str, timeout: int = 30) -> str:
         """
@@ -309,16 +399,28 @@ class ShellTool:
         if not allowed:
             raise ToolError(message)
         
-        # TODO: Implement containerization when use_container is enabled
-        # if self.permissions.run.use_container:
-        #     command = self._containerize_command(command)
+        # Check containerization requirements
+        if self.permissions.run.use_container:
+            if self._bwrap_available is False:
+                raise ToolError(
+                    "Containerization enabled but bubblewrap (bwrap) is not available. "
+                    "Install bubblewrap or disable containerization in permissions."
+                )
+            
+            # Build containerized command
+            exec_args = self._build_bwrap_command(command)
+            shell_mode = False  # bwrap args are already a list
+        else:
+            # Execute directly with shell
+            exec_args = command
+            shell_mode = True
         
         # Execute command
         try:
             result = subprocess.run(
-                command,
-                shell=True,
-                cwd=self.workspace,
+                exec_args,
+                shell=shell_mode,
+                cwd=None if self.permissions.run.use_container else self.workspace,
                 capture_output=True,
                 text=True,
                 timeout=timeout
