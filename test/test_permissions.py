@@ -667,3 +667,320 @@ class TestPathResolution:
         # Try to access parent directory
         with pytest.raises(ToolError, match="Permission denied: read outside repo"):
             tools.read("../secret.txt")
+
+
+class _StubRunTool:
+    """Stub run tool for harness integration tests."""
+    def __init__(self, result: str = "[exit:0]"):
+        self.result = result
+        self.called = False
+        self.called_with = None
+
+    def execute(self, **kwargs):
+        self.called = True
+        self.called_with = kwargs
+        return self.result
+
+
+class TestHarnessRunPermissionFlow:
+    """Test run permission ask/allow/deny through harness execution path."""
+
+    def test_auto_allow_benign_command(self, tmp_path, monkeypatch):
+        """Benign commands in ALLOW list should auto-approve."""
+        from pico_chat.harness.tool_permissions import CMD_DEFAULT_ALLOW
+        
+        profile = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(
+                allow=CMD_DEFAULT_ALLOW,
+                ask=set(),
+                deny=set(),
+                others="deny",
+            ),
+        )
+        monkeypatch.setattr(tool_permissions_module, "permissions", profile)
+
+        run_tool = _StubRunTool(".\n[exit:0]")
+        harness = Harness.__new__(Harness)
+        harness.debug_stream = _NoopDebugStream()
+        harness.state = AgentState.IDLE
+        harness.history = []
+        harness.memory = {}
+        harness.memory_snapshots = {}
+        harness.workspace = str(tmp_path)
+        harness.tools_map = {"run": run_tool}
+        harness._user_response_queue = asyncio.Queue()
+        
+        tool_call = {
+            "id": "call_1",
+            "function": {
+                "name": "run",
+                "arguments": json.dumps({"command": "find . -maxdepth 1"}),
+            },
+        }
+
+        events, messages = _run_harness_tool_call(harness, tool_call)
+        statuses = [e.status for e in events]
+
+        # Should auto-approve and execute
+        assert statuses == [
+            chunks.ToolStatus.PERMISSION_REQUESTED,
+            chunks.ToolStatus.APPROVED,
+            chunks.ToolStatus.EXECUTING,
+            chunks.ToolStatus.COMPLETED,
+        ]
+        assert events[0].auto_decision is True
+        assert run_tool.called is True
+        assert run_tool.called_with["command"] == "find . -maxdepth 1"
+
+    def test_auto_ask_dangerous_pattern(self, tmp_path, monkeypatch):
+        """Commands with dangerous patterns should require user confirmation."""
+        from pico_chat.harness.tool_permissions import CMD_DEFAULT_ALLOW
+        
+        profile = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(
+                allow=CMD_DEFAULT_ALLOW,
+                ask=set(),
+                deny=set(),
+                others="deny",
+            ),
+        )
+        monkeypatch.setattr(tool_permissions_module, "permissions", profile)
+
+        run_tool = _StubRunTool("[exit:0]")
+        harness = Harness.__new__(Harness)
+        harness.debug_stream = _NoopDebugStream()
+        harness.state = AgentState.IDLE
+        harness.history = []
+        harness.memory = {}
+        harness.memory_snapshots = {}
+        harness.workspace = str(tmp_path)
+        harness.tools_map = {"run": run_tool}
+        harness._user_response_queue = asyncio.Queue()
+        harness.set_user_response("yes")
+        
+        tool_call = {
+            "id": "call_2",
+            "function": {
+                "name": "run",
+                "arguments": json.dumps({"command": "find . -exec rm {} +"}),
+            },
+        }
+
+        events, messages = _run_harness_tool_call(harness, tool_call)
+        statuses = [e.status for e in events]
+
+        # Should ask user (dangerous pattern detected)
+        assert statuses == [
+            chunks.ToolStatus.PERMISSION_REQUESTED,
+            chunks.ToolStatus.APPROVED,
+            chunks.ToolStatus.EXECUTING,
+            chunks.ToolStatus.COMPLETED,
+        ]
+        assert events[0].auto_decision is False  # User must approve
+        assert run_tool.called is True
+
+    def test_auto_ask_command_in_ask_list(self, tmp_path, monkeypatch):
+        """Commands in ASK list should require user confirmation."""
+        from pico_chat.harness.tool_permissions import CMD_DEFAULT_ASK
+        
+        profile = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(
+                allow=set(),
+                ask=CMD_DEFAULT_ASK,
+                deny=set(),
+                others="deny",
+            ),
+        )
+        monkeypatch.setattr(tool_permissions_module, "permissions", profile)
+
+        run_tool = _StubRunTool("[exit:0]")
+        harness = Harness.__new__(Harness)
+        harness.debug_stream = _NoopDebugStream()
+        harness.state = AgentState.IDLE
+        harness.history = []
+        harness.memory = {}
+        harness.memory_snapshots = {}
+        harness.workspace = str(tmp_path)
+        harness.tools_map = {"run": run_tool}
+        harness._user_response_queue = asyncio.Queue()
+        harness.set_user_response("allow")
+        
+        tool_call = {
+            "id": "call_3",
+            "function": {
+                "name": "run",
+                "arguments": json.dumps({"command": "git status"}),
+            },
+        }
+
+        events, messages = _run_harness_tool_call(harness, tool_call)
+        statuses = [e.status for e in events]
+
+        # Should ask user (git in ASK list)
+        assert statuses == [
+            chunks.ToolStatus.PERMISSION_REQUESTED,
+            chunks.ToolStatus.APPROVED,
+            chunks.ToolStatus.EXECUTING,
+            chunks.ToolStatus.COMPLETED,
+        ]
+        assert events[0].auto_decision is False
+        assert run_tool.called is True
+
+    def test_auto_deny_blocked_command(self, tmp_path, monkeypatch):
+        """Commands in DENY list should auto-deny."""
+        from pico_chat.harness.tool_permissions import CMD_DEFAULT_DENY
+        
+        profile = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(
+                allow=set(),
+                ask=set(),
+                deny=CMD_DEFAULT_DENY,
+                others="deny",
+            ),
+        )
+        monkeypatch.setattr(tool_permissions_module, "permissions", profile)
+
+        run_tool = _StubRunTool("[exit:0]")
+        harness = Harness.__new__(Harness)
+        harness.debug_stream = _NoopDebugStream()
+        harness.state = AgentState.IDLE
+        harness.history = []
+        harness.memory = {}
+        harness.memory_snapshots = {}
+        harness.workspace = str(tmp_path)
+        harness.tools_map = {"run": run_tool}
+        harness._user_response_queue = asyncio.Queue()
+        
+        tool_call = {
+            "id": "call_4",
+            "function": {
+                "name": "run",
+                "arguments": json.dumps({"command": "sudo rm -rf /"}),
+            },
+        }
+
+        events, messages = _run_harness_tool_call(harness, tool_call)
+        statuses = [e.status for e in events]
+
+        # Should auto-deny
+        assert statuses == [chunks.ToolStatus.PERMISSION_REQUESTED, chunks.ToolStatus.DENIED]
+        assert events[0].auto_decision is True
+        assert events[1].denial_reason == "Auto-denied by security policy"
+        assert run_tool.called is False
+        assert "Permission denied" in messages[-1]["content"]
+
+    def test_user_deny_blocks_execution(self, tmp_path, monkeypatch):
+        """User denying permission should block execution."""
+        from pico_chat.harness.tool_permissions import CMD_DEFAULT_ASK
+        
+        profile = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(
+                allow=set(),
+                ask=CMD_DEFAULT_ASK,
+                deny=set(),
+                others="deny",
+            ),
+        )
+        monkeypatch.setattr(tool_permissions_module, "permissions", profile)
+
+        run_tool = _StubRunTool("[exit:0]")
+        harness = Harness.__new__(Harness)
+        harness.debug_stream = _NoopDebugStream()
+        harness.state = AgentState.IDLE
+        harness.history = []
+        harness.memory = {}
+        harness.memory_snapshots = {}
+        harness.workspace = str(tmp_path)
+        harness.tools_map = {"run": run_tool}
+        harness._user_response_queue = asyncio.Queue()
+        harness.set_user_response("no")
+        
+        tool_call = {
+            "id": "call_5",
+            "function": {
+                "name": "run",
+                "arguments": json.dumps({"command": "rm file.txt"}),
+            },
+        }
+
+        events, messages = _run_harness_tool_call(harness, tool_call)
+        statuses = [e.status for e in events]
+
+        # Should ask user, then deny
+        assert statuses == [chunks.ToolStatus.PERMISSION_REQUESTED, chunks.ToolStatus.DENIED]
+        assert events[0].auto_decision is False
+        assert events[1].denial_reason == "User denied"
+        assert run_tool.called is False
+        assert messages[-1]["content"] == "Permission denied: User denied"
+
+    def test_chain_command_requires_ask(self, tmp_path, monkeypatch):
+        """Command chains should require user confirmation."""
+        from pico_chat.harness.tool_permissions import CMD_DEFAULT_ALLOW
+        
+        profile = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(
+                allow=CMD_DEFAULT_ALLOW,
+                ask=set(),
+                deny=set(),
+                others="deny",
+                chain_policy="ask",
+            ),
+        )
+        monkeypatch.setattr(tool_permissions_module, "permissions", profile)
+
+        run_tool = _StubRunTool("[exit:0]")
+        harness = Harness.__new__(Harness)
+        harness.debug_stream = _NoopDebugStream()
+        harness.state = AgentState.IDLE
+        harness.history = []
+        harness.memory = {}
+        harness.memory_snapshots = {}
+        harness.workspace = str(tmp_path)
+        harness.tools_map = {"run": run_tool}
+        harness._user_response_queue = asyncio.Queue()
+        harness.set_user_response("yes")
+        
+        tool_call = {
+            "id": "call_6",
+            "function": {
+                "name": "run",
+                "arguments": json.dumps({"command": "ls -la | grep test"}),
+            },
+        }
+
+        events, messages = _run_harness_tool_call(harness, tool_call)
+        statuses = [e.status for e in events]
+
+        # Should ask user (chain detected)
+        assert statuses == [
+            chunks.ToolStatus.PERMISSION_REQUESTED,
+            chunks.ToolStatus.APPROVED,
+            chunks.ToolStatus.EXECUTING,
+            chunks.ToolStatus.COMPLETED,
+        ]
+        assert events[0].auto_decision is False  # Chain requires confirmation
+        assert run_tool.called is True

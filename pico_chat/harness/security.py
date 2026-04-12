@@ -4,6 +4,7 @@ Security layer for command execution.
 Provides:
 - Operator parsing (quote-aware splitting of command chains)
 - Permission-based command checking
+- Dangerous pattern detection for escalation
 - User confirmation for interactive commands
 """
 from typing import List, Tuple, Optional, Callable, Literal, TYPE_CHECKING
@@ -12,6 +13,9 @@ from enum import Enum
 
 if TYPE_CHECKING:
     from pico_chat.harness.tool_permissions import RunPermissions
+
+# Import dangerous patterns for escalation checking
+from pico_chat.harness.tool_permissions import CMD_DANGEROUS_PATTERNS
 
 
 class CommandAction(Enum):
@@ -168,6 +172,17 @@ def check_command(command: str, permissions: 'RunPermissions') -> CommandCheck:
         )
     
     if cmd_name in permissions.allow:
+        # Check for dangerous patterns that escalate to ASK
+        if cmd_name in CMD_DANGEROUS_PATTERNS:
+            for pattern in CMD_DANGEROUS_PATTERNS[cmd_name]:
+                if pattern in command:
+                    return CommandCheck(
+                        allowed=False,
+                        action=CommandAction.ASK,
+                        message=f"Command '{cmd_name}' with dangerous pattern '{pattern}' requires confirmation"
+                    )
+        
+        # No dangerous patterns found
         return CommandCheck(
             allowed=True,
             action=CommandAction.ALLOW,

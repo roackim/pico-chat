@@ -13,15 +13,15 @@ Permission = Literal["allow", "ask", "deny"]
 
 
 # Default command lists (migrated from security.py)
-DEFAULT_ALLOW = {
+CMD_DEFAULT_ALLOW = {
     'cat', 'head', 'tail', 'less', 'more',                      # File reading
     'ls', 'find', 'tree', 'file', 'which',                      # File discovery   
     'grep', 'awk', 'sed', 'cut', 'sort', 'uniq', 'wc',          # Text processing
     'echo', 'pwd', 'basename', 'dirname', 'realpath', 'date',   # Utilities
-    'cp', 'mv', 'mkdir', 'touch', 'ln',                         # File writing (non-destructive)
+    'cp', 'mv', 'mkdir', 'touch',                         # File writing (non-destructive)
 }
 
-DEFAULT_ASK = {
+CMD_DEFAULT_ASK = {
     'curl', 'wget',           # Network access
     'git',                    # Version control
     'python', 'python3',      # Code execution
@@ -29,12 +29,21 @@ DEFAULT_ASK = {
     'rm', 'rmdir',            # Deletion
     'bash', 'sh', 'zsh', 'fish',  # Shell spawning
     'eval', 'exec',               # Code injection vectors
+    'ln',                           # Symlinks
 }
 
-DEFAULT_DENY = {
+CMD_DEFAULT_DENY = {
     'dd', 'mkfs',                 # Low-level operations
     'sudo', 'su', 'doas',         # Privilege escalation
     'reboot', 'shutdown',         # System control
+}
+
+# Dangerous patterns that escalate ALLOW commands to ASK
+# Maps command name to list of dangerous strings to detect in the full command
+CMD_DANGEROUS_PATTERNS = {
+    'find': ['-exec', '-execdir', '-delete', '-ok'],
+    'awk': ['system('],
+    'sed': ['/e'],  # The 'e' flag in s///e (may have false positives, but safe)
 }
 
 
@@ -53,9 +62,9 @@ class FilePermissions:
 class RunPermissions:
     """Permissions for shell command execution with granular command control."""
     # Command classifications
-    allow: set[str] = field(default_factory=lambda: DEFAULT_ALLOW.copy())
-    deny: set[str] = field(default_factory=lambda: DEFAULT_DENY.copy())
-    ask: set[str] = field(default_factory=lambda: DEFAULT_ASK.copy())
+    allow: set[str] = field(default_factory=lambda: CMD_DEFAULT_ALLOW.copy())
+    deny: set[str] = field(default_factory=lambda: CMD_DEFAULT_DENY.copy())
+    ask: set[str] = field(default_factory=lambda: CMD_DEFAULT_ASK.copy())
     
     # Policy for commands not in any list
     others: Literal["allow", "ask", "deny"] = "deny"
@@ -122,8 +131,8 @@ strict = ToolPermissionsProfile(
         deny=set(),
         ask=set(),
         others="ask",
-        use_container=False,
-        container_network=False,
+        use_container=True,
+        container_network=True,
     ),
     memory="ask",
 )
@@ -135,8 +144,11 @@ permissive = ToolPermissionsProfile(
     write=FilePermissions(inside_repo="allow", outside_repo="deny"),
     patch=FilePermissions(inside_repo="allow", outside_repo="deny"),
     run=RunPermissions(
-        use_container=False,
-        container_network=False,
+        allow=CMD_DEFAULT_ALLOW,
+        ask=CMD_DEFAULT_ASK,
+        deny=CMD_DEFAULT_DENY,
+        use_container=True,
+        container_network=True,
     ),
     memory="allow",  # Memory operations are safe
 )
@@ -152,8 +164,8 @@ unrestricted = ToolPermissionsProfile(
         deny=set(),
         ask=set(),
         others="allow", # allow all commands
-        use_container=False,
-        container_network=False,
+        use_container=True,
+        container_network=True,
     ),
     memory="allow",
 )
@@ -166,11 +178,11 @@ locked = ToolPermissionsProfile(
     patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
     run=RunPermissions(
         allow=set(),
-        deny=DEFAULT_ALLOW | DEFAULT_ASK | DEFAULT_DENY,
+        deny=CMD_DEFAULT_ALLOW | CMD_DEFAULT_ASK | CMD_DEFAULT_DENY,
         ask=set(),
         others="deny",
-        use_container=False,
-        container_network=False,
+        use_container=True,
+        container_network=True,
     ),
     memory="deny",  # Even memory operations are denied
 )
@@ -185,11 +197,11 @@ TESTING = ToolPermissionsProfile(
         deny=set(),
         ask=set(),
         others="ask",
-        use_container=False,
-        container_network=False,
+        use_container=True,
+        container_network=True,
     ),
     memory="allow",  # Ask for memory operations too
 )
 
 # Global permissions profile (can be changed at runtime)
-permissions: ToolPermissionsProfile = TESTING # permissive
+permissions: ToolPermissionsProfile = permissive # permissive

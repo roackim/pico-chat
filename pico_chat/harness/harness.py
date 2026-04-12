@@ -185,13 +185,25 @@ class Harness:
                 return permissions.get_patch_permission(False)
         
         elif tool_name == "run":
-            # Run command permission - for now return ask if configured
+            # Run command permission - check the actual command
+            from pico_chat.harness.security import SecurityChecker, CommandAction
+            command = args.get("command", "")
             run_perms = permissions.get_run_permission()
-            # Simplified: if others is ask or ask list not empty, return ask
-            if run_perms.others == "ask" or len(run_perms.ask) > 0:
-                return "ask"
-            elif run_perms.others == "deny":
-                return "deny"
+            
+            # Use SecurityChecker to properly evaluate the command
+            checker = SecurityChecker(run_perms, confirmation_callback=None)
+            allowed, message = checker.check_chain(command)
+            
+            # SecurityChecker returns (bool, str) tuple
+            # If not allowed, check if it's a hard deny or ask
+            if not allowed:
+                # Parse the message to determine if it's ASK or DENY
+                # Commands in DENY list will have "blocked" in message
+                # Commands requiring confirmation will have "requires confirmation"
+                if "blocked" in message.lower() or "not in allowlist" in message.lower():
+                    return "deny"
+                else:
+                    return "ask"
             else:
                 return "allow"
         

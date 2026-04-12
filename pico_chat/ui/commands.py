@@ -1235,19 +1235,98 @@ class DebugCommand(Command):
                     msg_type=SysMsgError()
                 )
 
+class PermissionsCommand(Command):
+    def __init__(self):
+        super().__init__("permissions", "Show current permission configuration")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        from pico_chat.harness import tool_permissions
+        
+        perm = tool_permissions.permissions
+        
+        output = f"Current Profile: {perm.name}\n"
+        output += "=" * 60 + "\n\n"
+        
+        # File permissions
+        output += "File Permissions:\n"
+        output += "-" * 60 + "\n"
+        output += f"  read  (inside repo):  {perm.read.inside_repo}\n"
+        output += f"  read  (outside repo): {perm.read.outside_repo}\n"
+        output += f"  write (inside repo):  {perm.write.inside_repo}\n"
+        output += f"  write (outside repo): {perm.write.outside_repo}\n"
+        output += f"  patch (inside repo):  {perm.patch.inside_repo}\n"
+        output += f"  patch (outside repo): {perm.patch.outside_repo}\n\n"
+        
+        # Run permissions
+        output += "Run Permissions:\n"
+        output += "-" * 60 + "\n"
+        output += f"  others policy:     {perm.run.others}\n"
+        output += f"  chain policy:      {perm.run.chain_policy}\n"
+        output += f"  use container:     {perm.run.use_container}\n"
+        output += f"  container network: {perm.run.container_network}\n\n"
+        
+        # Command lists
+        output += f"  ALLOW commands ({len(perm.run.allow)}):\n"
+        if perm.run.allow:
+            allow_sorted = sorted(perm.run.allow)
+            for i in range(0, len(allow_sorted), 8):
+                chunk = allow_sorted[i:i+8]
+                output += f"    {', '.join(chunk)}\n"
+        else:
+            output += "    (none)\n"
+        output += "\n"
+        
+        output += f"  ASK commands ({len(perm.run.ask)}):\n"
+        if perm.run.ask:
+            ask_sorted = sorted(perm.run.ask)
+            for i in range(0, len(ask_sorted), 8):
+                chunk = ask_sorted[i:i+8]
+                output += f"    {', '.join(chunk)}\n"
+        else:
+            output += "    (none)\n"
+        output += "\n"
+        
+        output += f"  DENY commands ({len(perm.run.deny)}):\n"
+        if perm.run.deny:
+            deny_sorted = sorted(perm.run.deny)
+            for i in range(0, len(deny_sorted), 8):
+                chunk = deny_sorted[i:i+8]
+                output += f"    {', '.join(chunk)}\n"
+        else:
+            output += "    (none)\n"
+        output += "\n"
+        
+        # Dangerous patterns
+        from pico_chat.harness.tool_permissions import CMD_DANGEROUS_PATTERNS
+        output += "Dangerous Pattern Detection:\n"
+        output += "-" * 60 + "\n"
+        for cmd, patterns in sorted(CMD_DANGEROUS_PATTERNS.items()):
+            output += f"  {cmd}: {', '.join(patterns)}\n"
+        output += "\n"
+        
+        # Memory permissions
+        output += f"Memory Operations: {perm.memory}\n"
+        
+        ui.chat_history_panel.add_message(
+            output.rstrip(),
+            msg_type=SysMsg(),
+            title="permissions"
+        )
+
 # Command Registry
 COMMANDS: Dict[str, Command] = {
-    "help":     HelpCommand(),
-    "clear":    ClearCommand(),
-    "compact":  CompactCommand(),
-    "exit":     ExitCommand(),
-    "stop":     StopCommand(),
-    "status":   StatusCommand(),
-    "server":   ServerCommand(),
-    "tools":     ToolsCommand(),
-    "set":      SetCommand(),
-    "get":      GetCommand(),
-    "debug":    DebugCommand(),
+    "help":        HelpCommand(),
+    "clear":       ClearCommand(),
+    "compact":     CompactCommand(),
+    "exit":        ExitCommand(),
+    "stop":        StopCommand(),
+    "status":      StatusCommand(),
+    "server":      ServerCommand(),
+    "tools":       ToolsCommand(),
+    "set":         SetCommand(),
+    "get":         GetCommand(),
+    "debug":       DebugCommand(),
+    "permissions": PermissionsCommand(),
 }
 
 async def handle_command(ui: ChatUIProtocol, text: str):
