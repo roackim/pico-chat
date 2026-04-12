@@ -584,17 +584,22 @@ class chatTUI(ChatActionHandlers):
                     
                     # Clear its harness ID (will be reassigned)
                     edited_msg.harness_message_ids = []
-                
-                # Remove all UI messages AFTER the edited one (keep edited message visible)
-                messages_to_remove = len(self.chat_history_panel.messages) - self.editing_message_index - 1
-                for _ in range(messages_to_remove):
-                    self.chat_history_panel.remove_last_message()
+                    
+                    # Remove all UI messages AFTER the edited one (keep edited message visible)
+                    messages_to_remove = len(self.chat_history_panel.messages) - self.editing_message_index - 1
+                    for _ in range(messages_to_remove):
+                        self.chat_history_panel.remove_last_message()
+                    
+                    # Queue the edited message for processing
+                    self.message_queue.put_nowait((text, edited_msg))
+                else:
+                    # Message was deleted (e.g., via /clear) - treat as new message
+                    logger.warning(f"Edited message at index {self.editing_message_index} no longer exists, creating new message")
+                    user_msg = self.chat_history_panel.add_message(text, msg_type=UserMsg())
+                    self.message_queue.put_nowait((text, user_msg))
                 
                 # Clear editing state
                 self.editing_message_index = None
-                
-                # Queue the edited message for processing
-                self.message_queue.put_nowait((text, edited_msg))
             else:
                 logger.info(f"User submitted: {text[:50]}...")
                 
