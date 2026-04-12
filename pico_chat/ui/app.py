@@ -490,11 +490,24 @@ class chatTUI(ChatActionHandlers):
                 import logging
                 logger = logging.getLogger("tui")
    
-                recoverable_exceptions = [openai.APIConnectionError]
+                recoverable_exceptions = [openai.APIConnectionError, openai.InternalServerError]
                 
-                if type(e) in recoverable_exceptions:
+                # Check if it's a recoverable error
+                is_recoverable = type(e) in recoverable_exceptions
+                
+                # Special case: 503 model loading errors should show a better message
+                if isinstance(e, openai.InternalServerError) and e.status_code == 503:
+                    error_message = str(e)
+                    if "Loading model" in error_message or "unavailable" in error_message.lower():
+                        logger.warning(f"Model still loading after retries: {str(e)}")
+                        self.chat_history_panel.add_message(
+                            message="Model is still loading. Please wait a moment and try again.",
+                            msg_type=SysMsgError()
+                        )
+                        continue  # Don't crash, just continue event loop
+                
+                if is_recoverable:
                     logger.warning(f"Recoverable error: {type(e).__name__}: {str(e)}")
-                    # self.chat_history_panel.remove_last_message()  # Remove the pico message
                     self.chat_history_panel.add_message(
                         message=f"{str(e)}",
                         msg_type=SysMsgError()
