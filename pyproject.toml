@@ -15,6 +15,9 @@ dependencies = [
     "wcwidth == 0.6.0",  # For accurate character width calculation in the terminal
 ]
 
+[project.scripts]
+pico = "pico_chat.main:main"
+
 [build-system]
 requires = ["setuptools>=42"]
 build-backend = "setuptools.build_meta"
