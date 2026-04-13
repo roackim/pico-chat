@@ -52,7 +52,7 @@ def test_effective_history_starts_from_last_compaction_marker():
     harness.history = [
         {"id": "u1", "role": "user", "content": "first"},
         {"id": "a1", "role": "assistant", "content": "first answer"},
-        {"id": "c1", "role": "assistant", "content": f"{COMPACTION_MARKER_PREFIX}\nsummary"},
+        {"id": "c1", "role": "assistant", "content": f"{COMPACTION_MARKER_PREFIX}\ncompacted_messages=2\noriginal_tokens=100\n\nsummary"},
         {"id": "u2", "role": "user", "content": "second"},
     ]
 
@@ -84,7 +84,7 @@ def test_deleting_compaction_marker_restores_full_history_behavior():
     harness = _build_harness_stub()
     harness.history = [
         {"id": "u1", "role": "user", "content": "first"},
-        {"id": "c1", "role": "assistant", "content": f"{COMPACTION_MARKER_PREFIX}\nsummary"},
+        {"id": "c1", "role": "assistant", "content": f"{COMPACTION_MARKER_PREFIX}\ncompacted_messages=1\noriginal_tokens=50\n\nsummary"},
         {"id": "u2", "role": "user", "content": "second"},
     ]
 

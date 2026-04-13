@@ -16,14 +16,32 @@ Instructions:
 - For edits to existing files, prefer the 'patch' tool with path/search/replace.
 - Use 'write' mainly for creating new files or complete file rewrites.
 
-Memory Usage:
-- The memory is a work memory. Use it as much as needed.
-- Use 'memorize' as a scratchpad for the current conversation session.
-- Store important observations, TODOs, decisions, and facts to keep them near the system prompt.
-- Only memorize concrete information - never store placeholders like "unknown".
-- After calling memory tools, ALWAYS provide a text response to the user - never end with just tool calls.
-- Examples: active tasks, user preferences given in this session, project goals, key decisions.
-- Use 'forget' to clean up completed tasks or outdated information.
+Iteration & Planning:
+- Use loop() for both file processing and multi-step plans — they are the same concept.
+- For complex tasks, start with an explicit plan: loop(["step1", "step2", ...]) before executing.
+- Tools: loop(items), loop_next(), loop_itr_done() (validate before advancing), loop_abort()
+- Items can be: glob pattern, list, '@' (last run() output), or newline-separated string.
+- Process the current item, then call loop_next(). Findings accumulate in conversation history.
+
+Examples:
+  # Files via glob:
+  loop("src/**/*.py") → "auth.py [1/8]"
+  read("auth.py") → loop_itr_done() → loop_next() → "session.py [2/8]"
+
+  # Files from run command output:
+  run("git diff --name-only HEAD~1") → "auth.py\\nsession.py"
+  loop("@") → "auth.py [1/2]"
+  
+  # or
+  run("find src -name '*.py'") → "src/auth.py\\nsrc/session.py"
+  loop("@") → "src/auth.py [1/2]"
+
+  # Multi-step plan:
+  loop(["Identify route files", "Check each for auth", "Fix missing checks", "Verify"])
+  → "Identify route files [1/4]"
+  run("find . -name 'routes*.py'") → loop_itr_done() → loop_next()
+  → "Check each for auth [2/4]"
+  loop("routes/**/*.py")  # nested iteration within this step
 """
 
 MODEL_CONTEXT_PROMPT = """

@@ -36,6 +36,12 @@ class Harness:
         self.memory = {}  # Current memory state
         self.memory_snapshots = {}  # Snapshots keyed by user message ID
         
+        # Iteration system
+        self.iteration = {}  # Current iteration state (loop tracking)
+        
+        # Tool output history for @ references
+        self.tool_output_history = []  # [(tool_name, result), ...] - last 10
+        
         # User input queue for tool confirmations and prompts
         self._user_response_queue = asyncio.Queue()
         
@@ -45,7 +51,9 @@ class Harness:
         self.tools_map = create_minimal_tools(
             workspace_path=self.workspace,
             confirmation_callback=self._request_user_confirmation,
-            memory_store=self.memory
+            memory_store=self.memory,
+            iteration_state=self.iteration,
+            get_tool_output=self._get_tool_output
         )
         
         # Build initial project context
@@ -98,6 +106,39 @@ class Harness:
         """Return compact JSON representation of memory, including explicit empty list."""
         memory_items = list(self.memory.values())
         return json.dumps(memory_items, separators=(',', ':'), ensure_ascii=False)
+    
+    def _loop_status(self) -> str:
+        """Return formatted loop status for system prompt injection."""
+        if not self.iteration.get("active"):
+            return ""
+        
+        current = self.iteration.get("current_index", 0)
+        total = self.iteration.get("total", 0)
+        
+        if current < total:
+            current_item = self.iteration["items"][current]
+            return f"LOOP: {current_item} [{current+1}/{total}]"
+        else:
+            return ""
+    
+    def _get_tool_output(self, ref: str) -> Optional[str]:
+        """
+        Get a previous tool output by reference.
+        
+        Args:
+            ref: Reference string (currently only "@" for last run() output)
+            
+        Returns:
+            Tool output or None if not found
+        """
+        if ref == "@":
+            # Get last run() output
+            for name, result in reversed(self.tool_output_history):
+                if name == "run":
+                    return result
+            return None
+        
+        return None
 
     def _add_message_to_history(self, role: str, content: Optional[str], **kwargs) -> str:
         """Add a message to history with a unique ID.
@@ -211,6 +252,10 @@ class Harness:
             # Memory operations
             return permissions.get_memory_permission()
         
+        elif tool_name in ["loop", "loop_next", "loop_itr_done", "loop_abort"]:
+            # Iteration operations - auto-allow (read-only tracking)
+            return "allow"
+        
         return "ask"  # Default to asking
     
     def _build_permission_prompt(self, tool_name: str, args: dict) -> str:
@@ -258,6 +303,7 @@ class Harness:
         self.history = []
         self.memory = {}
         self.memory_snapshots = {}
+        self.iteration = {}
         self.debug_stream.log("CLEAR", "Conversation history cleared")
     
     def delete_messages_after_id(self, message_id: str, inclusive: bool = True) -> bool:
@@ -328,8 +374,26 @@ class Harness:
         """
         from pico_chat.harness.token_estimation import estimate_messages_tokens, estimate_tokens
         
+        effective_history = self._get_effective_history()
+        
+        # Check if the first message is a compaction marker
+        compacted_tokens = 0
+        if effective_history and self._is_compaction_message(effective_history[0]):
+            # Extract original token count from compaction marker if available
+            content = effective_history[0].get("content", "")
+            import re
+            match = re.search(r"original_tokens=(\d+)", content)
+            if match:
+                compacted_tokens = int(match.group(1))
+        
         # Estimate tokens for effective history (from latest compaction marker onward)
-        current_tokens = estimate_messages_tokens(self._get_effective_history())
+        current_tokens = estimate_messages_tokens(effective_history)
+        
+        # If we have compacted history, add the original token count (subtracting the marker itself)
+        if compacted_tokens > 0:
+            # Subtract the compaction marker's tokens to avoid double-counting
+            marker_tokens = estimate_messages_tokens([effective_history[0]])
+            current_tokens = current_tokens - marker_tokens + compacted_tokens
         
         # Add system prompt estimation (system message is added during _build_messages)
         # Rough estimate: project context + base system prompt + memory
@@ -380,10 +444,16 @@ class Harness:
             "role": "user",
             "content": (
                 "Summarize the following conversation for future continuation. "
-                "Return concise plain text with these sections in order: "
-                "Decisions, Constraints, Open Tasks, Important Artifacts, Failed Attempts. "
-                "Be factual and avoid speculation. "
-                "Keep it compact and preserve critical technical details.\n\n"
+                "The summary will replace the conversation history, so it must be COMPREHENSIVE enough "
+                "for the conversation to continue naturally. Include:\n"
+                "- Key decisions made and their reasoning\n"
+                "- Technical constraints and requirements\n"
+                "- Open tasks and next steps\n"
+                "- Important file paths, code snippets, and artifacts\n"
+                "- Failed attempts and lessons learned\n"
+                "- Any context the assistant needs to continue helping\n\n"
+                "Be thorough and factual. Preserve all critical technical details. "
+                "Aim for at least 20-30% of the original length to maintain quality.\n\n"
                 f"Conversation JSON:\n{json.dumps(effective_history, ensure_ascii=False)}"
             ),
         }
@@ -405,9 +475,14 @@ class Harness:
         if not summary_text:
             raise RuntimeError("Compaction failed: model returned empty summary")
 
+        # Estimate tokens in the original effective history to preserve context accounting
+        from pico_chat.harness.token_estimation import estimate_messages_tokens
+        original_tokens = estimate_messages_tokens(effective_history)
+
         compact_message = (
             f"{COMPACTION_MARKER_PREFIX}\n"
-            f"compacted_messages={len(effective_history)}\n\n"
+            f"compacted_messages={len(effective_history)}\n"
+            f"original_tokens={original_tokens}\n\n"
             f"{summary_text}"
         )
 
@@ -458,6 +533,11 @@ class Harness:
         # Always append memory state so empty memory is explicit as MEMORY:[]
         system_msg["content"] += f"\n\nMEMORY:{self._memory_json()}"
         
+        # Append loop status if iteration is active
+        loop_status = self._loop_status()
+        if loop_status:
+            system_msg["content"] += f"\n{loop_status}"
+        
         messages = [system_msg]
         messages.extend(self._get_effective_history())
         return messages
@@ -487,6 +567,11 @@ class Harness:
         
         # Always append memory state so empty memory is explicit as MEMORY:[]
         system_msg["content"] += f"\n\nMEMORY:{self._memory_json()}"
+        
+        # Append loop status if iteration is active
+        loop_status = self._loop_status()
+        if loop_status:
+            system_msg["content"] += f"\n{loop_status}"
         
         messages = [system_msg]
         messages.extend(self._get_effective_history())
@@ -912,6 +997,12 @@ class Harness:
                 
                 # STEP 4: Success
                 self.debug_stream.log("TOOL_RESULT", {"call_id": tool_call_id, "result": result})
+                
+                # Track tool output for @ references (keep last 10)
+                self.tool_output_history.append((tool_name, result))
+                if len(self.tool_output_history) > 10:
+                    self.tool_output_history.pop(0)
+                
                 yield chunks.ToolStatusChange(
                     tool_call_id=tool_call_id,
                     tool_name=tool_name,
