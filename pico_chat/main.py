@@ -19,7 +19,12 @@ def main():
     print("Initializing Pico-Chat Harness...")
     harness = get_harness()
     print() 
-    
+
+    # Apply theme from config
+    from pico_chat.ui.tui.colors import set_theme
+    from pico_chat import pico_cfg
+    set_theme(pico_cfg.config.ui_theme)
+
     tui = chatTUI(harness)
     asyncio.run(tui.run())
     return 0

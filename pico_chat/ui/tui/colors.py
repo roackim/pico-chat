@@ -37,6 +37,36 @@ class RGB:
         """ coinvert to ANSI background color code """
         return f"\033[48;2;{self.r};{self.g};{self.b}m"        
 
+
+class ANSIColor:
+    """Terminal-native color using standard 8/16 ANSI color codes.
+    
+    Uses the terminal's own palette instead of hardcoded RGB values,
+    so the theme respects the user's terminal color scheme.
+    
+    fg_code: ANSI foreground code (30-37 standard, 90-97 bright, 39 = default)
+    bg_code: ANSI background code (40-47 standard, 100-107 bright, 49 = default)
+    """
+    def __init__(self, fg: int = 39, bg: int = 49):
+        self.fg = fg
+        self.bg = bg
+
+    def __str__(self):
+        return self.ansi_fg()
+
+    def __add__(self, other):
+        if isinstance(other, str):
+            return self.ansi_fg() + other
+        else:
+            return self.ansi_fg() + str(other)
+
+    def ansi_fg(self) -> str:
+        return f"\033[{self.fg}m"
+
+    def ansi_bg(self) -> str:
+        return f"\033[{self.bg}m"
+
+
 @dataclass
 class _theme:    
     name: str
@@ -84,4 +114,31 @@ default = _theme(
     FOCUSED     = RGB("#FFDA75"),   # Yellow
 )
 
-theme: _theme = default
+# Terminal-native theme — reuses the user's own terminal color palette.
+# No hardcoded RGB: colors are the standard 8/16 ANSI slots so they
+# automatically match whatever the user has configured in their terminal.
+terminal = _theme(
+    name="terminal",
+    BACKGROUND  = ANSIColor(fg=39, bg=49),  # terminal default fg/bg
+    DEFAULT     = ANSIColor(fg=39),         # default fg
+    MUTED       = ANSIColor(fg=90),         # bright black (dark gray)
+    ERROR       = ANSIColor(fg=91),         # bright red
+    WARNING     = ANSIColor(fg=33),         # yellow  (maps to user's yellow)
+    SUCCESS     = ANSIColor(fg=32),         # green   (maps to user's green)
+    USER        = ANSIColor(fg=32),         # green
+    PICO        = ANSIColor(fg=36),         # cyan    (maps to user's cyan)
+    FOCUSED     = ANSIColor(fg=33),         # bright yellow
+)
+
+THEMES = {
+    "default":  default,
+    "terminal": terminal,
+}
+
+theme: _theme = terminal
+
+
+def set_theme(name: str):
+    """Switch the active theme by name. Unknown names fall back to 'default'."""
+    global theme
+    theme = THEMES.get(name, default)
