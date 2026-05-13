@@ -13,6 +13,7 @@ from .command_completion import CommandCompletion
 from .subcommand_completion import SubcommandCompletion
 from .context_completion import ContextCompletion
 from .server_completion import ServerCompletion
+from .path_completion import PathCompletion
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.terminal import MouseEvent
 from pico_chat.ui.tui.layout_utils import display_width
@@ -58,6 +59,9 @@ class InputComponent(Component):
         self.context_items_callback: Optional[Callable[[], List[str]]] = None
         self.server_completion: Optional[ServerCompletion] = None
         self.server_names_callback: Optional[Callable[[], List[str]]] = None
+        self.path_completion: Optional[PathCompletion] = None
+        self.path_commands: List[str] = []
+        self.get_workspace_callback: Optional[Callable[[], str]] = None
     
     @property
     def on_submit(self):
@@ -107,6 +111,11 @@ class InputComponent(Component):
     def setup_servers(self, get_servers_callback: Callable[[], List[str]]):
         """Initialize server name completion system."""
         self.server_names_callback = get_servers_callback
+
+    def setup_path_commands(self, commands: List[str], get_workspace: Callable[[], str]):
+        """Initialize filesystem path completion for the given commands."""
+        self.path_commands = commands
+        self.get_workspace_callback = get_workspace
     
     def _ensure_command_menu(self):
         """Lazy-create command menu and completion system on first use."""
@@ -151,6 +160,17 @@ class InputComponent(Component):
                 content_color=self.content_color
             )
             self.server_completion = ServerCompletion(menu, self.server_names_callback)
+
+    def _ensure_path_menu(self):
+        """Lazy-create path menu and completion system on first use."""
+        if self.path_completion is None and self.path_commands and self.get_workspace_callback:
+            compositor = self.compositor_ref if hasattr(self, 'compositor_ref') else None
+            menu = SelectionMenu(
+                compositor=compositor,
+                frame_color=self.content_color,
+                content_color=self.content_color
+            )
+            self.path_completion = PathCompletion(menu, self.path_commands, self.get_workspace_callback)
 
     # def setup_menus(self, commands: List[str], get_context_items: Optional[Callable[[], List[str]]] = None,
                     # get_subcommands: Optional[Callable[[str], List[str]]] = None):
@@ -210,6 +230,17 @@ class InputComponent(Component):
                 self._position_server_menu()
                 return
         
+        # Try path completion (e.g. /cd)  
+        if self.get_workspace_callback:
+            self._ensure_path_menu()
+            self.path_completion.update(self.buffer.text, self.buffer.cursor_pos)
+
+            if self.path_completion.is_active:
+                if self.context_completion:
+                    self.context_completion.hide()
+                self._position_path_menu()
+                return
+
         # Try context completion if no other menu active
         if self.context_items_callback:
             self._ensure_context_menu()
@@ -270,6 +301,22 @@ class InputComponent(Component):
         
         self._position_menu_at(self.server_completion.menu, trigger_pos)
     
+    def _position_path_menu(self):
+        """Position path menu after the command and space (e.g. '/cd ')."""
+        if not self.path_completion or not self.path_completion.is_active:
+            return
+
+        text = self.buffer.text.lstrip()
+        leading_ws = len(self.buffer.text) - len(text)
+
+        # Position after "/<cmd> "
+        if ' ' in text:
+            trigger_pos = leading_ws + text.find(' ') + 1
+        else:
+            trigger_pos = leading_ws
+
+        self._position_menu_at(self.path_completion.menu, trigger_pos)
+
     def _position_context_menu(self):
         """Position context menu at the '@' character."""
         if not self.context_completion or not self.context_completion.is_active:
@@ -511,6 +558,7 @@ class InputComponent(Component):
                 self.subcommand_completion,
                 self.context_completion,
                 self.server_completion,
+                self.path_completion,
             )
         )
 
@@ -529,6 +577,7 @@ class InputComponent(Component):
             self.command_completion,
             self.subcommand_completion,
             self.server_completion,
+            self.path_completion,
             self.context_completion,
         ]:
             if completion and completion.is_active:

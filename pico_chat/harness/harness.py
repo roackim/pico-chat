@@ -3,6 +3,7 @@ import json
 import logging
 import time
 import uuid
+from pathlib import Path
 from typing import AsyncGenerator, Any, Dict, List, Optional
 
 from pico_chat.harness.llm_status import AgentState
@@ -15,6 +16,8 @@ from pico_chat.harness.llm_server_config import server_config
 
 # Import the minimal toolset
 from pico_chat.harness.tool_wrappers import create_minimal_tools
+
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +76,34 @@ class Harness:
         # Initialize LLM server
         self.server: LLMServer = create_server(server_config)
         self.debug_stream.log("INIT", f"Server initialized: {server_config.name} ({server_config.type}) at {server_config.base_url}")
+
+    def switch_workspace(self, new_path: str) -> list[str]:
+        """Change the workspace directory and rebuild project context.
+
+        Returns a list of warning strings (may be empty).
+        Raises ValueError if the path does not exist or is not a directory.
+        """
+        resolved = Path(new_path).expanduser().resolve()
+        if not resolved.exists():
+            raise ValueError(f"Path does not exist: {resolved}")
+        if not resolved.is_dir():
+            raise ValueError(f"Not a directory: {resolved}")
+
+        self.workspace = str(resolved)
+        os.chdir(self.workspace)
+
+        # Rebuild project context
+        self.project_context = build_harness_context(self.workspace)
+        self.debug_stream.log("WORKSPACE", f"Workspace changed to: {self.workspace}")
+
+        # Recheck git-repo warning
+        warnings: list[str] = []
+        if not is_git_repo(self.workspace):
+            warnings.append(
+                f"Not a git repository: '{self.workspace}'\n"
+                "File tree context is disabled. Initialize a git repo to enable it."
+            )
+        return warnings
 
     def switch_server(self, new_config):
         """Switch to a different LLM server at runtime.

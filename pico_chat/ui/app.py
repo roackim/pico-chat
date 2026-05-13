@@ -67,6 +67,10 @@ class chatTUI(ChatActionHandlers):
         # Setup context (@file) completion
         get_context_items = lambda: agent.list_files_and_folders() if hasattr(agent, 'list_files_and_folders') else []
         self.input_component.setup_context(get_context_items)
+
+        # Setup path completion for /cd
+        get_workspace = lambda: agent.workspace if hasattr(agent, 'workspace') else os.getcwd()
+        self.input_component.setup_path_commands(["cd"], get_workspace)
         
         self.input_box = Box(self.input_component, title="message", fg=self.input_component.frame_color)
 

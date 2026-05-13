@@ -1313,6 +1313,47 @@ class PermissionsCommand(Command):
             title="permissions"
         )
 
+class PwdCommand(Command):
+    def __init__(self):
+        super().__init__("pwd", "Show current workspace directory")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        workspace = ui.agent.workspace if hasattr(ui.agent, 'workspace') else "unknown"
+        ui.chat_history_panel.add_message(workspace, msg_type=SysMsg(), title="pwd")
+
+
+class CdCommand(Command):
+    def __init__(self):
+        super().__init__("cd", "Change workspace directory and rebuild context")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if not args:
+            ui.chat_history_panel.add_message(
+                "Usage: /cd <path>",
+                msg_type=SysMsgError()
+            )
+            return
+
+        path = " ".join(args)
+
+        try:
+            warnings = ui.agent.switch_workspace(path)
+            workspace = ui.agent.workspace
+
+            ui.chat_history_panel.add_message(
+                workspace,
+                msg_type=SysMsg(),
+                title="cd"
+            )
+
+            from pico_chat.ui.tui.msg_types import SysMsgWarning
+            for w in warnings:
+                ui.chat_history_panel.add_message(w, msg_type=SysMsgWarning())
+
+        except (ValueError, OSError, PermissionError) as e:
+            ui.chat_history_panel.add_message(str(e), msg_type=SysMsgError())
+
+
 # Command Registry
 COMMANDS: Dict[str, Command] = {
     "help":        HelpCommand(),
@@ -1327,6 +1368,8 @@ COMMANDS: Dict[str, Command] = {
     "get":         GetCommand(),
     "debug":       DebugCommand(),
     "permissions": PermissionsCommand(),
+    "cd":          CdCommand(),
+    "pwd":         PwdCommand(),
 }
 
 async def handle_command(ui: ChatUIProtocol, text: str):
