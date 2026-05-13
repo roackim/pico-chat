@@ -32,6 +32,14 @@ from typing import Dict, List
 #     except Exception:
 #         return []
 
+def is_git_repo(root) -> bool:
+    """Returns True if root (or any parent) contains a .git directory."""
+    path = Path(root).resolve()
+    for candidate in [path, *path.parents]:
+        if (candidate / '.git').exists():
+            return True
+    return False
+
 def get_ignore_spec(root):
     """Loads .gitignore patterns."""
     gitignore_path = os.path.join(root, '.gitignore')
@@ -119,6 +127,9 @@ def build_harness_context(root, format: str = None):
         from pico_chat import pico_cfg
         format = pico_cfg.config.context_format
     
+    if not is_git_repo(root):
+        return f"Project Root: {root}\n[WARNING: Not a git repository — file tree skipped]"
+
     spec = get_ignore_spec(root)
     context_output = []
     

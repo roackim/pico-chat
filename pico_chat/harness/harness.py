@@ -7,7 +7,7 @@ from typing import AsyncGenerator, Any, Dict, List, Optional
 
 from pico_chat.harness.llm_status import AgentState
 from pico_chat.harness.debug import get_debug_stream
-from pico_chat.harness.context_builder import build_harness_context
+from pico_chat.harness.context_builder import build_harness_context, is_git_repo
 from pico_chat.harness.system_prompt import get_system_message
 from pico_chat.harness import chunks
 from pico_chat.harness.llm_server import create_server, LLMServer
@@ -57,6 +57,12 @@ class Harness:
         )
         
         # Build initial project context
+        self.startup_warnings: list[str] = []
+        if not is_git_repo(self.workspace):
+            self.startup_warnings.append(
+                f"Not a git repository: '{self.workspace}'\n"
+                "File tree context is disabled. Initialize a git repo to enable it."
+            )
         self.project_context = build_harness_context(self.workspace)
         self.debug_stream.log("CONTEXT", "Project context built")
         

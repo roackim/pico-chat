@@ -23,7 +23,7 @@ from pico_chat.ui.tui.layout_utils import strip_ansi
 import logging
 from pico_chat.ui.commands import StatusCommand
 from pico_chat.ui.tui.colors import theme
-from pico_chat.ui.tui.msg_types import MsgType, PicoMsg, ThinkingMsg, UserMsg, SysMsg, SysMsgError, ToolCallMsg, ToolDraftMsg, AskPermissionMsg
+from pico_chat.ui.tui.msg_types import MsgType, PicoMsg, ThinkingMsg, UserMsg, SysMsg, SysMsgError, SysMsgWarning, ToolCallMsg, ToolDraftMsg, AskPermissionMsg
 
 from pico_chat import pico_cfg
 from pico_chat.ui.logging_handlers import setup_tui_logging
@@ -801,6 +801,13 @@ class chatTUI(ChatActionHandlers):
             self.chat_history_panel.replace_message(placeholder, status_msg)
             
             logger.info(f"Server status online: {status['online']}")
+
+            # Show any startup warnings (e.g. not a git repository)
+            for warning in self.agent.startup_warnings:
+                self.chat_history_panel.add_message(
+                    warning,
+                    msg_type=SysMsgWarning(),
+                )
             
 
         # Run all tasks
