@@ -209,54 +209,32 @@ class ServerAddCommand(Command):
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         """
         Add a named server configuration.
-        Usage: /server add <type> <model/url> [name] [provider]
+        Usage: /server add <name> <type> <model/url> [provider]
         Examples:
-          /server add openrouter deepseek/deepseek-chat open-deepseek
-          /server add openrouter anthropic/claude-3.5-sonnet my-claude DeepInfra
-          /server add llamacpp http://localhost:8080/v1 local-llama
-          /server add llamacpp http://localhost:8080/v1  (auto-generates name)
+          /server add my-claude openrouter anthropic/claude-3.5-sonnet
+          /server add my-claude openrouter anthropic/claude-3.5-sonnet Anthropic
+          /server add local llamacpp http://localhost:8080/v1
         """
-        if len(args) < 2:
+        if len(args) < 3:
             command_text = "/server add " + " ".join(args) if args else "/server add"
             ui.chat_history_panel.add_message(
-                "Usage: /server add <type> <model/url> [name] [provider]\n\n"
+                "Usage: /server add <name> <type> <model/url> [provider]\n\n"
                 "Examples:\n"
-                "  /server add openrouter anthropic/claude-3.5-sonnet my-claude\n"
-                "  /server add openrouter deepseek/deepseek-chat open-deepseek DeepInfra\n"
-                "  /server add llamacpp http://localhost:8080/v1 local-llama\n"
-                "  /server add llamacpp http://localhost:8080/v1  (auto-generates name)\n\n"
-                "For OpenRouter, optional provider routes to specific inference provider\n"
+                "  /server add my-claude openrouter anthropic/claude-3.5-sonnet\n"
+                "  /server add my-claude openrouter anthropic/claude-3.5-sonnet Anthropic\n"
+                "  /server add local llamacpp http://localhost:8080/v1\n\n"
+                "For OpenRouter, optional provider routes to a specific inference provider.\n"
                 "Common providers: Anthropic, OpenAI, DeepInfra, Together, Fireworks",
                 msg_type=SysMsgError(),
                 command_text=command_text
             )
             return
-        
-        server_type = args[0].lower()
-        model_or_url = args[1]
-        
-        # Generate default name if not provided
-        if len(args) >= 3 and args[2]:
-            server_name = args[2]
-            provider = args[3] if len(args) > 3 else None
-        else:
-            # Auto-generate name
-            base_name = server_type  # Default to type name
-            if server_type == "openrouter" and "/" in model_or_url:
-                # Extract model name after slash (e.g., "anthropic/claude-3.5-sonnet" -> "claude-3.5-sonnet")
-                base_name = model_or_url.split("/")[-1]
-            
-            # Check for conflicts and add suffix if needed
-            from pico_chat import pico_cfg
-            servers = pico_cfg.config.servers or {}
-            server_name = base_name
-            counter = 2
-            while server_name in servers:
-                server_name = f"{base_name}#{counter}"
-                counter += 1
-            
-            provider = None  # No provider when name is auto-generated
-        
+
+        server_name = args[0]
+        server_type = args[1].lower()
+        model_or_url = args[2]
+        provider = args[3] if len(args) > 3 else None
+
         if server_type == "openrouter":
             await self._add_openrouter(ui, model_or_url, server_name, provider, args)
         elif server_type == "llamacpp":
@@ -849,13 +827,74 @@ class ServerRemoveCommand(Command):
             )
 
 
+class ServerInfoCommand(Command):
+    def __init__(self):
+        super().__init__("info", "Show full details for a server configuration")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if not args:
+            ui.chat_history_panel.add_message(
+                "Usage: /server info <name>\n\n"
+                "Use '/server list' to see available servers",
+                msg_type=SysMsgError()
+            )
+            return
+
+        server_name = args[0]
+        from pico_chat import pico_cfg
+        from pico_chat.ui.tui.colors import theme
+
+        servers = pico_cfg.config.servers
+        if server_name not in servers:
+            ui.chat_history_panel.add_message(
+                f"Server '{server_name}' not found.\n\n"
+                "Use '/server list' to see available servers",
+                msg_type=SysMsgError()
+            )
+            return
+
+        cfg = servers[server_name]
+        active = pico_cfg.config.active_server
+        color = str(theme.WARNING)
+        reset = theme.reset()
+
+        msg = color + f"Name             : {reset}{server_name}"
+        if server_name == active:
+            msg += f" {color}(active){reset}"
+        msg += "\n"
+        msg += color + f"Type             : {reset}{cfg.get('type', 'unknown')}\n"
+
+        server_type = cfg.get("type", "")
+        if server_type == "openrouter":
+            msg += color + f"Model            : {reset}{cfg.get('model', 'unknown')}\n"
+            provider = cfg.get("provider")
+            if provider:
+                msg += color + f"Provider         : {reset}{provider}\n"
+            msg += color + f"Base URL         : {reset}{cfg.get('base_url', 'unknown')}\n"
+            api_key_env = cfg.get("api_key_env", "")
+            msg += color + f"API Key Env      : {reset}{api_key_env}\n"
+        elif server_type == "llamacpp":
+            msg += color + f"Base URL         : {reset}{cfg.get('base_url', 'unknown')}\n"
+
+        msg += color + f"Timeout          : {reset}{cfg.get('timeout', 30.0)}s\n"
+        msg += color + f"Retry Attempts   : {reset}{cfg.get('retry_attempts', 3)}\n"
+        msg += color + f"Retry Delay      : {reset}{cfg.get('retry_delay', 2.0)}s\n"
+        if cfg.get("max_context"):
+            msg += color + f"Max Context      : {reset}{cfg['max_context']:,} tokens\n"
+
+        ui.chat_history_panel.add_message(msg.rstrip(), msg_type=SysMsg(), title="server")
+
+
 class ServerCommand(Command):
     def __init__(self):
+        _remove = ServerRemoveCommand()
         subcommands = {
-            "add": ServerAddCommand(),
-            "list": ServerListCommand(),
-            "use": ServerUseCommand(),
-            "remove": ServerRemoveCommand(),
+            "add":    ServerAddCommand(),
+            "list":   ServerListCommand(),
+            "use":    ServerUseCommand(),
+            "info":   ServerInfoCommand(),
+            "remove": _remove,
+            "rm":     _remove,
         }
         super().__init__("server", "Manage LLM server configurations", subcommands=subcommands)
 
@@ -921,127 +960,6 @@ class ToolsCommand(Command):
             msg_type=SysMsg(),
             title="tools",
         )
-
-class SetFpsCommand(Command):
-    def __init__(self):
-        super().__init__("fps", "Set target FPS (frames per second, 0 = uncapped)")
-
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        if not args:
-            ui.chat_history_panel.add_message(
-                "Usage: /set fps <number>\nExamples: /set fps 60, /set fps 0 (uncapped)",
-                msg_type=SysMsgError()
-            )
-            return
-        
-        try:
-            fps = int(args[0])
-            if fps < 0:
-                ui.chat_history_panel.add_message(
-                    "FPS must be 0 or greater",
-                    msg_type=SysMsgError()
-                )
-                return
-            
-            if fps > 120:
-                ui.chat_history_panel.add_message(
-                    "Warning: FPS values above 120 may cause high CPU usage",
-                    msg_type=SysMsg()
-                )
-            
-            # Update compositor FPS
-            if ui.compositor:
-                ui.compositor.fps = fps
-                if hasattr(ui.compositor, "render_times"):
-                    ui.compositor.render_times.clear()
-                ui.chat_history_panel.add_message(
-                    "Target FPS set to uncapped" if fps == 0 else f"Target FPS set to {fps}",
-                    msg_type=SysMsg()
-                )
-            else:
-                ui.chat_history_panel.add_message(
-                    "Compositor not available",
-                    msg_type=SysMsgError()
-                )
-                
-        except ValueError:
-            ui.chat_history_panel.add_message(
-                f"Invalid number: {args[0]}",
-                msg_type=SysMsgError()
-            )
-
-class GetFpsCommand(Command):
-    def __init__(self):
-        super().__init__("fps", "Get current target FPS and actual measured FPS")
-
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        if ui.compositor:
-            target_fps = ui.compositor.fps
-            actual_fps = ui.compositor.get_actual_fps()
-            
-            color = str(theme.WARNING)
-            reset = theme.reset()
-            target_label = "uncapped" if target_fps == 0 else str(target_fps)
-            msg = color + f"Target FPS       : {reset}{target_label}\n"
-            msg += color + f"Actual FPS       : {reset}{actual_fps:.2f}"
-            
-            ui.chat_history_panel.add_message(
-                msg,
-                msg_type=SysMsg()
-            )
-        else:
-            ui.chat_history_panel.add_message(
-                "Compositor not available",
-                msg_type=SysMsgError()
-            )
-
-class SetCommand(Command):
-    def __init__(self):
-        subcommands = {
-            "fps": SetFpsCommand(),
-        }
-        super().__init__("set", "Set configuration parameters", subcommands=subcommands)
-
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        if not args:
-            # Show available subcommands
-            help_text = "Usage: /set <parameter> <value>\n\nAvailable parameters:\n"
-            for name, cmd in sorted(self.subcommands.items()):
-                help_text += f"  {name.ljust(15)} - {cmd.description}\n"
-            ui.chat_history_panel.add_message(help_text.rstrip(), msg_type=SysMsgError())
-        else:
-            subcmd_name = args[0].lower()
-            if subcmd_name in self.subcommands:
-                await self.subcommands[subcmd_name].execute(ui, args[1:])
-            else:
-                ui.chat_history_panel.add_message(
-                    f"Unknown parameter: {subcmd_name}",
-                    msg_type=SysMsgError()
-                )
-
-class GetCommand(Command):
-    def __init__(self):
-        subcommands = {
-            "fps": GetFpsCommand(),
-        }
-        super().__init__("get", "Get configuration parameters", subcommands=subcommands)
-
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        if not args:
-            # Show available subcommands
-            help_text = "Usage: /get <parameter>\n\nAvailable parameters:\n"
-            for name, cmd in sorted(self.subcommands.items()):
-                help_text += f"  {name.ljust(15)} - {cmd.description}\n"
-            ui.chat_history_panel.add_message(help_text.rstrip(), msg_type=SysMsgError())
-        else:
-            subcmd_name = args[0].lower()
-            if subcmd_name in self.subcommands:
-                await self.subcommands[subcmd_name].execute(ui, args[1:])
-            else:
-                ui.chat_history_panel.add_message(
-                    f"Unknown parameter: {subcmd_name}",
-                    msg_type=SysMsgError()
-                )
 
 class DebugPanelCommand(Command):
     def __init__(self):
@@ -1364,8 +1282,6 @@ COMMANDS: Dict[str, Command] = {
     "status":      StatusCommand(),
     "server":      ServerCommand(),
     "tools":       ToolsCommand(),
-    "set":         SetCommand(),
-    "get":         GetCommand(),
     "debug":       DebugCommand(),
     "permissions": PermissionsCommand(),
     "cd":          CdCommand(),
