@@ -203,5 +203,21 @@ TESTING = ToolPermissionsProfile(
     memory="allow",  # Ask for memory operations too
 )
 
+# Scaffolder profile: read-only inside repo, deny everything else.
+# Used by subagents to explore the codebase without side effects.
+scaffolder = ToolPermissionsProfile(
+    name="scaffolder",
+    read=FilePermissions(inside_repo="allow", outside_repo="deny"),
+    write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+    patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+    run=RunPermissions(
+        allow=set(),
+        deny=set(),
+        ask=set(),
+        others="deny",
+    ),
+    memory="deny",
+)
+
 # Global permissions profile (can be changed at runtime)
 permissions: ToolPermissionsProfile = permissive # permissive

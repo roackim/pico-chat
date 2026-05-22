@@ -76,3 +76,24 @@ class GenerationMetrics(Chunk):
     tokens_per_second: float
     ttft_ms: Optional[float] = None  # Time to first token
     duration_ms: Optional[float] = None  # Total duration
+
+
+@dataclass
+class SubagentsWaiting(Chunk):
+    """Emitted when the harness is auto-waiting for background subagents to finish."""
+    count: int
+
+
+@dataclass
+class SubagentResult(Chunk):
+    """Emitted when a background subagent completes (one per subagent)."""
+    index: int
+    task: str
+    result: str
+
+
+@dataclass
+class SubagentsDone(Chunk):
+    """Emitted when all background subagents have finished or been aborted."""
+    completed: int
+    aborted: int

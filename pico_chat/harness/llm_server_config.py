@@ -45,32 +45,15 @@ _DEFAULT_SERVER = LLMServerConfig(
 )
 
 
-def get_server_config() -> LLMServerConfig:
-    """
-    Get the active server configuration.
-    
-    Loads from pico_cfg if available, otherwise returns default llamacpp server.
-    Environment variables override config file values for API keys.
-    """
-    from pico_chat import pico_cfg
-    
-    server_dict = pico_cfg.config.get_active_server_config()
-    
-    if server_dict is None:
-        # No config found, return default
-        return _DEFAULT_SERVER
-    
-    # Parse server dict into LLMServerConfig
+def _parse_server_dict(name: str, server_dict: dict) -> LLMServerConfig:
+    """Parse a server config dict into an LLMServerConfig."""
     server_type = server_dict.get("type", "llamacpp")
-    
-    # Get API key from environment variable if specified
     api_key = server_dict.get("api_key", "")
     api_key_env = server_dict.get("api_key_env")
     if api_key_env:
         api_key = os.getenv(api_key_env, api_key)
-    
     return LLMServerConfig(
-        name=pico_cfg.config.active_server,
+        name=name,
         type=server_type,
         base_url=server_dict.get("base_url", "http://localhost:8080/v1"),
         api_key=api_key,
@@ -81,6 +64,35 @@ def get_server_config() -> LLMServerConfig:
         retry_delay=server_dict.get("retry_delay", 2.0),
         provider=server_dict.get("provider"),
     )
+
+
+def get_server_config() -> LLMServerConfig:
+    """
+    Get the active server configuration.
+    
+    Loads from pico_cfg if available, otherwise returns default llamacpp server.
+    Environment variables override config file values for API keys.
+    """
+    from pico_chat import pico_cfg
+
+    server_dict = pico_cfg.config.get_active_server_config()
+    if server_dict is None:
+        return _DEFAULT_SERVER
+    return _parse_server_dict(pico_cfg.config.active_server, server_dict)
+
+
+def get_server_config_by_name(name: str) -> LLMServerConfig | None:
+    """
+    Get a server configuration by name.
+
+    Returns None if the named server is not found in config.
+    """
+    from pico_chat import pico_cfg
+
+    server_dict = pico_cfg.config.servers.get(name)
+    if server_dict is None:
+        return None
+    return _parse_server_dict(name, server_dict)
 
 
 # Global server configuration - call get_server_config() to get current config

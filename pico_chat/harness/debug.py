@@ -13,8 +13,8 @@ class DebugStream:
     def __init__(self):
         self.config = pico_cfg.config
         self.log_path = Path("debug_stream.log")
-        # Keep file open for performance
-        self._file = open(self.log_path, "a", encoding="utf-8", buffering=1) # Line buffering
+        # Keep file open for performance (only when enabled)
+        self._file = open(self.log_path, "a", encoding="utf-8", buffering=1) if self.config.debug_log_enabled else None
         # Also get Python logger for TUI integration
         self._logger = logging.getLogger("harness")
 
@@ -33,15 +33,11 @@ class DebugStream:
         entry = f"[{timestamp}] [{direction}] {payload_str}\n"
         
         # Write to the open file handle
-        try:
-            self._file.write(entry)
-            # Flushing is handled by buffering=1 (line buffering) roughly, 
-            # or explicit self._file.flush() if we want immediate disk sync (slower).
-            # For "The Wire" debugging, immediate flush isn't critical strictly per token
-            # if we get crashes, but beneficial.
-            # Let's trust the OS buffering unless debugging.
-        except Exception:
-            pass # Don't crash on logging error
+        if self._file is not None:
+            try:
+                self._file.write(entry)
+            except Exception:
+                pass # Don't crash on logging error
         
         # Also send to Python logging for TUI debug panel
         try:
@@ -54,7 +50,7 @@ class DebugStream:
     def __del__(self):
         """Cleanup file handle on destruction."""
         try:
-            if hasattr(self, '_file') and self._file:
+            if hasattr(self, '_file') and self._file is not None:
                 self._file.close()
         except:
             pass

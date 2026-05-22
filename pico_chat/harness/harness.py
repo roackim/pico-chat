@@ -30,11 +30,12 @@ THINKING_TAGS = [
 COMPACTION_MARKER_PREFIX = "[COMPACTION_SUMMARY]"
 
 class Harness:
-    def __init__(self, workspace_path: str | None = None):
+    def __init__(self, workspace_path: str | None = None, depth: int = 0):
         self.debug_stream = get_debug_stream()
         self.state = AgentState.IDLE
         self.history = []
-        
+        self.depth = depth
+
         # Memory system
         self.memory = {}  # Current memory state
         self.memory_snapshots = {}  # Snapshots keyed by user message ID
@@ -44,19 +45,33 @@ class Harness:
         
         # Tool output history for @ references
         self.tool_output_history = []  # [(tool_name, result), ...] - last 10
-        
+
         # User input queue for tool confirmations and prompts
         self._user_response_queue = asyncio.Queue()
+
+        # Background subagent tracking
+        self._pending_subagents: list = []      # [{index, task, future}, ...]
+        self._abort_subagents_event = asyncio.Event()
         
         # Tools initialization with minimal toolset
         import os
         self.workspace = workspace_path or os.getcwd()
+
+        # Subagents use scaffolder (read-only) permissions
+        from pico_chat.harness.tool_permissions import scaffolder
+        tool_permissions = scaffolder if depth > 0 else None
+        self._tool_permissions = tool_permissions  # used by _check_tool_permission
+
         self.tools_map = create_minimal_tools(
             workspace_path=self.workspace,
-            confirmation_callback=self._request_user_confirmation,
+            # Subagents are read-only; they never need to ask the user for approval.
+            confirmation_callback=None if depth > 0 else self._request_user_confirmation,
             memory_store=self.memory,
             iteration_state=self.iteration,
-            get_tool_output=self._get_tool_output
+            get_tool_output=self._get_tool_output,
+            permissions=tool_permissions,
+            depth=depth,
+            pending_subagents=self._pending_subagents,
         )
         
         # Build initial project context
@@ -72,10 +87,18 @@ class Harness:
         # Calculate schemas once and log
         self.tool_schemas = [tool.get_schema() for tool in self.tools_map.values()] if self.tools_map else None
         self.debug_stream.log("TOOL_SCHEMAS", self.tool_schemas)
-        
-        # Initialize LLM server
-        self.server: LLMServer = create_server(server_config)
-        self.debug_stream.log("INIT", f"Server initialized: {server_config.name} ({server_config.type}) at {server_config.base_url}")
+
+        # Select LLM server: subagents use subagent_server if configured
+        from pico_chat import pico_cfg
+        from pico_chat.harness.llm_server_config import get_server_config_by_name
+        chosen_config = server_config
+        if depth > 0 and pico_cfg.config.subagent_server:
+            sub_cfg = get_server_config_by_name(pico_cfg.config.subagent_server)
+            if sub_cfg:
+                chosen_config = sub_cfg
+
+        self.server: LLMServer = create_server(chosen_config)
+        self.debug_stream.log("INIT", f"Server initialized: {chosen_config.name} ({chosen_config.type}) at {chosen_config.base_url}")
 
     def switch_workspace(self, new_path: str) -> list[str]:
         """Change the workspace directory and rebuild project context.
@@ -207,6 +230,10 @@ class Harness:
         """Called by the UI when a response to a tool's prompt is ready."""
         self._user_response_queue.put_nowait(text)
 
+    def abort_subagents(self):
+        """Called by the UI when the user wants to abort waiting background subagents."""
+        self._abort_subagents_event.set()
+
     async def _wait_for_user_input(self, prompt: str) -> str:
         """Wait for the user to provide text via the UI."""
         # Note: The UI is responsible for seeing the prompt (yielded below) 
@@ -221,8 +248,9 @@ class Harness:
             "ask" - need user permission
             "deny" - auto-deny
         """
-        from pico_chat.harness.tool_permissions import permissions
-        
+        from pico_chat.harness.tool_permissions import permissions as global_permissions
+        permissions = self._tool_permissions if self._tool_permissions is not None else global_permissions
+
         if tool_name == "read":
             path = args.get("path", "")
             from pathlib import Path
@@ -293,6 +321,10 @@ class Harness:
             # Iteration operations - auto-allow (read-only tracking)
             return "allow"
         
+        elif tool_name in ["subagent", "wait_for_subagents"]:
+            # Subagent operations are always approved
+            return "allow"
+
         return "ask"  # Default to asking
     
     def _build_permission_prompt(self, tool_name: str, args: dict) -> str:
@@ -1128,6 +1160,50 @@ class Harness:
         
         return status
 
+    async def _auto_wait_subagents(self) -> AsyncGenerator[chunks.Chunk, None]:
+        """Auto-wait for any background subagents still running after the LLM loop ends."""
+        if not self._pending_subagents:
+            return
+
+        pending = list(self._pending_subagents)
+        yield chunks.SubagentsWaiting(count=len(pending))
+
+        futures_map = {p["future"]: p for p in pending}
+        remaining = set(futures_map.keys())
+        completed = 0
+        aborted = 0
+
+        abort_task = asyncio.create_task(self._abort_subagents_event.wait())
+        try:
+            while remaining:
+                done, _ = await asyncio.wait(
+                    remaining | {abort_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                if abort_task in done:
+                    for f in remaining:
+                        f.cancel()
+                    aborted = len(remaining)
+                    remaining.clear()
+                    break
+
+                for f in done - {abort_task}:
+                    remaining.discard(f)
+                    p = futures_map[f]
+                    try:
+                        result = f.result()
+                    except Exception as e:
+                        result = f"[error: {e}]"
+                    yield chunks.SubagentResult(index=p["index"], task=p["task"], result=result)
+                    completed += 1
+        finally:
+            abort_task.cancel()
+            self._abort_subagents_event.clear()
+            self._pending_subagents.clear()
+
+        yield chunks.SubagentsDone(completed=completed, aborted=aborted)
+
     async def chat(self, user_input: str) -> AsyncGenerator[chunks.Chunk, None]:
         """
         Main chat loop orchestrator.
@@ -1185,6 +1261,10 @@ class Harness:
                 raise e
             
         self.state = AgentState.IDLE
+
+        # Auto-wait for any background subagents still running
+        async for chunk in self._auto_wait_subagents():
+            yield chunk
 
 _harness = None
 

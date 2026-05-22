@@ -170,6 +170,8 @@ def _build_harness_stub(tmp_path, read_tool):
     harness.workspace = str(tmp_path)
     harness.tools_map = {"read": read_tool}
     harness._user_response_queue = asyncio.Queue()
+    harness._tool_permissions = None
+    harness.tool_output_history = []
     return harness
 
 
@@ -713,6 +715,8 @@ class TestHarnessRunPermissionFlow:
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
         harness._user_response_queue = asyncio.Queue()
+        harness._tool_permissions = None
+        harness.tool_output_history = []
         
         tool_call = {
             "id": "call_1",
@@ -764,6 +768,8 @@ class TestHarnessRunPermissionFlow:
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
         harness._user_response_queue = asyncio.Queue()
+        harness._tool_permissions = None
+        harness.tool_output_history = []
         harness.set_user_response("yes")
         
         tool_call = {
@@ -815,6 +821,8 @@ class TestHarnessRunPermissionFlow:
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
         harness._user_response_queue = asyncio.Queue()
+        harness._tool_permissions = None
+        harness.tool_output_history = []
         harness.set_user_response("allow")
         
         tool_call = {
@@ -866,6 +874,8 @@ class TestHarnessRunPermissionFlow:
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
         harness._user_response_queue = asyncio.Queue()
+        harness._tool_permissions = None
+        harness.tool_output_history = []
         
         tool_call = {
             "id": "call_4",
@@ -913,6 +923,8 @@ class TestHarnessRunPermissionFlow:
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
         harness._user_response_queue = asyncio.Queue()
+        harness._tool_permissions = None
+        harness.tool_output_history = []
         harness.set_user_response("no")
         
         tool_call = {
@@ -962,6 +974,8 @@ class TestHarnessRunPermissionFlow:
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
         harness._user_response_queue = asyncio.Queue()
+        harness._tool_permissions = None
+        harness.tool_output_history = []
         harness.set_user_response("yes")
         
         tool_call = {

@@ -1,0 +1,64 @@
+# pico_chat/ui/ — Chat UI Layer
+
+Async TUI built from scratch. Handles chat display, user input, message actions, and slash commands.
+
+See [notes/ui.md](../notes/ui.md) for the full architecture overview.
+
+---
+
+## Files
+
+### `app.py`
+`chatTUI` — main application class.
+- Sets up layout, compositor, and component tree
+- Runs the async event loop
+- Routes incoming `Chunk` objects from the harness to the chat display
+- Dispatches user input to the harness or command handler
+
+### `chat_history_panel.py`
+`ChatHistoryPanel` — extends `TextComponent` for scrollable message display.
+- `add_message(text, msg_type, title=None, ...)` — creates a `Message`, appends it, scrolls to bottom
+- `new_message(...)` — creates but does not append (use with `replace_message`)
+- `replace_message(old, new)` — swap a placeholder message with a final one
+- `clear()` — removes all messages
+- Handles keyboard focus, per-message focus navigation, and width-change reformatting
+
+### `chat_message.py`
+`Message` — wraps content with a `MsgType`, colors, padding, and action set.
+- Constructor accepts `msg_type`, `title`, `frame_color`, `content_color`, `left_margin`, `harness_message_ids`
+- `finalize()` — marks message complete; removes STOP action, enables DELETE
+- `get_active_actions()` — returns actions appropriate for current state
+- Internally composed of a `TextComponent` inside a `Box`
+- See [notes/ui.md](../notes/ui.md) for the full MsgType and MsgAction reference.
+
+### `chat_action_handlers.py`
+`ChatActionHandlers` mixin for `chatTUI`.
+- Copy to clipboard via `xclip` or `wl-copy` (auto-detected)
+- Delete message from history
+- Edit message in-place
+- Retry (re-send last user message)
+
+### `commands.py`
+Slash command system.
+- `Command` base class: `name`, `description`, `subcommands`, `execute(ui, args)`
+- `COMMANDS` dict — module-level registry; all top-level commands registered here
+- `handle_command(ui, text)` — strips `/`, looks up `COMMANDS`, dispatches
+- `get_command_list()` / `get_subcommand_list(cmd)` — used by input autocomplete
+- Commands with sub-operations pass a `subcommands` dict to the constructor (e.g. `ServerCommand`)
+- Commands starting with `_` are hidden from `/help`
+- See [notes/ui.md](../notes/ui.md) for how to add a new command.
+
+### `logging_handlers.py`
+`TuiLogHandler` — Python `logging.Handler` that routes log records to the debug panel.
+Filters out high-volume noise from known verbose loggers.
+
+### `legacy_markdown_rendering.py`
+**Dead code.** Previous markdown renderer, disabled. Kept as reference. Do not modify or import.
+
+---
+
+## Subdirectories
+
+| Directory | Purpose |
+|-----------|---------|
+| [tui/](./ui-tui.md) | Low-level terminal rendering engine |

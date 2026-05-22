@@ -53,8 +53,17 @@ class Config:
         
         self.target_fps: int = 60
         
+        # Debug settings
+        self.debug_log_enabled: bool = False  # Write debug_stream.log to disk
+
         # Context building settings
         self.context_format: Literal["tree", "flat"] = "tree"  # Tree format saves tokens by avoiding path repetition
+
+        # Subagent settings
+        self.subagent_max_depth: int = 1        # Maximum subagent recursion depth
+        self.subagent_server: str | None = None  # Server name for subagents (None = inherit active_server)
+        self.subagent_timeout: int = 120         # Seconds before a subagent is auto-aborted
+        self.subagent_max_context: int | None = None  # Max tokens per subagent (None = unlimited)
 
         # Load config from file if path provided or default exists
         if config_path:
@@ -88,8 +97,11 @@ class Config:
             # Load other settings
             if "settings" in data:
                 settings = data["settings"]
-                for key in ["render_thinking", "max_file_size", "max_search_results", 
-                           "command_timeout", "target_fps", "context_format"]:
+                for key in ["render_thinking", "max_file_size", "max_search_results",
+                           "command_timeout", "target_fps", "context_format",
+                           "debug_log_enabled",
+                           "subagent_max_depth", "subagent_server",
+                           "subagent_timeout", "subagent_max_context"]:
                     if key in settings:
                         setattr(self, key, settings[key])
                         

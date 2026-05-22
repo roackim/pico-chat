@@ -304,6 +304,7 @@ class chatTUI(ChatActionHandlers):
                             msg.tool_args = chunk.tool_args
                             msg.tool_status = "approved"
                             msg.rebuild_tool_display()
+                        self.pending_permission_prompt = None
                     
                     elif chunk.status == chunks.ToolStatus.DENIED:
                         msg = self.active_tool_messages.get(tool_id)
@@ -317,6 +318,7 @@ class chatTUI(ChatActionHandlers):
                             msg.rebuild_tool_display()
                             msg.finalize()
                             del self.active_tool_messages[tool_id]
+                        self.pending_permission_prompt = None
                     
                     elif chunk.status == chunks.ToolStatus.EXECUTING:
                         msg = self.active_tool_messages.get(tool_id)

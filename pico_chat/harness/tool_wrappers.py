@@ -329,42 +329,180 @@ class LoopAbortTool(ToolWrapper):
         return self.iteration_tools.loop_abort()
 
 
+import asyncio as _asyncio
+
+
+class _ContextLimitError(Exception):
+    def __init__(self, tokens: int):
+        self.tokens = tokens
+
+
+class SubagentTool(ToolWrapper):
+    """Spawn a read-only scaffolding subagent (foreground or background)"""
+
+    def __init__(self, workspace_path: str | Path, depth: int, pending_subagents: list):
+        super().__init__(
+            name="subagent",
+            description=(
+                "Spawn a read-only scaffolding subagent to explore the codebase and return findings. "
+                "The subagent can only read files — it cannot write, patch, or run commands. "
+                "Set background=true to queue multiple subagents in parallel; "
+                "collect their results with wait_for_subagents. "
+                "Returns the subagent's complete text response (foreground) or a queue confirmation (background)."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "task": {
+                        "type": "string",
+                        "description": "The task for the subagent. Be explicit — it has no conversation history."
+                    },
+                    "background": {
+                        "type": "boolean",
+                        "description": "If true, run in background and return immediately. Collect results with wait_for_subagents."
+                    }
+                },
+                "required": ["task"]
+            }
+        )
+        self.workspace_path = workspace_path
+        self.depth = depth
+        self._pending = pending_subagents
+
+    async def _run_subagent(self, task: str) -> str:
+        from pico_chat import pico_cfg
+        from pico_chat.harness.harness import Harness
+        from pico_chat.harness import chunks as chunk_types
+
+        timeout = pico_cfg.config.subagent_timeout
+        max_context = pico_cfg.config.subagent_max_context
+
+        sub = Harness(workspace_path=str(self.workspace_path), depth=self.depth + 1)
+
+        result_parts = []
+        cumulative_tokens = 0
+        last_call_tokens = 0
+        in_assistant_turn = False
+
+        async def _collect():
+            nonlocal cumulative_tokens, last_call_tokens, in_assistant_turn
+            async for chunk in sub.chat(task):
+                if isinstance(chunk, chunk_types.MessageStart):
+                    if chunk.role == "assistant":
+                        if in_assistant_turn:
+                            cumulative_tokens += last_call_tokens
+                            last_call_tokens = 0
+                        in_assistant_turn = True
+                elif isinstance(chunk, chunk_types.Content):
+                    result_parts.append(chunk.content)
+                elif isinstance(chunk, chunk_types.GenerationMetrics):
+                    last_call_tokens = chunk.tokens
+                    if max_context and (cumulative_tokens + last_call_tokens) > max_context:
+                        raise _ContextLimitError(cumulative_tokens + last_call_tokens)
+
+        try:
+            await _asyncio.wait_for(_collect(), timeout=timeout)
+        except _asyncio.TimeoutError:
+            return f"[subagent timed out after {timeout}s]"
+        except _ContextLimitError as e:
+            return f"[subagent aborted: context limit exceeded ({e.tokens} > {max_context} tokens)]"
+
+        return "".join(result_parts) or "[subagent returned no response]"
+
+    async def execute(self, task: str, background: bool = False) -> str:
+        from pico_chat import pico_cfg
+
+        if self.depth >= pico_cfg.config.subagent_max_depth:
+            return f"[subagent] Depth limit reached ({pico_cfg.config.subagent_max_depth})."
+
+        if not background:
+            return await self._run_subagent(task)
+
+        index = len(self._pending)
+        future = _asyncio.create_task(self._run_subagent(task))
+        self._pending.append({"index": index, "task": task, "future": future})
+        return f"[subagent:{index}] Queued in background."
+
+
+class WaitForSubagentsTool(ToolWrapper):
+    """Wait for all background subagents and collect results"""
+
+    def __init__(self, pending_subagents: list):
+        super().__init__(
+            name="wait_for_subagents",
+            description=(
+                "Wait for all background subagents to finish and return their results. "
+                "Call this after launching subagents with background=true."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        )
+        self._pending = pending_subagents
+
+    async def execute(self) -> str:
+        if not self._pending:
+            return "[wait_for_subagents] No pending subagents."
+
+        pending = list(self._pending)
+        futures = [p["future"] for p in pending]
+        results = await _asyncio.gather(*futures, return_exceptions=True)
+        self._pending.clear()
+
+        parts = []
+        for p, result in zip(pending, results):
+            if isinstance(result, Exception):
+                parts.append(f"[subagent:{p['index']}] Error: {result}")
+            else:
+                parts.append(f"[subagent:{p['index']}] Task: {p['task']}\n{result}")
+
+        return "\n\n".join(parts)
+
+
 def create_minimal_tools(
     workspace_path: str | Path,
     confirmation_callback: Optional[Callable[[str], bool]] = None,
     memory_store: Optional[Dict[str, Dict]] = None,
     iteration_state: Optional[Dict[str, Any]] = None,
-    get_tool_output: Optional[Callable[[str], Optional[str]]] = None
+    get_tool_output: Optional[Callable[[str], Optional[str]]] = None,
+    permissions=None,
+    depth: int = 0,
+    pending_subagents: Optional[list] = None,
 ) -> dict[str, ToolWrapper]:
     """
     Create the minimal toolset with harness-compatible wrappers.
-    
+
     Args:
         workspace_path: Root directory for all operations
         confirmation_callback: Function to prompt user for command confirmation
         memory_store: Reference to harness memory dict (for memory tools)
         iteration_state: Reference to harness iteration dict (for loop tools)
         get_tool_output: Callback to resolve @ references to previous tool outputs
-        
+        permissions: ToolPermissionsProfile to use (defaults to default_permissions)
+        depth: Current subagent depth (0 = top-level harness)
+        pending_subagents: Shared list for background subagent tracking
+
     Returns:
         Dict of tool name to tool wrapper
     """
-    toolset = MinimalToolset(workspace_path, confirmation_callback)
-    
+    toolset = MinimalToolset(workspace_path, confirmation_callback, permissions=permissions)
+
     tools = {
         "read": ReadTool(toolset),
         "write": WriteTool(toolset),
         "patch": PatchTool(toolset),
         "run": RunTool(toolset),
     }
-    
+
     # Memory tools disabled - conversation history serves as working memory
     # To re-enable: uncomment and ensure memory_store is passed to create_minimal_tools()
     # if memory_store is not None:
     #     memory_tools = MemoryTools(memory_store)
     #     tools["memorize"] = MemorizeTool(memory_tools)
     #     tools["forget"] = ForgetTool(memory_tools)
-    
+
     # Add iteration tools if iteration state is provided
     if iteration_state is not None:
         iteration_tools = IterationTools(workspace_path, iteration_state, get_tool_output)
@@ -372,5 +510,12 @@ def create_minimal_tools(
         tools["loop_next"] = LoopNextTool(iteration_tools)
         tools["loop_itr_done"] = LoopItrDoneTool(iteration_tools)
         tools["loop_abort"] = LoopAbortTool(iteration_tools)
-    
+
+    # Add subagent tools if within depth limit
+    from pico_chat import pico_cfg
+    _pending = pending_subagents if pending_subagents is not None else []
+    if depth < pico_cfg.config.subagent_max_depth:
+        tools["subagent"] = SubagentTool(workspace_path, depth, _pending)
+    tools["wait_for_subagents"] = WaitForSubagentsTool(_pending)
+
     return tools

@@ -1231,6 +1231,105 @@ class PermissionsCommand(Command):
             title="permissions"
         )
 
+class OpenRouterBalanceCommand(Command):
+    def __init__(self):
+        super().__init__("balance", "Show OpenRouter account credit balance")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        import httpx
+
+        api_key = os.getenv("OPENROUTER_API_KEY", "")
+        if not api_key:
+            ui.chat_history_panel.add_message(
+                "OpenRouter API key not found.\n"
+                "Set environment variable: export OPENROUTER_API_KEY=sk-or-...",
+                msg_type=SysMsgError(),
+            )
+            return
+
+        placeholder = ui.chat_history_panel.add_message(
+            "Fetching OpenRouter balance...",
+            msg_type=SysMsg(),
+            title="openrouter",
+        )
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    "https://openrouter.ai/api/v1/credits",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    timeout=10.0,
+                )
+
+            if response.status_code != 200:
+                error_msg = ui.chat_history_panel.new_message(
+                    f"OpenRouter API error: HTTP {response.status_code}",
+                    msg_type=SysMsgError(),
+                    title="openrouter",
+                )
+                ui.chat_history_panel.replace_message(placeholder, error_msg)
+                return
+
+            data = response.json().get("data", {})
+            total_credits = data.get("total_credits", 0.0)
+            total_usage = data.get("total_usage", 0.0)
+            remaining = total_credits - total_usage
+
+            color = str(theme.WARNING)
+            reset = theme.reset()
+
+            if remaining > 5:
+                balance_color = "\x1b[32m"  # green
+            elif remaining > 1:
+                balance_color = "\x1b[33m"  # yellow
+            else:
+                balance_color = "\x1b[31m"  # red
+
+            msg  = color + f"Remaining        : {reset}{balance_color}${remaining:.4f}\033[0m\n"
+            msg += color + f"Total Credits    : {reset}${total_credits:.4f}\n"
+            msg += color + f"Total Usage      : {reset}${total_usage:.4f}\n"
+
+            result_msg = ui.chat_history_panel.new_message(
+                msg.rstrip(),
+                msg_type=SysMsg(),
+                title="openrouter",
+            )
+            ui.chat_history_panel.replace_message(placeholder, result_msg)
+
+        except Exception as e:
+            error_msg = ui.chat_history_panel.new_message(
+                f"Failed to fetch balance: {e}",
+                msg_type=SysMsgError(),
+                title="openrouter",
+            )
+            ui.chat_history_panel.replace_message(placeholder, error_msg)
+
+
+class OpenRouterCommand(Command):
+    def __init__(self):
+        subcommands = {
+            "balance": OpenRouterBalanceCommand(),
+        }
+        super().__init__("openrouter", "OpenRouter account utilities", subcommands=subcommands)
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if not args:
+            help_text = "Usage: /openrouter <subcommand>\n\nSubcommands:\n"
+            for name, cmd in sorted(self.subcommands.items()):
+                help_text += f"  {name.ljust(10)} - {cmd.description}\n"
+            ui.chat_history_panel.add_message(help_text.rstrip(), msg_type=SysMsgError())
+        else:
+            subcmd_name = args[0].lower()
+            if subcmd_name in self.subcommands:
+                await self.subcommands[subcmd_name].execute(ui, args[1:])
+            else:
+                ui.chat_history_panel.add_message(
+                    f"Unknown subcommand: {subcmd_name}\n"
+                    f"Available: {', '.join(sorted(self.subcommands.keys()))}",
+                    msg_type=SysMsgError(),
+                )
+
+
 class PwdCommand(Command):
     def __init__(self):
         super().__init__("pwd", "Show current workspace directory")
@@ -1284,6 +1383,7 @@ COMMANDS: Dict[str, Command] = {
     "tools":       ToolsCommand(),
     "debug":       DebugCommand(),
     "permissions": PermissionsCommand(),
+    "openrouter":  OpenRouterCommand(),
     "cd":          CdCommand(),
     "pwd":         PwdCommand(),
 }
