@@ -1,7 +1,10 @@
 """Tests for input submission behavior during tool permission prompts."""
 
+import asyncio
+import pytest
 from pico_chat.ui.app import chatTUI
 from pico_chat.ui.tui.msg_types import SysMsg
+from pico_chat.harness import chunks
 
 
 class _StubAgent:
@@ -60,3 +63,87 @@ class TestCommandMenuNavigation:
         assert ui._last_focus_id == "input"
         assert ui.chat_history_panel.focused_message_index is None
         assert ui.input_component.command_completion.menu.selected_index != selected_before
+
+
+def _make_chunk_stream(*chunk_list):
+    """Return an async generator that yields the given chunks."""
+    async def _gen():
+        for chunk in chunk_list:
+            yield chunk
+    return _gen()
+
+
+class TestPendingPermissionPromptClearing:
+    """Regression tests: pending_permission_prompt must be cleared by incoming chunks,
+    not only by explicit allow/deny key presses. Without the fix, auto-denied tool calls
+    left pending_permission_prompt set, blocking every subsequent user message."""
+
+    def test_auto_denied_chunk_clears_pending_prompt(self):
+        """DENIED chunk (auto-deny path) must clear pending_permission_prompt."""
+        ui = chatTUI(_StubAgent())
+        ui.pending_permission_prompt = "Allow running: sudo rm -rf /?"
+
+        denied_chunk = chunks.ToolStatusChange(
+            tool_call_id="call_1",
+            tool_name="run",
+            tool_args='{"command": "sudo rm -rf /"}',
+            status=chunks.ToolStatus.DENIED,
+            auto_decision=True,
+            denial_reason="Auto-denied by security policy",
+        )
+
+        async def _run():
+            async for _ in ui._process_generation("hello", ui.chat_history_panel.add_message("hello")):
+                pass
+
+        # Patch agent.chat to yield the DENIED chunk then stop
+        ui.agent.chat = lambda _: _make_chunk_stream(denied_chunk)
+        asyncio.run(ui._process_generation("hello", ui.chat_history_panel.add_message("hello")))
+
+        assert ui.pending_permission_prompt is None, (
+            "pending_permission_prompt must be cleared after a DENIED chunk arrives"
+        )
+
+    def test_auto_approved_chunk_clears_pending_prompt(self):
+        """APPROVED chunk must clear pending_permission_prompt (covers auto-approve)."""
+        ui = chatTUI(_StubAgent())
+        ui.pending_permission_prompt = "Allow reading: secrets.txt?"
+
+        approved_chunk = chunks.ToolStatusChange(
+            tool_call_id="call_2",
+            tool_name="read",
+            tool_args='{"path": "secrets.txt"}',
+            status=chunks.ToolStatus.APPROVED,
+            auto_decision=True,
+        )
+
+        ui.agent.chat = lambda _: _make_chunk_stream(approved_chunk)
+        asyncio.run(ui._process_generation("hello", ui.chat_history_panel.add_message("hello")))
+
+        assert ui.pending_permission_prompt is None, (
+            "pending_permission_prompt must be cleared after an APPROVED chunk arrives"
+        )
+
+    def test_message_not_blocked_after_auto_denial(self):
+        """After auto-denial clears the flag, subsequent messages must not be blocked."""
+        ui = chatTUI(_StubAgent())
+        ui.pending_permission_prompt = "Allow running: sudo rm -rf /?"
+
+        denied_chunk = chunks.ToolStatusChange(
+            tool_call_id="call_3",
+            tool_name="run",
+            tool_args='{"command": "sudo rm -rf /"}',
+            status=chunks.ToolStatus.DENIED,
+            auto_decision=True,
+            denial_reason="Auto-denied by security policy",
+        )
+
+        ui.agent.chat = lambda _: _make_chunk_stream(denied_chunk)
+        asyncio.run(ui._process_generation("hello", ui.chat_history_panel.add_message("hello")))
+
+        # Now submit a follow-up message – it must NOT be blocked
+        ui.on_user_submit("what happened?")
+
+        assert ui.message_queue.qsize() == 1, (
+            "User message must be queued, not blocked, after pending_permission_prompt was cleared"
+        )
