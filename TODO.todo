@@ -5,28 +5,35 @@
     [x] /status - show infos about connection, model, context etc
     [x] /stop - stop the current generation
     [x] /retry - retry the last assistant message
-    [ ] /connect - connect to a different LLM server (prompt for URL, API key, etc)
+    [-] /connect - connect to a different LLM server (prompt for URL, API key, etc)
+        [x] done through /server command
     [ ] /config - show and edit configuration (e.g. model parameters, tools, etc)
+
+[ ] discussions history management:
+    [ ] list conversations
+    [ ] switch between conversations
+    [ ] delete conversations
+    [ ] export / import conversations
+
+Ideas:
+[!] /theme - switch between themes
+[!] /export - export conversation history to a file (e.g. markdown, json, etc)
+[!] /import - import conversation history from a file
+[?] /memory - manage work memory (list items, forget some, edit some, etc)
+    [ ] Not sure is this is really needed. The LLM should be able to manage its own memory.
     
-    Ideas:
-    [!] /theme - switch between themes
-    [!] /export - export conversation history to a file (e.g. markdown, json, etc)
-    [!] /import - import conversation history from a file
-    [?] /memory - manage work memory (list items, forget some, edit some, etc)
-        [ ] Not sure is this is really needed. The LLM should be able to manage its own memory.
+    [ ] possibly add bangs ? !important to mark as to memorize or something. 
+    !instructions to mark as system instructions, etc. This way the LLM can decide what to memorize and what not, and we can also use it to give it instructions on how to manage its memory.
+        [ ] add /instruct command to instruct the LLM important infos that it should remember for the whole conversation
+            -> then store into the system prompt or something like that.
         
-        [ ] possibly add bangs ? !important to mark as to memorize or something. 
-        !instructions to mark as system instructions, etc. This way the LLM can decide what to memorize and what not, and we can also use it to give it instructions on how to manage its memory.
-            [ ] add /instruct command to instruct the LLM important infos that it should remember for the whole conversation
-                -> then store into the system prompt or something like that.
-            
-                examples:
-                    /instruct in the shell, always use `pixi run` prefix to access python environment for the project.
-                    /instruct when coding assembly always use GNU assembly syntax and not intel
-                    /instruct when modifying a file, always document your approach in a comment at the top of the code unit your are modifying.
-            
-            [ ] Support for global instructions ? 
-                - kinda on the territory of custom system prompts
+            examples:
+                /instruct in the shell, always use `pixi run` prefix to access python environment for the project.
+                /instruct when coding assembly always use GNU assembly syntax and not intel
+                /instruct when modifying a file, always document your approach in a comment at the top of the code unit your are modifying.
+        
+        [ ] Support for global instructions ? 
+            - kinda on the territory of custom system prompts
 
 [ ] Cache component rasterization result for performance optimization
 
@@ -41,14 +48,15 @@
 
 
 [ ] Pico agentic problems
-    [ ] Did not iterate the whole repo
+    [o] Did not iterate the whole repo
+        [x] added loop tool to iterate from harness
     [ ] Did not use memory while iterating the repo
 
 [ ] UI tool improvement: 
     [ ] drafting when writing content of tool call (UI hangs up currently)
     [ ] writing / patch -> just the number of lines not full in UI
 
-[ ] Inject current window size ?
+[ ] Inject current context window size ?
     [ ] Properly compute it ? Seems overstated (taking things into account that is not passed to the LLM ?)
 [ ] Memory should maybe not need feedback / waiting ? 
 
@@ -123,8 +131,8 @@
         -> should be clickable with mouse or keyboard with LEFT/RIGHT to select button and ENTER to confirm
             -> or maybe also Y / N
 
-[ ] containerize tool calls for security (e.g. file access, command execution, etc)
-    [ ] Bubblewrap 
+[x] containerize tool calls for security (e.g. file access, command execution, etc)
+    [x] Bubblewrap 
     [ ] Docker
     [ ] Podman
     ---
@@ -211,15 +219,16 @@ LONG TERM:
 [o] Config
     [ ] Save / Load config from file
 [x] Theme support
-[ ] Containerization for security
+[x] Containerization for security
 
-[o] Open Router support
-    [ ] Needs testing and debugging
+[x] Open Router support
+    [x] Needs testing and debugging
 [ ] Plugin system for tools, prompts, etc
     [ ] Custom commands / tools
     [ ] Custom System prompts / Personalities
     [ ] Custom prompts aliases like @docs to quickly ask for documentation 
-[o] Context builder
+[x] Context builder
+    [x] needs improving, problems when running like at / or $HOME
 
     
 Cool test prompts:
@@ -227,8 +236,8 @@ Cool test prompts:
 * Make a python script binairo.py to generate a binairo puzzle and its solution. (Sudoku variant)
 
 ROADMAP:
-1: focus / select messages
-2: buttons working
-3: bublewrap containerization of tool calls ! [really important for security]
-4: inference interactivity (steering, stopping, showing intermediate thoughts, etc)
-5: markdown rendering improvements (tables, code blocks, etc)
+[x] 1: focus / select messages
+[-] 2: buttons working
+[x] 3: bublewrap containerization of tool calls ! [really important for security]
+[o] 4: inference interactivity (steering, stopping, showing intermediate thoughts, etc)
+[ ] 5: markdown rendering improvements (tables, code blocks, etc)
