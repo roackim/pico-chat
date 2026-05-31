@@ -2,6 +2,7 @@ import os
 import pathspec
 from pathlib import Path
 from typing import Dict, List
+from datetime import date, datetime
 
 # from tree_sitter import Language, Parser
 # import tree_sitter_python as tspython
@@ -127,11 +128,20 @@ def build_harness_context(root, format: str = None):
         from pico_chat import pico_cfg
         format = pico_cfg.config.context_format
     
+
+    
     if not is_git_repo(root):
         return f"Project Root: {root}\n[WARNING: Not a git repository — file tree skipped]"
 
     spec = get_ignore_spec(root)
     context_output = []
+    
+    # Add current time and date metadata
+    cdate = datetime.now().date()
+    ctime = datetime.now().strftime("%H:%M:%S")  # format to HH:MM:SS
+    
+    context_output.append(f"Current date: {cdate}")
+    context_output.append(f"Current time: {ctime}")
     
     context_output.append(f"Project Root: {root}")
     
