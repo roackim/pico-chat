@@ -317,6 +317,10 @@ class Harness:
             # Memory operations
             return permissions.get_memory_permission()
         
+        elif tool_name in ["search_web", "search_wiki"]:
+            # Search operations
+            return permissions.get_search_permission()
+        
         elif tool_name in ["loop", "loop_next", "loop_itr_done", "loop_abort"]:
             # Iteration operations - auto-allow (read-only tracking)
             return "allow"

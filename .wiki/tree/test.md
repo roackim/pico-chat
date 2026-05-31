@@ -21,3 +21,4 @@ All tests use pytest. See [notes/testing.md](../notes/testing.md) for run instru
 | `test_token_estimation_samples.py` | `harness/token_estimation.py` | Regression tests on real code/text samples |
 | `test_ui_permission_submit.py` | `ui/app.py`, `ui/tui/components/input/` | Input blocked during active permission prompt |
 | `test_subagents.py` | `harness/tool_wrappers.py`, `harness/harness.py`, `harness/tool_permissions.py` | Depth limit, timeout, context cap, scaffolder profile, background queuing, wait_for_subagents, harness abort |
+| `test_search.py` | `harness/tools.py`, `tool_wrappers.py`, `tool_permissions.py` | DuckDuckGo and Wikipedia search, rate limiting (main vs. subagent), permission enforcement, error handling, wrapper integration |

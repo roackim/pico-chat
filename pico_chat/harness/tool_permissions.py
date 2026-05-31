@@ -97,6 +97,10 @@ class ToolPermissionsProfile:
     # These are safe in-memory operations, typically allowed
     memory: Permission = "allow"
     
+    # Search operations (search_web/search_wiki)
+    # Safe read-only external API calls, typically allowed
+    search: Permission = "allow"
+    
     def get_read_permission(self, is_inside_repo: bool) -> Permission:
         """Get read permission for a path."""
         return self.read.get(is_inside_repo)
@@ -116,6 +120,10 @@ class ToolPermissionsProfile:
     def get_memory_permission(self) -> Permission:
         """Get memory operation permission."""
         return self.memory
+    
+    def get_search_permission(self) -> Permission:
+        """Get search operation permission."""
+        return self.search
 
 
 # --- Predefined Profiles ---
@@ -135,6 +143,7 @@ strict = ToolPermissionsProfile(
         container_network=True,
     ),
     memory="ask",
+    search="ask",
 )
 
 # Permissive profile: allow operations inside repo, ask for outside/commands
@@ -151,6 +160,7 @@ permissive = ToolPermissionsProfile(
         container_network=True,
     ),
     memory="allow",  # Memory operations are safe
+    search="allow",  # Search is safe read-only external API
 )
 
 # Unrestricted profile: allow everything (use with caution!)
@@ -168,6 +178,7 @@ unrestricted = ToolPermissionsProfile(
         container_network=True,
     ),
     memory="allow",
+    search="allow",
 )
 
 # Locked profile: deny everything
@@ -185,6 +196,7 @@ locked = ToolPermissionsProfile(
         container_network=True,
     ),
     memory="deny",  # Even memory operations are denied
+    search="deny",
 )
 
 TESTING = ToolPermissionsProfile(
@@ -201,6 +213,7 @@ TESTING = ToolPermissionsProfile(
         container_network=True,
     ),
     memory="allow",  # Ask for memory operations too
+    search="ask",
 )
 
 # Scaffolder profile: read-only inside repo, deny everything else.
@@ -217,6 +230,7 @@ scaffolder = ToolPermissionsProfile(
         others="deny",
     ),
     memory="deny",
+    search="allow",  # Subagents can search for library docs and research
 )
 
 # Global permissions profile (can be changed at runtime)

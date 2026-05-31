@@ -29,13 +29,19 @@ See [notes/subagents.md](../notes/subagents.md) for the full subagent lifecycle.
 `AgentState` enum: `UNCONNECTED`, `IDLE`, `THINKING`, `ANSWERING`.
 
 ### `tools.py`
-Tool classes: `MinimalToolset` (read/list), `FileTools` (+ write/patch), `ShellTool` (run).
+Tool classes: `MinimalToolset` (read/list), `FileTools` (+ write/patch), `ShellTool` (run), `SearchTools` (search_web/search_wiki).
+`SearchTools` — web search via DuckDuckGo HTML and Wikipedia MediaWiki API. Returns formatted results (title/URL/snippet). Supports time range filtering for DDG.
 Pure functions — no internal state. See [notes/tools-and-permissions.md](../notes/tools-and-permissions.md).
 
 ### `tool_wrappers.py`
 `*ToolWrapper` classes — adapt tool functions to the OpenAI function-calling JSON schema.
 - `get_schema()` — returns function schema for the LLM
 - `execute(args)` — parses LLM args and calls the underlying tool
+
+Search wrappers:
+- `SearchWebTool` — DuckDuckGo web search with rate limiting
+- `SearchWikiTool` — Wikipedia search with rate limiting
+Main agent: 3 results/search, unlimited searches. Subagents: 10 results/search, max 3 searches.
 
 Subagent wrappers:
 - `SubagentTool` — spawns a read-only child `Harness`; foreground or background mode; enforces depth limit, timeout, and context cap
@@ -44,6 +50,7 @@ Subagent wrappers:
 ### `tool_permissions.py`
 `ToolPermissionsProfile` — per-tool policy configuration (`ALLOW` / `ASK` / `DENY`).
 Permission constants and chain policy definitions.
+`get_search_permission()` — returns search operation policy (default: `ALLOW` in permissive/scaffolder profiles).
 
 ### `security.py`
 `SecurityChecker` — evaluates shell commands before execution.

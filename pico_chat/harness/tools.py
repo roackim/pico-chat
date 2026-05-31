@@ -503,3 +503,169 @@ class MinimalToolset:
     def run(self, command: str, timeout: int = 30) -> str:
         """Execute shell command"""
         return self.shell_tool.run(command, timeout)
+
+
+class SearchTools:
+    """Web search operations using DuckDuckGo and Wikipedia"""
+    
+    def __init__(self):
+        """Initialize search tools with no configuration required."""
+        pass
+    
+    def search_web(self, query: str, max_results: int = 3, time_range: Optional[str] = None) -> str:
+        """
+        Search the web using DuckDuckGo.
+        
+        Args:
+            query: Search query string
+            max_results: Maximum number of results to return (default: 3)
+            time_range: Optional time filter: "day", "week", "month", "year" (default: None)
+            
+        Returns:
+            Formatted search results as text
+            
+        Example:
+            >>> tools.search_web("python asyncio tutorial", max_results=3)
+            '[1] Python asyncio Tutorial\\nURL: https://example.com\\nSnippet: ...'
+        """
+        try:
+            import httpx
+            import re
+            from html import unescape
+            
+            # Build URL with optional time range
+            params = {'q': query}
+            if time_range:
+                time_map = {'day': 'd', 'week': 'w', 'month': 'm', 'year': 'y'}
+                if time_range in time_map:
+                    params['df'] = time_map[time_range]
+            
+            # Make request
+            headers = {'User-Agent': 'Mozilla/5.0 (compatible)'}
+            response = httpx.get(
+                'https://html.duckduckgo.com/html/',
+                params=params,
+                headers=headers,
+                timeout=10.0,
+                follow_redirects=True
+            )
+            response.raise_for_status()
+            
+            html = response.text
+            
+            # Parse results using regex (lightweight alternative to HTML parser)
+            # DuckDuckGo HTML structure: results are in divs with class="result"
+            result_pattern = r'<a[^>]+class="result__a"[^>]+href="(.*?)"[^>]*>(.*?)</a>.*?<a[^>]+class="result__snippet"[^>]*>(.*?)</a>'
+            matches = re.findall(result_pattern, html, re.DOTALL)
+            
+            if not matches:
+                return f"[search_web] No results found for: {query}"
+            
+            # Format results
+            results = []
+            for idx, (url, title, snippet) in enumerate(matches[:max_results], 1):
+                # Clean HTML entities and tags
+                clean_title = unescape(re.sub(r'<.*?>', '', title)).strip()
+                clean_snippet = unescape(re.sub(r'<.*?>', '', snippet)).strip()
+                clean_url = unescape(url)
+                
+                results.append(
+                    f"[{idx}] {clean_title}\n"
+                    f"URL: {clean_url}\n"
+                    f"{clean_snippet}"
+                )
+            
+            if results:
+                header = f"DuckDuckGo search results for: {query}\n" + "=" * 60 + "\n\n"
+                return header + "\n\n".join(results)
+            else:
+                return f"[search_web] No results found for: {query}"
+                
+        except ImportError:
+            raise ToolError("httpx library not available - required for search functionality")
+        except httpx.TimeoutException:
+            raise ToolError(f"Search timed out for query: {query}")
+        except httpx.HTTPError as e:
+            raise ToolError(f"Search request failed: {e}")
+        except Exception as e:
+            raise ToolError(f"Search error: {e}")
+    
+    def search_wiki(self, query: str, max_results: int = 3) -> str:
+        """
+        Search Wikipedia using the MediaWiki API.
+        
+        Args:
+            query: Search query string
+            max_results: Maximum number of results to return (default: 3)
+            
+        Returns:
+            Formatted search results as text
+            
+        Example:
+            >>> tools.search_wiki("Python programming language", max_results=3)
+            '[1] Python (programming language)\\nURL: https://en.wikipedia.org/wiki/Python_(programming_language)\\nSnippet: ...'
+        """
+        try:
+            import httpx
+            
+            # Use Wikipedia API
+            params = {
+                'action': 'query',
+                'list': 'search',
+                'srsearch': query,
+                'srlimit': max_results,
+                'srprop': 'snippet',
+                'format': 'json',
+                'utf8': 1
+            }
+            
+            headers = {'User-Agent': 'pico-chat/0.8.0 (Educational AI assistant)'}
+            response = httpx.get(
+                'https://en.wikipedia.org/w/api.php',
+                params=params,
+                headers=headers,
+                timeout=10.0
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            search_results = data.get('query', {}).get('search', [])
+            
+            if not search_results:
+                return f"[search_wiki] No results found for: {query}"
+            
+            # Format results
+            import re
+            from html import unescape
+            
+            results = []
+            for idx, item in enumerate(search_results[:max_results], 1):
+                title = item.get('title', 'Unknown')
+                snippet = item.get('snippet', 'No description available')
+                
+                # Clean HTML tags from snippet
+                clean_snippet = unescape(re.sub(r'<.*?>', '', snippet)).strip()
+                
+                # Build Wikipedia URL
+                url = f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}"
+                
+                results.append(
+                    f"[{idx}] {title}\n"
+                    f"URL: {url}\n"
+                    f"{clean_snippet}"
+                )
+            
+            if results:
+                header = f"Wikipedia search results for: {query}\n" + "=" * 60 + "\n\n"
+                return header + "\n\n".join(results)
+            else:
+                return f"[search_wiki] No results found for: {query}"
+                
+        except ImportError:
+            raise ToolError("httpx library not available - required for search functionality")
+        except httpx.TimeoutException:
+            raise ToolError(f"Wikipedia search timed out for query: {query}")
+        except httpx.HTTPError as e:
+            raise ToolError(f"Wikipedia search request failed: {e}")
+        except Exception as e:
+            raise ToolError(f"Wikipedia search error: {e}")

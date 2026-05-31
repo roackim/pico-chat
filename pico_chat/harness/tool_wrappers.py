@@ -461,6 +461,95 @@ class WaitForSubagentsTool(ToolWrapper):
         return "\n\n".join(parts)
 
 
+class SearchWebTool(ToolWrapper):
+    """Search the web using DuckDuckGo"""
+    
+    def __init__(self, search_tools, max_results: int = 3, search_limit: Optional[int] = None):
+        super().__init__(
+            name="search_web",
+            description=(
+                "Search the web using DuckDuckGo. Returns top search results with titles, URLs, and snippets. "
+                "Use this for: library documentation, API references, recent news, troubleshooting, "
+                "technical queries, comparisons, and general web searches. "
+                "Prefer this over search_wiki for most queries unless searching for a specific entity or concept."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query (e.g., 'python asyncio tutorial', 'rust error handling best practices')"
+                    },
+                    "time_range": {
+                        "type": "string",
+                        "enum": ["day", "week", "month", "year"],
+                        "description": "Optional: filter results by recency (useful for news or recent library updates)"
+                    }
+                },
+                "required": ["query"]
+            }
+        )
+        self.search_tools = search_tools
+        self.max_results = max_results
+        self.search_limit = search_limit
+        self.search_count = 0
+    
+    def execute(self, query: str, time_range: Optional[str] = None) -> str:
+        # Check rate limit
+        if self.search_limit is not None and self.search_count >= self.search_limit:
+            return f"[search_web] Rate limit reached ({self.search_limit} searches per session)"
+        
+        self.search_count += 1
+        
+        try:
+            from pico_chat.harness.tools import ToolError
+            return self.search_tools.search_web(query, max_results=self.max_results, time_range=time_range)
+        except ToolError as e:
+            return f"[search_web] {str(e)}"
+
+
+class SearchWikiTool(ToolWrapper):
+    """Search Wikipedia"""
+    
+    def __init__(self, search_tools, max_results: int = 3, search_limit: Optional[int] = None):
+        super().__init__(
+            name="search_wiki",
+            description=(
+                "Search Wikipedia for encyclopedic information. Returns top results with titles, URLs, and snippets. "
+                "Use this for: named entities (people, places, organizations), concepts with canonical definitions, "
+                "historical events, scientific concepts, algorithms, data structures, and programming paradigms. "
+                "NOT recommended for library-specific documentation or recent news."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query (e.g., 'Python programming language', 'Binary search algorithm')"
+                    }
+                },
+                "required": ["query"]
+            }
+        )
+        self.search_tools = search_tools
+        self.max_results = max_results
+        self.search_limit = search_limit
+        self.search_count = 0
+    
+    def execute(self, query: str) -> str:
+        # Check rate limit
+        if self.search_limit is not None and self.search_count >= self.search_limit:
+            return f"[search_wiki] Rate limit reached ({self.search_limit} searches per session)"
+        
+        self.search_count += 1
+        
+        try:
+            from pico_chat.harness.tools import ToolError
+            return self.search_tools.search_wiki(query, max_results=self.max_results)
+        except ToolError as e:
+            return f"[search_wiki] {str(e)}"
+
+
 def create_minimal_tools(
     workspace_path: str | Path,
     confirmation_callback: Optional[Callable[[str], bool]] = None,
@@ -487,6 +576,8 @@ def create_minimal_tools(
     Returns:
         Dict of tool name to tool wrapper
     """
+    from pico_chat.harness.tools import SearchTools
+    
     toolset = MinimalToolset(workspace_path, confirmation_callback, permissions=permissions)
 
     tools = {
@@ -495,6 +586,20 @@ def create_minimal_tools(
         "patch": PatchTool(toolset),
         "run": RunTool(toolset),
     }
+    
+    # Search tools with depth-based configuration
+    search_tools = SearchTools()
+    if depth > 0:
+        # Subagent: more results per search, but limited number of searches
+        search_max_results = 10
+        search_limit = 3
+    else:
+        # Main agent: fewer results per search, unlimited searches
+        search_max_results = 3
+        search_limit = None
+    
+    tools["search_web"] = SearchWebTool(search_tools, max_results=search_max_results, search_limit=search_limit)
+    tools["search_wiki"] = SearchWikiTool(search_tools, max_results=search_max_results, search_limit=search_limit)
 
     # Memory tools disabled - conversation history serves as working memory
     # To re-enable: uncomment and ensure memory_store is passed to create_minimal_tools()
