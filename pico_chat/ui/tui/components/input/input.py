@@ -383,6 +383,12 @@ class InputComponent(Component):
     def set_focused(self, focused: bool):
         """Set the focused state of this input component."""
         self.focused = focused
+        # When gaining focus, make cursor immediately visible
+        if focused:
+            self.cursor_renderer.mark_input()
+            # Mark parent for re-render to show cursor
+            if hasattr(self, 'parent') and self.parent and hasattr(self.parent, 'mark_changed'):
+                self.parent.mark_changed()
 
     def render(self, buffer: Buffer):
         """Render the input field with prompt, text, and scrolling (cursor rendered separately)."""
