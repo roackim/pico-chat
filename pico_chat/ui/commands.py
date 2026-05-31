@@ -162,14 +162,14 @@ class StatusCommand(Command):
     
     @staticmethod
     def format_status(status: Dict[str, Any]) -> str:
-        status_color = "\x1b[32m" if status["online"] else "\x1b[31m"
+        status_color = theme.SUCCESS if status["online"] else theme.ERROR
         status_text = "online" if status["online"] else "offline"
         
         color = str(theme.WARNING)
         reset = theme.reset()
         msg  = color + f"Server           : {reset}{status['server_name']} ({status['server_type']})\n"
         msg += color + f"URL              : {reset}{status['base_url']}\n"
-        msg += color + f"Status           : {reset}{status_color}{status_text}\033[0m\n"
+        msg += color + f"Status           : {reset}{status_color}{status_text}{reset}\n"
         
         if status_text == "online":
             msg += color + f"Model            : {reset}{status['model']}\n"
@@ -190,14 +190,14 @@ class StatusCommand(Command):
                 
                 # Color code the percentage based on pressure
                 if percentage < 50:
-                    pressure_color = "\x1b[32m"  # Green
+                    pressure_color = theme.SUCCESS
                 elif percentage < 75:
-                    pressure_color = "\x1b[33m"  # Yellow
+                    pressure_color = theme.WARNING
                 else:
-                    pressure_color = "\x1b[31m"  # Red
+                    pressure_color = theme.ERROR
                 
                 msg += color + f"Context Usage    : {reset}{used:,} / {max_tokens:,} tokens "
-                msg += f"({pressure_color}{percentage:.1f}%\033[0m)\n"
+                msg += f"({pressure_color}{percentage:.1f}%{reset})\n"
         
         return msg
 
@@ -562,8 +562,8 @@ class ServerListCommand(Command):
             ui.chat_history_panel.add_message(
                 "No servers configured.\n\n"
                 "Add a server with:\n"
-                "  /server add openrouter <model> <name> [provider]\n"
-                "  /server add llamacpp <url> <name>",
+                "  /server add <name> openrouter <model> [provider]\n"
+                "  /server add <name> llamacpp <url>",
                 msg_type=SysMsg()
             )
             return
@@ -1154,12 +1154,64 @@ class DebugGetMemoryCommand(Command):
             logger.error(f"Error getting memory: {e}", exc_info=True)
             ui.chat_history_panel.add_message(f"Failed to get memory: {e}", msg_type=SysMsgError())
 
+
+class DebugLogCommand(Command):
+    def __init__(self):
+        super().__init__("log", "Show recent log messages (default: 50, max: 200)")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        """Show recent log messages from the debug panel."""
+        # Parse number of lines to show
+        num_lines = 50  # default
+        if args:
+            try:
+                num_lines = int(args[0])
+                num_lines = max(1, min(200, num_lines))  # Clamp to 1-200
+            except ValueError:
+                ui.chat_history_panel.add_message(
+                    f"Invalid number: {args[0]}. Usage: /debug log [lines]",
+                    msg_type=SysMsgError()
+                )
+                return
+        
+        # Get logs from debug panel
+        if hasattr(ui, 'debug_panel') and hasattr(ui.debug_panel, 'lines'):
+            lines = list(ui.debug_panel.lines)
+            
+            if not lines:
+                ui.chat_history_panel.add_message(
+                    "No log messages available.",
+                    msg_type=SysMsg()
+                )
+                return
+            
+            # Get last N lines
+            recent_lines = lines[-num_lines:]
+            
+            # Format output
+            header = f"Last {len(recent_lines)} log messages:"
+            separator = "─" * 80
+            log_text = f"{header}\n{separator}\n" + "\n".join(recent_lines)
+            
+            ui.chat_history_panel.add_message(
+                log_text,
+                msg_type=SysMsg(),
+                title="logs"
+            )
+        else:
+            ui.chat_history_panel.add_message(
+                "Debug panel not available.",
+                msg_type=SysMsgError()
+            )
+
+
 class DebugCommand(Command):
     def __init__(self):
         subcommands = {
             "panel": DebugPanelCommand(),
             "get_context": DebugGetContextCommand(),
             "get_memory": DebugGetMemoryCommand(),
+            "log": DebugLogCommand(),
         }
         super().__init__("debug", "Debug utilities", subcommands=subcommands)
 
@@ -1306,13 +1358,13 @@ class OpenRouterBalanceCommand(Command):
             reset = theme.reset()
 
             if remaining > 5:
-                balance_color = "\x1b[32m"  # green
+                balance_color = theme.SUCCESS
             elif remaining > 1:
-                balance_color = "\x1b[33m"  # yellow
+                balance_color = theme.WARNING
             else:
-                balance_color = "\x1b[31m"  # red
+                balance_color = theme.ERROR
 
-            msg  = color + f"Remaining        : {reset}{balance_color}${remaining:.4f}\033[0m\n"
+            msg  = color + f"Remaining        : {reset}{balance_color}${remaining:.4f}{reset}\n"
             msg += color + f"Total Credits    : {reset}${total_credits:.4f}\n"
             msg += color + f"Total Usage      : {reset}${total_usage:.4f}\n"
 

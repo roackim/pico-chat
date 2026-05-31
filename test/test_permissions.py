@@ -205,7 +205,11 @@ class TestHarnessReadPermissionFlow:
         assert events[0].auto_decision is True
         assert events[1].denial_reason == "Auto-denied by security policy"
         assert read_tool.called is False
-        assert messages[-1]["content"] == "Permission denied: Auto-denied by security policy"
+        # Check that denial message contains key information
+        denial_content = messages[-1]["content"]
+        assert "[TOOL DENIED]" in denial_content
+        assert "Auto-denied by security policy" in denial_content
+        assert "'read' tool call was not executed" in denial_content
 
     def test_user_deny_enforced_for_ask(self, tmp_path, monkeypatch):
         profile = ToolPermissionsProfile(
@@ -235,7 +239,11 @@ class TestHarnessReadPermissionFlow:
         assert events[0].auto_decision is False
         assert events[1].denial_reason == "User denied"
         assert read_tool.called is False
-        assert messages[-1]["content"] == "Permission denied: User denied"
+        # Check that denial message contains key information
+        denial_content = messages[-1]["content"]
+        assert "[TOOL DENIED]" in denial_content
+        assert "User denied" in denial_content
+        assert "'read' tool call was not executed" in denial_content
 
     def test_allow_executes_tool(self, tmp_path, monkeypatch):
         profile = ToolPermissionsProfile(
@@ -893,7 +901,10 @@ class TestHarnessRunPermissionFlow:
         assert events[0].auto_decision is True
         assert events[1].denial_reason == "Auto-denied by security policy"
         assert run_tool.called is False
-        assert "Permission denied" in messages[-1]["content"]
+        # Check that denial message contains key information
+        denial_content = messages[-1]["content"]
+        assert "[TOOL DENIED]" in denial_content
+        assert "Auto-denied by security policy" in denial_content
 
     def test_user_deny_blocks_execution(self, tmp_path, monkeypatch):
         """User denying permission should block execution."""
@@ -943,7 +954,10 @@ class TestHarnessRunPermissionFlow:
         assert events[0].auto_decision is False
         assert events[1].denial_reason == "User denied"
         assert run_tool.called is False
-        assert messages[-1]["content"] == "Permission denied: User denied"
+        # Check that denial message contains key information
+        denial_content = messages[-1]["content"]
+        assert "[TOOL DENIED]" in denial_content
+        assert "User denied" in denial_content
 
     def test_chain_command_requires_ask(self, tmp_path, monkeypatch):
         """Command chains should require user confirmation."""

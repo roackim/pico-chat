@@ -101,17 +101,17 @@ class _theme:
     
 default = _theme(
     name="default",
-    BACKGROUND  = RGB("#B21ECF"),   # Black
-    DEFAULT     = RGB("#F3EBD1"),   # White
+    BACKGROUND  = RGB("#1E1E1E"),   # Dark gray (VS Code dark background)
+    DEFAULT     = RGB("#D4D4D4"),   # Light gray (readable text)
     
-    MUTED       = RGB("#7D7D7D"),   # Muted gray
-    ERROR       = RGB("#FF6060"),   # Red
-    WARNING     = RGB("#FFC760"),   # Orange
-    SUCCESS     = RGB("#5AEA7C"),   # Green
+    MUTED       = RGB("#808080"),   # Medium gray
+    ERROR       = RGB("#F48771"),   # Soft red
+    WARNING     = RGB("#CCA700"),   # Amber/gold
+    SUCCESS     = RGB("#89D185"),   # Soft green
     
-    USER        = RGB("#5AEA7C"),   # Blue
-    PICO        = RGB("#66C0F4"),   # Green
-    FOCUSED     = RGB("#FFDA75"),   # Yellow
+    USER        = RGB("#4EC9B0"),   # Cyan/teal
+    PICO        = RGB("#569CD6"),   # Blue
+    FOCUSED     = RGB("#DCDCAA"),   # Yellow-beige
 )
 
 # Terminal-native theme — reuses the user's own terminal color palette.

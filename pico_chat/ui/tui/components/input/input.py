@@ -458,23 +458,20 @@ class InputComponent(Component):
         parts = [p for p in text.split(' ') if p]  # Filter out empty parts from trailing spaces
         
         # /server add hints
+        # Format: /server add <name> <type> <model/url> [provider]
         if len(parts) >= 2 and parts[0] == '/server' and parts[1] == 'add':
             if len(parts) == 2:
-                return " openrouter|llamacpp"
+                return " NAME"
             elif len(parts) == 3:
-                server_type = parts[2]
-                if server_type == 'openrouter':
-                    return " MODEL_ID [NAME] [PROVIDER]"
-                elif server_type == 'llamacpp':
-                    return " URL [NAME]"
+                return " openrouter|llamacpp"
             elif len(parts) == 4:
-                server_type = parts[2]
+                server_type = parts[3]
                 if server_type == 'openrouter':
-                    return " [NAME] [PROVIDER]"
+                    return " MODEL_ID [PROVIDER]"
                 elif server_type == 'llamacpp':
-                    return " [NAME]"
+                    return " URL"
             elif len(parts) == 5:
-                server_type = parts[2]
+                server_type = parts[3]
                 if server_type == 'openrouter':
                     return " [PROVIDER]"
         

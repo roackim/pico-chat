@@ -59,11 +59,28 @@ class ServerCompletion:
         
         # Determine what to show: server types or server names
         if subcommand == 'add':
-            # For '/server add', show server types
+            # For '/server add', format is: /server add <name> <type> <model/url> [provider]
+            # Only show server types for the 2nd argument (type), not the 1st (name)
+            arg_parts = argument_text.split(' ')
+            
+            # If we're still on the first argument (name), don't show completions
+            if len(arg_parts) == 1 and not argument_text.endswith(' '):
+                self.hide()
+                return
+            
+            # If we have more than 2 arguments, don't show completions
+            if len(arg_parts) > 2 or (len(arg_parts) == 2 and argument_text.endswith(' ')):
+                self.hide()
+                return
+            
+            # We're on the 2nd argument (type), show server types
             items = self.server_types
+            # Filter based on the current partial type being entered
+            filter_text = arg_parts[1] if len(arg_parts) == 2 else ""
         else:
             # For '/server use' and '/server remove', show server names
             items = self.get_servers()
+            filter_text = argument_text.rstrip()
         
         if not items:
             self.hide()
@@ -81,22 +98,13 @@ class ServerCompletion:
             self.hide()
             return
         
-        # Strip trailing whitespace for exact match check
-        argument_trimmed = argument_text.rstrip()
-        
-        # For /server add, check if we've entered a valid type and additional arguments
-        if subcommand == 'add' and ' ' in argument_text:
-            # User has typed server type and is now typing additional args
-            self.hide()
-            return
-        
         # Filter out exact matches
-        if argument_trimmed in items:
+        if filter_text.rstrip() in items:
             self.hide()
             return
         
         # Update menu with fuzzy filtering
-        self.menu.update(items, argument_trimmed, display_prefix="")
+        self.menu.update(items, filter_text, display_prefix="")
         self.is_active = self.menu.is_visible
     
     def accept_selection(self, text: str) -> Optional[str]:
@@ -109,9 +117,17 @@ class ServerCompletion:
         if not parsed:
             return None
         
-        command, subcommand, _ = parsed
+        command, subcommand, argument_text = parsed
         
-        # Return full command with selected item
+        # For /server add, we need to preserve the name and only replace the type
+        if subcommand == 'add':
+            arg_parts = argument_text.split(' ')
+            if len(arg_parts) >= 1:
+                # Keep the name, append the selected type
+                name = arg_parts[0]
+                return f"/{command} {subcommand} {name} {selected} "
+        
+        # For other commands (use, remove), replace entire argument
         return f"/{command} {subcommand} {selected}"
     
     def hide(self):

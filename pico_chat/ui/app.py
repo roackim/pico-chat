@@ -1,6 +1,7 @@
 """Pico-Chat TUI Application."""
 
 import sys
+import os
 import asyncio
 import atexit
 from turtle import done
@@ -140,6 +141,7 @@ class chatTUI(ChatActionHandlers):
         
         current_msg_type = SysMsg  # Track the type of current message
         current_harness_ids = []  # Track harness message IDs for current UI message
+        processing_msg = None  # Track the "processing..." message to replace it
 
         def ensure_tool_message_type(msg: Message, target_type: MsgType) -> Message:
             """Replace message with a new one if type differs, preserving tool metadata."""
@@ -183,10 +185,11 @@ class chatTUI(ChatActionHandlers):
                     # If not currently in a thinking message, create one
                     if current_msg_type != ThinkingMsg:
                         if current_msg_type == SysMsg:
-                            # Replace "Sending request..." with thinking
+                            # Replace "Sending request..." or "Processing results..." with thinking
                             new_msg = chat.new_message("", msg_type=ThinkingMsg(), harness_message_ids=current_harness_ids)
                             chat.replace_message(current_msg, new_msg)
                             current_msg = new_msg
+                            processing_msg = None  # Clear processing indicator
                         else:
                             # Finalize previous and create new
                             current_msg.finalize()
@@ -199,10 +202,11 @@ class chatTUI(ChatActionHandlers):
                     # If not currently in a content message, create one
                     if current_msg_type != PicoMsg:
                         if current_msg_type == SysMsg:
-                            # Replace "Sending request..." with content
+                            # Replace "Sending request..." or "Processing results..." with content
                             new_msg = chat.new_message("", msg_type=PicoMsg(), harness_message_ids=current_harness_ids)
                             chat.replace_message(current_msg, new_msg)
                             current_msg = new_msg
+                            processing_msg = None  # Clear processing indicator
                         else:
                             # Finalize previous and create new
                             current_msg.finalize()
@@ -218,8 +222,10 @@ class chatTUI(ChatActionHandlers):
 
                     if not msg:
                         if current_msg_type == SysMsg:
+                            # Replace processing message with tool draft
                             msg = chat.new_message("", msg_type=ToolDraftMsg(), harness_message_ids=current_harness_ids)
                             chat.replace_message(current_msg, msg)
+                            processing_msg = None  # Clear processing indicator
                         else:
                             msg = chat.add_message("", msg_type=ToolDraftMsg(), harness_message_ids=current_harness_ids)
                         self.active_tool_messages[tool_id] = msg
@@ -251,6 +257,7 @@ class chatTUI(ChatActionHandlers):
                                     harness_message_ids=current_harness_ids
                                 )
                                 self.active_tool_messages[tool_id] = msg
+                                processing_msg = None  # Clear processing indicator if showing new tool
 
                             msg = ensure_tool_message_type(msg, ToolCallMsg())
                             self.active_tool_messages[tool_id] = msg
@@ -267,6 +274,7 @@ class chatTUI(ChatActionHandlers):
                                     harness_message_ids=current_harness_ids
                                 )
                                 self.active_tool_messages[tool_id] = msg
+                                processing_msg = None  # Clear processing indicator
 
                             msg = ensure_tool_message_type(msg, AskPermissionMsg())
                             self.active_tool_messages[tool_id] = msg
@@ -339,6 +347,36 @@ class chatTUI(ChatActionHandlers):
                             msg.rebuild_tool_display()
                             msg.finalize()
                             del self.active_tool_messages[tool_id]
+                            
+                            # Show processing indicator after tool completes
+                            # This will be replaced by the next content/thinking/tool
+                            if processing_msg is None or processing_msg.finalized:
+                                import time
+                                processing_start_time = time.time()
+                                
+                                async def update_processing_time():
+                                    """Update processing message with elapsed time."""
+                                    await asyncio.sleep(2.0)  # Wait 2 seconds before showing timer
+                                    while processing_msg and not processing_msg.finalized:
+                                        elapsed = int(time.time() - processing_start_time)
+                                        if elapsed >= 2:
+                                            processing_msg.set_text(
+                                                f"{theme.MUTED}Processing results... ({elapsed}s){theme.reset()}"
+                                            )
+                                            if self.compositor:
+                                                self.compositor.request_render()
+                                        await asyncio.sleep(1.0)
+                                
+                                processing_msg = chat.add_message(
+                                    f"{theme.MUTED}Processing results...{theme.reset()}",
+                                    msg_type=SysMsg(),
+                                    harness_message_ids=current_harness_ids
+                                )
+                                current_msg = processing_msg
+                                current_msg_type = SysMsg
+                                
+                                # Start background timer task
+                                asyncio.create_task(update_processing_time())
                     
                     elif chunk.status == chunks.ToolStatus.ERROR:
                         msg = self.active_tool_messages.get(tool_id)

@@ -689,7 +689,35 @@ class Harness:
         current_thinking_open_tag = None
         
         # Use server's create_completion (handles retries automatically)
+        chunk_count = 0
+        empty_chunks = 0
         async for chunk in self.server.create_completion(messages, tools=self.tool_schemas, stream=True):
+            chunk_count += 1
+            
+            # Log chunk details for debugging empty responses
+            if not chunk.choices:
+                empty_chunks += 1
+                logger.debug(f"Chunk {chunk_count}: No choices")
+                continue
+            
+            delta = chunk.choices[0].delta
+            finish_reason = chunk.choices[0].finish_reason
+            
+            # Log if we have a finish reason (end of stream)
+            if finish_reason:
+                logger.debug(f"Chunk {chunk_count}: finish_reason={finish_reason}")
+                # Log the delta to see if there's any content or error
+                if hasattr(delta, 'content') and delta.content:
+                    logger.debug(f"  Final delta content: {delta.content}")
+                if hasattr(delta, 'refusal') and delta.refusal:
+                    logger.warning(f"  LLM REFUSAL: {delta.refusal}")
+                if hasattr(delta, 'tool_calls') and delta.tool_calls:
+                    logger.debug(f"  Final delta has tool calls")
+                if chunk_count <= 3:
+                    logger.warning(f"Got finish_reason={finish_reason} on chunk {chunk_count} - very early finish! Possible API error or content filter.")
+                    # Log the full chunk for debugging
+                    logger.debug(f"  Full chunk: {chunk}")
+            
             # Log TTFT on first chunk
             if not first_chunk_received:
                 ttft = time.perf_counter() - request_start_time
@@ -935,6 +963,15 @@ class Harness:
         if tool_calls_list:
             self.debug_stream.log("TOOL_CALLS", tool_calls_list)
         
+        # Log if we got NOTHING (this is abnormal and indicates a problem)
+        if not full_content and not tool_calls_list:
+            logger.warning(f"LLM returned empty response - no content and no tool calls! Received {chunk_count} chunks ({empty_chunks} empty)")
+            logger.debug(f"Total tokens received: {total_tokens}")
+            if chunk_count <= 3:
+                logger.warning("Very few chunks received - likely server error or immediate EOF")
+        else:
+            logger.debug(f"LLM response: {len(full_content)} chars content, {len(tool_calls_list)} tool calls from {chunk_count} chunks")
+        
         # Store results in instance variables for caller to access
         self._last_full_content = full_content
         self._last_tool_calls = tool_calls_list
@@ -1031,7 +1068,9 @@ class Harness:
                     denial_reason=denial_reason
                 )
                 # Add to history and continue to next tool
-                result = f"Permission denied: {denial_reason}"
+                # Make the denial message more explicit to help LLM understand what to do
+                result = f"[TOOL DENIED] The '{tool_name}' tool call was not executed. Reason: {denial_reason}. You should proceed with answering based on the information from other successful tool calls, or acknowledge the denial and ask if the user would like you to try a different approach."
+                logger.debug(f"Tool {tool_name} denied, sending explanation to LLM: {result[:100]}...")
                 self._add_message_to_history(
                     role="tool",
                     content=result,
@@ -1227,6 +1266,31 @@ class Harness:
                 assistant_msg_id = str(uuid.uuid4())
                 yield chunks.MessageStart(message_id=assistant_msg_id, role="assistant")
                 
+                # Log request about to be sent
+                logger.debug(f"Calling LLM with {len(messages)} messages in context")
+                
+                # Log last few messages for debugging
+                last_msgs = messages[-3:] if len(messages) > 3 else messages
+                for i, msg in enumerate(last_msgs, start=max(1, len(messages)-2)):
+                    role = msg.get("role", "?")
+                    content_len = len(str(msg.get("content", "")))
+                    tool_calls_count = len(msg.get("tool_calls", []))
+                    logger.debug(f"  Message {i}: role={role}, content_len={content_len}, tool_calls={tool_calls_count}")
+                    
+                    # If this is an assistant message with tool calls, log the IDs
+                    if role == "assistant" and msg.get("tool_calls"):
+                        for tc in msg.get("tool_calls", []):
+                            logger.debug(f"    Tool call ID: {tc.get('id', 'MISSING')}, name: {tc.get('function', {}).get('name', '?')}")
+                    
+                    # If this is a tool result message, log first 200 chars to check format
+                    if role == "tool":
+                        content = str(msg.get("content", ""))
+                        logger.debug(f"    Tool result preview: {content[:200]}")
+                        tool_call_id = msg.get('tool_call_id', 'MISSING!')
+                        logger.debug(f"    Tool call ID: {tool_call_id}")
+                        if tool_call_id == "MISSING!":
+                            logger.error("Tool message is missing tool_call_id - this will cause API errors!")
+                
                 # Stream LLM response
                 async for chunk in self._stream_llm_response(messages):
                     yield chunk
@@ -1234,6 +1298,8 @@ class Harness:
                 # Collect results from instance variables
                 full_content = self._last_full_content
                 tool_calls_list = self._last_tool_calls
+                
+                logger.debug(f"LLM response complete. Content length: {len(full_content) if full_content else 0}, Tool calls: {len(tool_calls_list) if tool_calls_list else 0}")
                 
                 # Add assistant message to history with pre-generated ID
                 msg = {
@@ -1255,11 +1321,15 @@ class Harness:
                 
                 # If no tools, we're done
                 if not tool_calls_list:
+                    logger.debug("No tool calls - generation complete")
                     break
                     
                 # Execute tools and yield feedback
+                logger.debug(f"Executing {len(tool_calls_list)} tool call(s)")
                 async for feedback in self._execute_tool_calls(tool_calls_list, messages):
                     yield feedback
+                
+                logger.debug("Tool execution complete - continuing loop")
 
             except Exception as e:
                 raise e

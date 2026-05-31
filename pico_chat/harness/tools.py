@@ -559,7 +559,13 @@ class SearchTools:
             matches = re.findall(result_pattern, html, re.DOTALL)
             
             if not matches:
-                return f"[search_web] No results found for: {query}"
+                return (
+                    f"[search_web] No results found for query: '{query}'\n\n"
+                    "Suggestions:\n"
+                    "- Try different keywords or a more specific query\n"
+                    "- Check spelling and try alternative terms\n"
+                    "- Use the search_wiki tool for encyclopedia topics"
+                )
             
             # Format results
             results = []
@@ -568,6 +574,24 @@ class SearchTools:
                 clean_title = unescape(re.sub(r'<.*?>', '', title)).strip()
                 clean_snippet = unescape(re.sub(r'<.*?>', '', snippet)).strip()
                 clean_url = unescape(url)
+                
+                # DuckDuckGo uses redirect URLs - extract real URL from uddg parameter
+                if 'uddg=' in clean_url:
+                    from urllib.parse import parse_qs, urlparse, unquote
+                    try:
+                        # Parse the redirect URL
+                        parsed = urlparse(clean_url if clean_url.startswith('http') else 'https:' + clean_url)
+                        params = parse_qs(parsed.query)
+                        if 'uddg' in params:
+                            clean_url = unquote(params['uddg'][0])
+                    except:
+                        pass  # Keep original URL if parsing fails
+                
+                # Ensure URL has scheme
+                if clean_url.startswith('//'):
+                    clean_url = 'https:' + clean_url
+                elif not clean_url.startswith(('http://', 'https://')):
+                    clean_url = 'https://' + clean_url
                 
                 results.append(
                     f"[{idx}] {clean_title}\n"
@@ -579,7 +603,11 @@ class SearchTools:
                 header = f"DuckDuckGo search results for: {query}\n" + "=" * 60 + "\n\n"
                 return header + "\n\n".join(results)
             else:
-                return f"[search_web] No results found for: {query}"
+                return (
+                    f"[search_web] No valid results found for query: '{query}'\n\n"
+                    "The search returned some matches but they could not be parsed. "
+                    "Try a different query or use search_wiki for encyclopedia topics."
+                )
                 
         except ImportError:
             raise ToolError("httpx library not available - required for search functionality")
@@ -632,7 +660,13 @@ class SearchTools:
             search_results = data.get('query', {}).get('search', [])
             
             if not search_results:
-                return f"[search_wiki] No results found for: {query}"
+                return (
+                    f"[search_wiki] No Wikipedia articles found for query: '{query}'\n\n"
+                    "Suggestions:\n"
+                    "- Try different keywords or check spelling\n"
+                    "- Use search_web for general web searches\n"
+                    "- Wikipedia may not have an article on this specific topic"
+                )
             
             # Format results
             import re

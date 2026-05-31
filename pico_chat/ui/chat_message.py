@@ -75,7 +75,7 @@ class Message:
         self.tool_args: Optional[str] = None
         self.tool_output: Optional[str] = None
         self.tool_status: Optional[str] = None  # "approved", "denied", "completed", etc.
-        self.show_output: bool = False  # Toggle for output visibility
+        self.show_output: bool = True  # Toggle for output visibility (True = show details when focused)
         
         # Generation metrics
         self.metrics_tokens: int = 0
@@ -88,7 +88,8 @@ class Message:
         
         self.box = Box(
             self.component,
-            parent_msg=self
+            parent_msg=self,
+            compact_when_unfocused=(isinstance(msg_type, (msg_types.ToolCallMsg, msg_types.AskPermissionMsg)))  # Tool calls and permission requests use compact mode
         )
     
     def finalize(self):
@@ -218,8 +219,9 @@ class Message:
         
         from pico_chat.ui.tui.colors import theme
         
-        # Build status line with colors
+        # Build status line with colors - use symbols for compact display
         status_parts = []
+        status_symbol = ""
         if self.tool_status:
             # Split status by | and color each part
             parts = self.tool_status.split(' | ')
@@ -235,17 +237,61 @@ class Message:
                 else:
                     colored_parts.append(f"{theme.MUTED}{part}{theme.reset()}")
             status_parts = [' | '.join(colored_parts)]
+            
+            # For compact mode, use a simple symbol
+            if 'completed' in self.tool_status:
+                status_symbol = f" {theme.SUCCESS}✓{theme.reset()}"
+            elif 'error' in self.tool_status or 'denied' in self.tool_status:
+                status_symbol = f" {theme.ERROR}✗{theme.reset()}"
+            elif 'executing' in self.tool_status:
+                status_symbol = f" {theme.MUTED}⋯{theme.reset()}"
         
         # Build header line - simpler format: "> toolname"
         header = f"{theme.WARNING}> {self.tool_name}{theme.reset()}"
-        if status_parts:
-            header += f" {status_parts[0]}"
+        
+        # Add compact arg summary to header for better single-line view
+        args_summary = ""
+        if self.tool_args:
+            import json
+            try:
+                args_dict = json.loads(self.tool_args)
+                # Extract key info for compact display
+                if self.tool_name == "patch" and isinstance(args_dict, dict):
+                    path = args_dict.get("path")
+                    if path:
+                        args_summary = f" {theme.MUTED}{path}{theme.reset()}"
+                elif len(args_dict) == 1:
+                    # Single arg - show value (truncate if too long)
+                    key, value = list(args_dict.items())[0]
+                    if isinstance(value, str):
+                        # Truncate long values
+                        if len(value) > 60:
+                            value = value[:57] + "..."
+                        args_summary = f" {theme.MUTED}{value}{theme.reset()}"
+                    else:
+                        args_summary = f" {theme.MUTED}{json.dumps(value)[:60]}{theme.reset()}"
+            except:
+                pass
+        
+        # Check if we're in compact mode for status display
+        # Compact when: unfocused, OR focused but user toggled output off
+        is_compact = (self.box.compact_when_unfocused and not self.box.focused) or \
+                     (self.box.focused and not self.show_output)
+        
+        header += args_summary
+        if is_compact:
+            # Compact: just show symbol
+            header += status_symbol
+        else:
+            # Expanded: show full status text
+            if status_parts:
+                header += f" {status_parts[0]}"
         
         # Build text
         lines = [header]
         
-        # Add command/args if available - extract command value directly
-        if self.tool_args:
+        # Add command/args if available - extract command value directly (skip in compact mode)
+        if self.tool_args and not is_compact:
             # Try to parse as JSON to show nicely
             import json
             import re
@@ -313,8 +359,8 @@ class Message:
                 # Not JSON or parse error - show raw
                 lines.append(f"{theme.MUTED}cmd:{theme.reset()} {self.tool_args}")
         
-        # Add output if show_output is True
-        if self.show_output and self.tool_output:
+        # Add output if show_output is True (skip in compact mode - user can focus to see)
+        if self.show_output and self.tool_output and not is_compact:
             lines.append(f"{theme.MUTED}out: {self.tool_output}{theme.reset()}")
         
         self.base_text = '\n'.join(lines)

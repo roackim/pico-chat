@@ -157,12 +157,33 @@ class LLMServer(ABC):
                         }
                     }
                 
+                # Log request details for debugging (truncate long messages)
+                if logger.isEnabledFor(logging.DEBUG):
+                    import json as json_module
+                    msg_summary = []
+                    for msg in messages:
+                        role = msg.get("role", "?")
+                        content_len = len(str(msg.get("content", "")))
+                        tc_count = len(msg.get("tool_calls", []))
+                        msg_summary.append(f"{role}:{content_len}chars:{tc_count}tools")
+                    logger.debug(f"API request: model={model_name}, messages=[{', '.join(msg_summary)}], tools={'yes' if tools else 'no'}")
+                
                 response = await self.client.chat.completions.create(**kwargs)
                 
                 # If streaming, yield chunks
                 if stream:
-                    async for chunk in response:
-                        yield chunk
+                    chunk_count = 0
+                    try:
+                        async for chunk in response:
+                            chunk_count += 1
+                            # Log very first and last few chunks for debugging
+                            if chunk_count <= 2 or chunk_count % 50 == 0:
+                                logger.debug(f"LLM chunk {chunk_count}: choices={len(chunk.choices)}, finish={chunk.choices[0].finish_reason if chunk.choices else 'N/A'}")
+                            yield chunk
+                        logger.debug(f"LLM stream complete: {chunk_count} total chunks")
+                    except Exception as e:
+                        logger.error(f"Error during streaming after {chunk_count} chunks: {type(e).__name__}: {e}")
+                        raise
                 else:
                     yield response
                 

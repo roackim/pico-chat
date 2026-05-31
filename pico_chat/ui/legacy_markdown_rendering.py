@@ -80,8 +80,11 @@ def _apply_simple_markdown(text: str) -> str:
     # Italic: *text* → italic
     content = re.sub(r'(?<!\*)\*([^\*]+?)\*(?!\*)', r'\033[3m\1\033[23m', content)
     
-    # Headers: # → yellow/gold color + bold
-    content = re.sub(r'^(#{1,6})\s+(.+)$', r'\033[1;38;5;220m\2\033[0m', content, flags=re.MULTILINE)
+    # Headers: # → use theme warning color + bold
+    from pico_chat.ui.tui.colors import theme
+    header_color = str(theme.WARNING)
+    reset = theme.reset()
+    content = re.sub(r'^(#{1,6})\s+(.+)$', f'\\033[1m{header_color}\\2{reset}', content, flags=re.MULTILINE)
     
     # Bullet lists: - → •
     content = re.sub(r'^(\s*)[-*+]\s', r'\1• ', content, flags=re.MULTILINE)

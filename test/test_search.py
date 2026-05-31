@@ -71,7 +71,8 @@ class TestSearchToolsBasic:
             
             result = tools.search_web("xyzabc123nonexistent", max_results=3)
             
-            assert "No results found" in result
+            assert "No results found" in result or "No valid results" in result
+            assert "search_web" in result
     
     def test_search_web_timeout(self):
         """Test DuckDuckGo search timeout handling."""
@@ -138,7 +139,8 @@ class TestSearchToolsBasic:
             
             result = tools.search_wiki("xyzabc123nonexistent", max_results=3)
             
-            assert "No results found" in result
+            assert "No" in result and "found" in result
+            assert "search_wiki" in result
     
     def test_search_wiki_timeout(self):
         """Test Wikipedia search timeout handling."""

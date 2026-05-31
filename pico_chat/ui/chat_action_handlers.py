@@ -14,8 +14,47 @@ class ChatActionHandlers:
         logger = logging.getLogger("tui")
         
         try:
-            # Strip ANSI escape codes for clean clipboard content
-            text_to_copy = strip_ansi(message.base_text)
+            # For tool call messages, build comprehensive debug output
+            from pico_chat.ui.tui.msg_types import ToolCallMsg, AskPermissionMsg
+            if isinstance(message.type, (ToolCallMsg, AskPermissionMsg)) and message.tool_name:
+                import json
+                
+                # Build detailed tool call output
+                lines = [
+                    "=" * 60,
+                    f"TOOL CALL: {message.tool_name}",
+                    "=" * 60,
+                    "",
+                    "ARGUMENTS:",
+                    "-" * 60,
+                ]
+                
+                # Pretty-print arguments
+                if message.tool_args:
+                    try:
+                        args_dict = json.loads(message.tool_args)
+                        lines.append(json.dumps(args_dict, indent=2))
+                    except:
+                        lines.append(message.tool_args)
+                else:
+                    lines.append("(no arguments)")
+                
+                lines.extend(["", "STATUS:", "-" * 60])
+                lines.append(message.tool_status or "pending")
+                
+                # Include output if available
+                if message.tool_output:
+                    lines.extend(["", "OUTPUT:", "-" * 60, message.tool_output])
+                else:
+                    lines.extend(["", "OUTPUT:", "-" * 60, "(no output yet)"])
+                
+                lines.append("")
+                lines.append("=" * 60)
+                
+                text_to_copy = "\n".join(lines)
+            else:
+                # Strip ANSI escape codes for clean clipboard content
+                text_to_copy = strip_ansi(message.base_text)
             
             # Try to copy to clipboard using various methods
             
@@ -205,10 +244,10 @@ class ChatActionHandlers:
         logger = logging.getLogger("tui")
         logger.info("Output toggle action triggered")
         
-        from pico_chat.ui.tui.msg_types import ToolCallMsg
+        from pico_chat.ui.tui.msg_types import ToolCallMsg, AskPermissionMsg
         
         # Check if this is a tool message
-        if isinstance(message.type, ToolCallMsg):
+        if isinstance(message.type, (ToolCallMsg, AskPermissionMsg)):
             # Toggle output visibility
             message.show_output = not message.show_output
             message.rebuild_tool_display()

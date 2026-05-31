@@ -8,7 +8,7 @@ from pico_chat import pico_cfg
 from pico_chat.ui.tui.colors import theme
 
 class Box(Component):
-    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None, parent_msg=None):
+    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None, parent_msg=None, compact_when_unfocused: bool = False):
         super().__init__(id)
         self.child = child
         self.child.parent = self
@@ -18,6 +18,7 @@ class Box(Component):
         self.fg = fg
         self.focused = focused
         self.actions = actions or []
+        self.compact_when_unfocused = compact_when_unfocused  # If True, render without borders when unfocused
         
         if self.bg is None: self.bg = theme.get_bg()
         if self.fg is None: self.fg = theme.DEFAULT
@@ -40,18 +41,34 @@ class Box(Component):
         old_size = (self.width, self.height)
         size_changed = old_size != (width, height)
 
-        if size_changed:
-            super().set_layout(x, y, width, height)
-            self.child.set_layout(x + 1, y + 1, width - 2, height - 2)
+        # In compact mode when unfocused, no borders - child gets full size
+        if self.compact_when_unfocused and not self.focused:
+            if size_changed:
+                super().set_layout(x, y, width, height)
+                self.child.set_layout(x, y, width, height)
+            else:
+                self.x = x
+                self.y = y
+                self.width = width
+                self.height = height
+                self.child.x = x
+                self.child.y = y
+                self.child.width = width
+                self.child.height = height
         else:
-            self.x = x
-            self.y = y
-            self.width = width
-            self.height = height
-            self.child.x = x + 1
-            self.child.y = y + 1
-            self.child.width = width - 2
-            self.child.height = height - 2
+            # Normal mode with borders
+            if size_changed:
+                super().set_layout(x, y, width, height)
+                self.child.set_layout(x + 1, y + 1, width - 2, height - 2)
+            else:
+                self.x = x
+                self.y = y
+                self.width = width
+                self.height = height
+                self.child.x = x + 1
+                self.child.y = y + 1
+                self.child.width = width - 2
+                self.child.height = height - 2
         
         # Initialize or resize SubBuffer if size changed
         if size_changed:
@@ -68,8 +85,11 @@ class Box(Component):
             self.subbuffer.set_position(x, y)
 
     def get_preferred_height(self, width: int) -> int:
-        """Box adds 2 rows of height for borders (top/bottom)."""
+        """Box adds 2 rows of height for borders (top/bottom), unless in compact unfocused mode."""
         if hasattr(self.child, 'get_preferred_height'):
+            # In compact mode when unfocused, no borders
+            if self.compact_when_unfocused and not self.focused:
+                return self.child.get_preferred_height(width)
             # Height of child inside the box plus top/bottom borders.
             # Child's width inside box is box_width - 2.
             inner_height = self.child.get_preferred_height(width - 2)
@@ -84,7 +104,9 @@ class Box(Component):
             self.subbuffer.mark_changed()
 
     def render(self, buffer: Buffer):
-        if self.width < 2 or self.height < 2:
+        # Skip if too small - but compact mode can be 1x1
+        min_size = 1 if (self.compact_when_unfocused and not self.focused) else 2
+        if self.width < min_size or self.height < min_size:
             return
         
         # Ensure SubBuffer exists
@@ -118,6 +140,11 @@ class Box(Component):
             actions = self.actions
         
         bg = self.bg
+        
+        # Compact mode: render without borders when unfocused
+        if self.compact_when_unfocused and not self.focused:
+            self._render_compact_to_subbuffer()
+            return
         
         if self.focused:
             fg = theme.FOCUSED
@@ -226,6 +253,23 @@ class Box(Component):
         if title:
             title_str = f" {title[:self.width-4]} "
             self.subbuffer.write_str(2, 0, title_str, fg=fg, bg=bg)
+    
+    def _render_compact_to_subbuffer(self):
+        """Render in compact mode: no borders, just content."""
+        bg = self.bg
+        
+        # Clear SubBuffer
+        self.subbuffer.clear()
+        
+        # Fill background
+        if bg:
+            for iy in range(self.height):
+                for ix in range(self.width):
+                    self.subbuffer.set(ix, iy, " ", bg=bg)
+        
+        # Render child content directly (no border offset)
+        temp_buffer = self._create_subbuffer_wrapper()
+        self.child.render(temp_buffer)
     
     def _create_subbuffer_wrapper(self):
         """Create a Buffer-compatible wrapper that redirects to SubBuffer with coordinate translation."""

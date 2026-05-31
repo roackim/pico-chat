@@ -89,4 +89,4 @@ class AskPermissionMsg(MsgType):
     title = "permission"
     frame_color = "WARNING"
     content_color = None
-    actions = [MsgAction.ALLOW, MsgAction.DENY, MsgAction.COPY]
+    actions = [MsgAction.ALLOW, MsgAction.DENY, MsgAction.OUTPUT, MsgAction.COPY]
