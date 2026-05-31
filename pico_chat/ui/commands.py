@@ -973,7 +973,7 @@ class DebugPanelCommand(Command):
 
 class DebugGetContextCommand(Command):
     def __init__(self):
-        super().__init__("get_context", "Copy current LLM context to clipboard")
+        super().__init__("get_context", "Display and copy current LLM context")
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         logger = logging.getLogger("tui")
@@ -982,10 +982,39 @@ class DebugGetContextCommand(Command):
             # Get the exact context that would be sent to the LLM
             context = await ui.agent.get_current_context()
             
-            # Format as pretty JSON
+            # Format as pretty JSON for clipboard
             context_json = json.dumps(context, indent=2, ensure_ascii=False)
             
-            # Try to copy to clipboard using various methods
+            # Create human-readable formatted display
+            formatted_lines = ["=" * 80]
+            formatted_lines.append("CURRENT LLM CONTEXT")
+            formatted_lines.append("=" * 80)
+            formatted_lines.append("")
+            
+            for idx, msg in enumerate(context, 1):
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+                
+                # Header for each message
+                formatted_lines.append(f"[{idx}/{len(context)}] {role.upper()}")
+                formatted_lines.append("-" * 80)
+                
+                # Content with proper newlines (not escaped)
+                # The content is already a string, just add it directly
+                formatted_lines.append(content)
+                formatted_lines.append("")
+            
+            formatted_lines.append("=" * 80)
+            formatted_lines.append(f"Total messages: {len(context)}")
+            formatted_lines.append(f"Total characters: {len(context_json):,}")
+            formatted_lines.append("=" * 80)
+            
+            formatted_display = "\n".join(formatted_lines)
+            
+            # Display in chat UI
+            ui.chat_history_panel.add_message(formatted_display, msg_type=SysMsg())
+            
+            # Try to copy JSON to clipboard using various methods
             copied = False
             
             # Method 1: Try xclip (X11)
@@ -1024,17 +1053,15 @@ class DebugGetContextCommand(Command):
                     pass
             
             if copied:
-                msg_count = len(context)
-                char_count = len(context_json)
                 ui.chat_history_panel.add_message(
-                    f"Copied {msg_count} messages ({char_count:,} characters) to clipboard",
+                    "✓ JSON also copied to clipboard",
                     msg_type=SysMsg()
                 )
             else:
                 logger.warning("No clipboard utility found")
                 ui.chat_history_panel.add_message(
-                    "Could not copy: no clipboard utility found\nInstall xclip, xsel, or wl-copy",
-                    msg_type=SysMsgError()
+                    "⚠ Could not copy to clipboard (install xclip, xsel, or wl-copy)",
+                    msg_type=SysMsg()
                 )
                 
         except Exception as e:
