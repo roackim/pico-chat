@@ -340,6 +340,10 @@ class ShellTool:
         if Path('/lib64').exists():
             bwrap_args.extend(['--ro-bind', '/lib64', '/lib64'])
         
+        # Add /run if it exists (needed for DNS resolution via systemd-resolved)
+        if Path('/run').exists():
+            bwrap_args.extend(['--ro-bind', '/run', '/run'])
+        
         # Home directory (read-only)
         bwrap_args.extend(['--ro-bind', home, home])
         

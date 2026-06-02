@@ -142,7 +142,7 @@ def build_harness_context(root, format: str = None):
     
     context_output.append(f"Current date: {cdate}")
     context_output.append(f"Current time: {ctime}")
-    
+    context_output.append("")  # Blank line for separation
     context_output.append(f"Project Root: {root}")
     
     if format == "tree":

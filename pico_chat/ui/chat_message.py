@@ -4,6 +4,7 @@ from typing import Optional
 from pico_chat import pico_cfg
 from pico_chat.ui.tui.colors import theme, RGB
 from pico_chat.ui.tui.components import TextComponent, Box
+from pico_chat.ui.tui.components.markdown import MarkdownComponent
 from pico_chat.ui.tui.layout_utils import wrap_text
 from pico_chat.ui.tui.msg_types import MsgType, MsgAction
 from pico_chat.ui.tui import msg_types
@@ -24,9 +25,10 @@ class Message:
                  left_margin: int = 0,
                  right_margin: int = 0,
                  harness_message_ids: list = None,
+                 render_markdown: bool = False,
 ):
         """Initialize a message.
-        
+
         Args:
             text: The raw message text
             msg_type: The type of message (determines default formatting)
@@ -39,6 +41,7 @@ class Message:
             left_margin: Number of spaces to pad the left side of the box
             right_margin: Number of spaces to pad the right side of the box
             harness_message_ids: List of harness message IDs this UI message references
+            render_markdown: If True, use MarkdownComponent instead of TextComponent
         """
         
         self.type = msg_type or MsgType()
@@ -66,8 +69,15 @@ class Message:
         self.frame_color = frame_color
         self.left_margin = left_margin
         self.right_margin = right_margin
-        self.formatted_text = self._format_line_wrap()
-        self.component = TextComponent(self.formatted_text, fg=content_color)
+        self.render_markdown = render_markdown
+
+        if render_markdown:
+            self.formatted_text = ""  # Not used for markdown messages
+            self.component = MarkdownComponent(text, fg=content_color)
+        else:
+            self.formatted_text = self._format_line_wrap()
+            self.component = TextComponent(self.formatted_text, fg=content_color)
+
         self.finalized = False  # Whether this message is finalized
         
         # Tool-specific metadata
@@ -75,7 +85,7 @@ class Message:
         self.tool_args: Optional[str] = None
         self.tool_output: Optional[str] = None
         self.tool_status: Optional[str] = None  # "approved", "denied", "completed", etc.
-        self.show_output: bool = True  # Toggle for output visibility (True = show details when focused)
+        self.show_output: bool = False  # Toggle for output visibility (press 'o' to show out: line)
         
         # Generation metrics
         self.metrics_tokens: int = 0
@@ -140,6 +150,10 @@ class Message:
         """Update the content color of the message."""
         self.component.fg = color
         self.box.mark_changed()  # Color changed
+
+    def _is_markdown(self) -> bool:
+        """Check if this message uses markdown rendering."""
+        return self.render_markdown
     
     def set_focused(self, focused: bool):
         """Set the focused state of this message."""
@@ -178,18 +192,25 @@ class Message:
     
     def reformat(self, max_width: int) -> str:
         """Reformat the message with a new maximum width.
-        
+
         Args:
             max_width: New maximum width for line wrapping
-            
+
         Returns:
-            The newly formatted text
+            The newly formatted text (plain-text fallback for markdown)
         """
         self.max_width = max_width
-        self.formatted_text = self._format_line_wrap()
-        self.component.update(self.formatted_text)
-        self.box.mark_changed()  # Content changed, need to re-render
-        return self.formatted_text
+
+        if self._is_markdown():
+            # MarkdownComponent handles wrapping internally via set_layout / width
+            self.component.update(self.base_text)
+            self.box.mark_changed()
+            return self.base_text
+        else:
+            self.formatted_text = self._format_line_wrap()
+            self.component.update(self.formatted_text)
+            self.box.mark_changed()
+            return self.formatted_text
     
     def get_formatted(self) -> str:
         """Get the current formatted text."""
@@ -274,9 +295,8 @@ class Message:
                 pass
         
         # Check if we're in compact mode for status display
-        # Compact when: unfocused, OR focused but user toggled output off
-        is_compact = (self.box.compact_when_unfocused and not self.box.focused) or \
-                     (self.box.focused and not self.show_output)
+        # Compact when unfocused only
+        is_compact = self.box.compact_when_unfocused and not self.box.focused
         
         header += args_summary
         if is_compact:
@@ -359,9 +379,15 @@ class Message:
                 # Not JSON or parse error - show raw
                 lines.append(f"{theme.MUTED}cmd:{theme.reset()} {self.tool_args}")
         
-        # Add output if show_output is True (skip in compact mode - user can focus to see)
+        # Add output if show_output is True (toggle with 'o' key)
         if self.show_output and self.tool_output and not is_compact:
-            lines.append(f"{theme.MUTED}out: {self.tool_output}{theme.reset()}")
+            # Split output into lines and format each one
+            output_lines = self.tool_output.split('\n')
+            for i, line in enumerate(output_lines):
+                if i == 0:
+                    lines.append(f"{theme.MUTED}out:{theme.reset()} {line}")
+                else:
+                    lines.append(f"     {line}")  # Indent continuation lines
         
         self.base_text = '\n'.join(lines)
         self.reformat(self.max_width)

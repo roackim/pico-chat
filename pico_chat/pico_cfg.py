@@ -3,6 +3,27 @@ import toml
 from pathlib import Path
 from typing import Literal, Dict, Any, Optional
 
+# Default markdown element styles.
+# Each key is an element name; values are dicts with optional:
+#   fg (hex string), bg (hex string), bold (bool), reverse (bool)
+DEFAULT_MARKDOWN_STYLES: Dict[str, Dict[str, Any]] = {
+    "header1":    {"fg": "#CCA700", "bold": True},
+    "header2":    {"fg": "#CCA700", "bold": True},
+    "header3":    {"fg": "#CCA700", "bold": True},
+    "header4":    {"fg": "#CCA700", "bold": True},
+    "header5":    {"fg": "#CCA700", "bold": True},
+    "header6":    {"fg": "#CCA700", "bold": True},
+    "bold":       {"bold": True},
+    "italic":     {"reverse": True},
+    "code":       {"fg": "#808080"},
+    "code_block": {"fg": "#808080"},
+    "quote":      {"fg": "#808080"},
+    "list":       {},
+    "link":       {"fg": "#569CD6"},
+    "hr":         {"fg": "#808080"},
+    "paragraph":  {},
+}
+
 Permission = Literal["allow", "ask", "deny"]
 
 
@@ -65,6 +86,11 @@ class Config:
         self.subagent_timeout: int = 120         # Seconds before a subagent is auto-aborted
         self.subagent_max_context: int | None = None  # Max tokens per subagent (None = unlimited)
 
+        # Markdown element styles (element_name -> {fg, bg, bold, reverse})
+        self.markdown_styles: Dict[str, Dict[str, Any]] = {}
+        for _k, _v in DEFAULT_MARKDOWN_STYLES.items():
+            self.markdown_styles[_k] = dict(_v)
+
         # Load config from file if path provided or default exists
         if config_path:
             self._load_from_file(Path(config_path))
@@ -94,6 +120,12 @@ class Config:
                     if hasattr(self, attr_name):
                         setattr(self, attr_name, value)
             
+            # Load markdown styles
+            if "markdown_styles" in data:
+                for element, style_dict in data["markdown_styles"].items():
+                    if element in self.markdown_styles:
+                        self.markdown_styles[element].update(style_dict)
+
             # Load other settings
             if "settings" in data:
                 settings = data["settings"]
