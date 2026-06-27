@@ -77,6 +77,9 @@ class Config:
         # Debug settings
         self.debug_log_enabled: bool = False  # Write debug_stream.log to disk
 
+        # Reasoning / thinking trace settings
+        self.preserve_reasoning_traces: bool = False  # Preserve  thinking/ response blocks in history for multi-turn reasoning
+
         # Context building settings
         self.context_format: Literal["tree", "flat"] = "tree"  # Tree format saves tokens by avoiding path repetition
 
@@ -132,6 +135,7 @@ class Config:
                 for key in ["render_thinking", "max_file_size", "max_search_results",
                            "command_timeout", "target_fps", "context_format",
                            "debug_log_enabled",
+                           "preserve_reasoning_traces",
                            "subagent_max_depth", "subagent_server",
                            "subagent_timeout", "subagent_max_context"]:
                     if key in settings:

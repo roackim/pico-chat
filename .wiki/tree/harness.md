@@ -2,7 +2,7 @@
 
 The agent backbone. Manages the LLM conversation loop, tool execution, security checks, context construction, and memory.
 
-See [notes/architecture.md](../notes/architecture.md) and [notes/tools-and-permissions.md](../notes/tools-and-permissions.md) for conceptual details.
+See [notes/architecture.md](../notes/architecture.md), [notes/tools-and-permissions.md](../notes/tools-and-permissions.md), and [notes/reasoning-traces.md](../notes/reasoning-traces.md) for conceptual details.
 
 ---
 

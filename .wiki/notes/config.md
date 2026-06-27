@@ -46,8 +46,7 @@ The `ui_` prefix is applied automatically: a TOML key `theme` under `[ui]` maps 
 - `config.get_active_server_config()` — returns the active server's raw dict, or `None`
 
 **General:**
-- `config.render_thinking` — whether to show `<think>` blocks
-- `config.max_file_size`, `config.max_search_results`, `config.command_timeout`
+- `config.render_thinking` — whether to show `<think>` blocks- `config.preserve_reasoning_traces` — preserve `  thinking...  response` in history for multi-turn reasoning- `config.max_file_size`, `config.max_search_results`, `config.command_timeout`
 - `config.context_format` — `"tree"` or `"flat"` for context injection
 - `config.target_fps` — compositor render rate
 

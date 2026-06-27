@@ -12,6 +12,7 @@ This document tells AI agents and humans how to operate and maintain this wiki.
   notes/
     architecture.md         ← High-level system design and data flow
     config.md               ← Configuration reference (config.toml)
+    reasoning-traces.md     ← Reasoning trace handling (thinking tags, reasoning_content)
     security.md             ← Security model, dangerous patterns, sandboxing
     subagents.md            ← Subagent lifecycle, permissions, depth/timeout/context limits
     testing.md              ← Test suite overview and how to run tests

@@ -681,6 +681,7 @@ class Harness:
         metrics_interval = pico_cfg.config.ui_metrics_refresh_interval
         
         full_content = ""
+        full_reasoning = ""
         tool_calls_buffer: Dict[int, Dict[str, Any]] = {}
         
         # State for parsing thinking tags in content
@@ -743,6 +744,7 @@ class Harness:
                 
                 # Count tokens and yield content
                 total_tokens += estimate_tokens(reasoning)
+                full_reasoning += reasoning
                 yield chunks.Thinking(content=reasoning)
                 
                 # Yield metrics update periodically
@@ -848,6 +850,7 @@ class Harness:
                             if thinking_content:
                                 if self.state != AgentState.THINKING:
                                     self.state = AgentState.THINKING
+                                full_reasoning += thinking_content
                                 yield chunks.Thinking(content=thinking_content)
                                 
                                 # Yield metrics update periodically
@@ -875,6 +878,7 @@ class Harness:
                                 if safe_content:
                                     if self.state != AgentState.THINKING:
                                         self.state = AgentState.THINKING
+                                    full_reasoning += safe_content
                                     yield chunks.Thinking(content=safe_content)
                                     
                                     # Yield metrics update periodically
@@ -924,6 +928,7 @@ class Harness:
                 # Unclosed thinking block - yield as thinking (model might have been cut off)
                 if self.state != AgentState.THINKING:
                     self.state = AgentState.THINKING
+                full_reasoning += content_buffer
                 yield chunks.Thinking(content=content_buffer)
             else:
                 # Regular content
@@ -974,6 +979,7 @@ class Harness:
         
         # Store results in instance variables for caller to access
         self._last_full_content = full_content
+        self._last_full_reasoning = full_reasoning
         self._last_tool_calls = tool_calls_list
 
     async def _execute_tool_calls(
@@ -1262,6 +1268,8 @@ class Harness:
         # Agent Loop (Handle Multi-step Tool Calls)
         while True:
             try:
+                from pico_chat import pico_cfg
+                
                 # Generate assistant message ID upfront so UI can track it
                 assistant_msg_id = str(uuid.uuid4())
                 yield chunks.MessageStart(message_id=assistant_msg_id, role="assistant")
@@ -1297,15 +1305,26 @@ class Harness:
                 
                 # Collect results from instance variables
                 full_content = self._last_full_content
+                full_reasoning = self._last_full_reasoning
                 tool_calls_list = self._last_tool_calls
                 
-                logger.debug(f"LLM response complete. Content length: {len(full_content) if full_content else 0}, Tool calls: {len(tool_calls_list) if tool_calls_list else 0}")
+                logger.debug(f"LLM response complete. Content length: {len(full_content) if full_content else 0}, Reasoning length: {len(full_reasoning) if full_reasoning else 0}, Tool calls: {len(tool_calls_list) if tool_calls_list else 0}")
+                
+                # Optionally reconstruct full output with thinking tags for multi-turn reasoning
+                if pico_cfg.config.preserve_reasoning_traces and full_reasoning:
+                    # Reconstruct the original interleaved format so the model sees
+                    # its own chain-of-thought on subsequent turns.
+                    # Use DeepSeek-R1-style  thinking...  response tags (de facto standard).
+                    reconstructed = f"  thinking\n{full_reasoning}\n  \n\n{full_content}"
+                    full_content_for_history = reconstructed
+                else:
+                    full_content_for_history = full_content if full_content else None
                 
                 # Add assistant message to history with pre-generated ID
                 msg = {
                     "id": assistant_msg_id,
                     "role": "assistant",
-                    "content": full_content if full_content else None
+                    "content": full_content_for_history
                 }
                 if tool_calls_list:
                     msg["tool_calls"] = tool_calls_list
@@ -1315,7 +1334,7 @@ class Harness:
                 # Also add to messages for current request (without ID for API call)
                 messages.append({
                     "role": "assistant",
-                    "content": full_content if full_content else None,
+                    "content": full_content_for_history,
                     "tool_calls": tool_calls_list if tool_calls_list else None
                 })
                 
