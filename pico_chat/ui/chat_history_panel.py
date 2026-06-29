@@ -258,11 +258,20 @@ class ChatHistoryPanel(TextComponent):
         msg_start, msg_end = self._get_message_virtual_y_range(msg_index)
         msg_height = msg_end - msg_start
         
-        # Calculate current visible range in virtual coordinates
+        # Calculate current visible range in virtual coordinates.
+        # Derive start_y from auto_scroll/anchored_start_y (the source of truth used by
+        # render() and the mouse wheel handler) rather than self.scroll_offset, which is
+        # only refreshed inside render() and can be stale between renders (e.g. while the
+        # last message is streaming and total_height/max_scroll keep growing). Using a
+        # stale scroll_offset yields a wrong start_y, which makes the "already visible"
+        # check pass incorrectly and the view fail to follow the newly focused message.
         line_map = self._build_line_map()
         total_height = len(line_map)
         max_scroll = max(0, total_height - self.height)
-        start_y = max_scroll - self.scroll_offset
+        if self.auto_scroll or self.anchored_start_y is None:
+            start_y = max_scroll
+        else:
+            start_y = self.anchored_start_y
         end_y = start_y + self.height
         
         # Check if message is already fully visible
@@ -295,6 +304,7 @@ class ChatHistoryPanel(TextComponent):
                 # Message bottom is below visible area, scroll down to show it
                 new_end_y = msg_end
                 new_start_y = new_end_y - self.height
+                self.anchored_start_y = new_start_y
                 self.scroll_offset = max_scroll - new_start_y
                 self.scroll_offset = max(0, min(max_scroll, self.scroll_offset))
             elif msg_start < start_y:
