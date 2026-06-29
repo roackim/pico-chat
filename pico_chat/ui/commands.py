@@ -342,57 +342,13 @@ class ServerAddCommand(Command):
                                     error_msg.command_text = command_text
                                     ui.chat_history_panel.replace_message(placeholder, error_msg)
                                     return
-                            else:
-                                # Fallback: validate against known common providers if API doesn't provide list
-                                common_providers = [
-                                    "Anthropic", "OpenAI", "Google", "DeepInfra", "Together", 
-                                    "Fireworks", "Lepton", "Replicate", "Azure", "AWS", "Groq",
-                                    "Mistral", "Cohere", "Databricks", "Cloudflare"
-                                ]
-                                provider_lower = provider.lower()
-                                valid_providers_lower = [p.lower() for p in common_providers]
-                                
-                                if provider_lower not in valid_providers_lower:
-                                    error_msg = ui.chat_history_panel.new_message(
-                                        f"Provider '{provider}' is not a recognized OpenRouter provider.\n\n"
-                                        f"Common providers: {', '.join(common_providers)}\n\n"
-                                        "Leave provider empty to use OpenRouter's default routing.\n"
-                                        "Check https://openrouter.ai/models for provider details.",
-                                        msg_type=SysMsgError(),
-                                        title="server"
-                                    )
-                                    error_msg.command_text = command_text
-                                    ui.chat_history_panel.replace_message(placeholder, error_msg)
-                                    return
+                            # else: API didn't provide provider info, trust the user's choice
                     else:
                         # Can't validate, but warn user
                         logger.warning(f"Could not fetch OpenRouter models list: HTTP {response.status_code}")
             except Exception as e:
                 # Network error - can't validate, but continue (user might be offline but model might be valid)
                 logger.warning(f"Failed to validate OpenRouter model: {e}")
-            
-            # If provider was specified but we couldn't validate it from API, do basic validation
-            if provider and not model_info:
-                common_providers = [
-                    "Anthropic", "OpenAI", "Google", "DeepInfra", "Together", 
-                    "Fireworks", "Lepton", "Replicate", "Azure", "AWS", "Groq",
-                    "Mistral", "Cohere", "Databricks", "Cloudflare"
-                ]
-                provider_lower = provider.lower()
-                valid_providers_lower = [p.lower() for p in common_providers]
-                
-                if provider_lower not in valid_providers_lower:
-                    error_msg = ui.chat_history_panel.new_message(
-                        f"Provider '{provider}' is not a recognized OpenRouter provider.\n\n"
-                        f"Common providers: {', '.join(common_providers)}\n\n"
-                        "Leave provider empty to use OpenRouter's default routing.\n"
-                        "Check https://openrouter.ai/models for provider details.",
-                        msg_type=SysMsgError(),
-                        title="server"
-                    )
-                    error_msg.command_text = command_text
-                    ui.chat_history_panel.replace_message(placeholder, error_msg)
-                    return
             
             # Test connection with API key
             test_config = LLMServerConfig(
