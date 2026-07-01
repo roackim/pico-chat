@@ -413,9 +413,11 @@ class chatTUI(ChatActionHandlers):
                 await asyncio.sleep(0)
                 
         except asyncio.CancelledError:
-            # If cancelled, we want to stop and show that
-            current_msg.append(f"\n{theme.MUTED}[Generation stopped]{theme.reset()}")
-            # Finalize and re-raise
+            # Finalize current message and add a plain SysMsg notification.
+            # Avoid appending ANSI codes to a MarkdownComponent message (PicoMsg)
+            # since the component would render the escape sequences as literal text.
+            current_msg.finalize()
+            chat.add_message("[Generation stopped]", msg_type=SysMsg())
             raise 
             
         except Exception as e:

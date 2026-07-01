@@ -538,7 +538,9 @@ class ChatHistoryPanel(TextComponent):
     def _should_render_markdown(msg_type: MsgType) -> bool:
         """Return True if this message type should render markdown."""
         from pico_chat.ui.tui.msg_types import PicoMsg, ThinkingMsg
-        return isinstance(msg_type, (PicoMsg, ThinkingMsg))
+        # ThinkingMsg intentionally excluded: thinking content is plain text,
+        # markdown would misinterpret it and break trailing-newline stripping.
+        return isinstance(msg_type, PicoMsg) and not isinstance(msg_type, ThinkingMsg)
 
     def new_message(self, message: str, *, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None, left_margin: int = 0, right_margin: int = 0, harness_message_ids: list = None, append=False) -> Message:
         """Create a new message. If append is True, add it to the chat history. Return the Message object for further manipulation.

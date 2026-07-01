@@ -1314,8 +1314,8 @@ class Harness:
                 if pico_cfg.config.preserve_reasoning_traces and full_reasoning:
                     # Reconstruct the original interleaved format so the model sees
                     # its own chain-of-thought on subsequent turns.
-                    # Use DeepSeek-R1-style  thinking...  response tags (de facto standard).
-                    reconstructed = f"  thinking\n{full_reasoning}\n  \n\n{full_content}"
+                    # Use DeepSeek-R1-style <thinking>...</thinking> response tags (de facto standard).
+                    reconstructed = f"<thinking>\n{full_reasoning}\n</thinking>\n\n{full_content}"
                     full_content_for_history = reconstructed
                 else:
                     full_content_for_history = full_content if full_content else None
