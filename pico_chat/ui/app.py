@@ -91,6 +91,22 @@ class chatTUI(ChatActionHandlers):
         
         # Track the current generation task
         self.current_generation_task: Optional[asyncio.Task] = None
+
+        # Track the user input/message currently being generated (for steer/pause/resume)
+        self._active_user_input: Optional[str] = None
+        self._active_user_msg: Optional[Message] = None
+
+        # Set by handle_steer_action so agent_worker re-queues the active input
+        # after cancellation (with the thinking prefill already set).
+        self._requeue_after_cancel: bool = False
+
+        # Pause context: populated by handle_pause_action, cleared by handle_resume_action
+        self._paused_user_input: Optional[str] = None
+        self._paused_user_msg: Optional[Message] = None
+
+        # Set when the user edits a paused message's thinking prefill instead of a
+        # normal user message; on submit we call set_thinking_prefill + resume.
+        self.editing_prefill_for_resume: bool = False
         
         # Track which message is being edited (for edit-then-submit workflow)
         self.editing_message_index: Optional[int] = None
@@ -472,6 +488,22 @@ class chatTUI(ChatActionHandlers):
                     logger = logging.getLogger("tui")
                     logger.debug(f"Agent worker received user input")
 
+                    # Skip messages that were consumed as steer injections
+                    if getattr(user_msg, 'is_steered', False):
+                        logger.debug("Skipping steered message (already consumed as thinking prefill)")
+                        continue
+
+                    # Un-queue: restore normal visual state before processing
+                    if getattr(user_msg, 'is_queued', False):
+                        user_msg.is_queued = False
+                        user_msg.set_title("user")
+                        from pico_chat.ui.tui.colors import theme
+                        user_msg.set_frame_color(theme.USER)
+
+                    # Track the active user input for steer/pause/resume
+                    self._active_user_input = user_input
+                    self._active_user_msg   = user_msg
+
                     self.current_generation_task = asyncio.create_task(
                         self._process_generation(user_input, user_msg)
                     )
@@ -528,6 +560,15 @@ class chatTUI(ChatActionHandlers):
                         pass
                     finally:
                         self.current_generation_task = None
+                        # Steer action: re-queue the active input so it is
+                        # regenerated with the thinking prefill already in place.
+                        if self._requeue_after_cancel and self._active_user_input:
+                            self.message_queue.put_nowait(
+                                (self._active_user_input, self._active_user_msg)
+                            )
+                        self._requeue_after_cancel = False
+                        self._active_user_input = None
+                        self._active_user_msg   = None
 
             except asyncio.TimeoutError:
                 continue
@@ -632,6 +673,13 @@ class chatTUI(ChatActionHandlers):
             self.on_command_submit(clean_text)
             return
 
+        # Editing a paused message's thinking prefill: set prefill then resume
+        if getattr(self, 'editing_prefill_for_resume', False):
+            self.editing_prefill_for_resume = False
+            self.agent.set_thinking_prefill(clean_text)
+            self.handle_resume_action(None)
+            return
+
         if self.pending_permission_prompt:
             self.chat_history_panel.add_message(
                 "Permission required for pending tool call. Use [a] allow or [x] deny first. Commands like /status are still available.",
@@ -686,6 +734,15 @@ class chatTUI(ChatActionHandlers):
                 
                 # Create user message and queue it
                 user_msg = self.chat_history_panel.add_message(text, msg_type=UserMsg())
+
+                # If a generation is active, mark as queued so the UI shows it
+                if self.current_generation_task and not self.current_generation_task.done():
+                    user_msg.is_queued = True
+                    user_msg.set_title("user (queued)")
+                    user_msg.set_frame_color(
+                        getattr(__import__('pico_chat.ui.tui.colors', fromlist=['theme']).theme, 'MUTED')
+                    )
+
                 self.message_queue.put_nowait((text, user_msg))
             
             # Enable auto-scroll to show the new message
@@ -844,6 +901,10 @@ class chatTUI(ChatActionHandlers):
         self.chat_history_panel.on_allow_action = self.handle_allow_action
         self.chat_history_panel.on_deny_action = self.handle_deny_action
         self.chat_history_panel.on_output_action = self.handle_output_action
+        self.chat_history_panel.on_steer_action = self.handle_steer_action
+        self.chat_history_panel.on_pause_action = self.handle_pause_action
+        self.chat_history_panel.on_resume_action = self.handle_resume_action
+        self.chat_history_panel.on_delete_action = self.handle_delete_action
         
         # Set initial focus states
         self._update_focus_states()

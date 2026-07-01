@@ -54,6 +54,10 @@ class ChatHistoryPanel(TextComponent):
         self.on_allow_action: Optional[callable] = None
         self.on_deny_action: Optional[callable] = None
         self.on_output_action: Optional[callable] = None
+        self.on_steer_action: Optional[callable] = None
+        self.on_pause_action: Optional[callable] = None
+        self.on_resume_action: Optional[callable] = None
+        self.on_delete_action: Optional[callable] = None
 
     def set_compositor(self, compositor):
         """Set the compositor for updates."""
@@ -404,8 +408,12 @@ class ChatHistoryPanel(TextComponent):
                 focused_msg = self.messages[self.focused_message_index]
                 
                 # Delete action
-                if event == 'd' and MsgAction.DELETE in focused_msg.type.actions:
-                    self.remove_message_by_index(self.focused_message_index)
+                if event == 'd' and MsgAction.DELETE in focused_msg.get_active_actions():
+                    if self.on_delete_action:
+                        self.on_delete_action(focused_msg)
+                    else:
+                        # Fallback: UI-only removal
+                        self.remove_message_by_index(self.focused_message_index)
                     return True
                 
                 # Copy action
@@ -415,7 +423,7 @@ class ChatHistoryPanel(TextComponent):
                     return True
                 
                 # Edit action
-                elif event == 'e' and MsgAction.EDIT in focused_msg.type.actions:
+                elif event == 'e' and MsgAction.EDIT in focused_msg.get_active_actions():
                     if self.on_edit_action:
                         self.on_edit_action(focused_msg)
                     return True
@@ -448,6 +456,25 @@ class ChatHistoryPanel(TextComponent):
                 elif event == 'o' and MsgAction.OUTPUT in focused_msg.type.actions:
                     if self.on_output_action:
                         self.on_output_action(focused_msg)
+                    return True
+
+                # Steer action (queued UserMsg → inject as thinking prefill)
+                # Use get_active_actions so it only fires when is_queued=True
+                elif event == 't' and MsgAction.STEER in focused_msg.get_active_actions():
+                    if self.on_steer_action:
+                        self.on_steer_action(focused_msg)
+                    return True
+
+                # Pause action (live PicoMsg/ThinkingMsg)
+                elif event == 'p' and MsgAction.PAUSE in focused_msg.get_active_actions():
+                    if self.on_pause_action:
+                        self.on_pause_action(focused_msg)
+                    return True
+
+                # Resume action (paused message)
+                elif event == 'u' and MsgAction.RESUME in focused_msg.get_active_actions():
+                    if self.on_resume_action:
+                        self.on_resume_action(focused_msg)
                     return True
         
         # Handle mouse input

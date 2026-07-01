@@ -13,6 +13,9 @@ class MsgAction(Enum):
     ALLOW = ("a", "allow")
     DENY = ("x", "deny")
     OUTPUT = ("o", "output")
+    STEER = ("t", "steer")   # inject queued message as thinking prefill
+    PAUSE = ("p", "pause")   # cancel generation + capture thinking so far
+    RESUME = ("u", "resume") # re-send with captured thinking prefill
     
     def __init__(self, key: str, label: str):
         self.key = key
@@ -33,13 +36,13 @@ class MsgType:
 class UserMsg(MsgType):
     name = "user"
     title = "user"
-    actions = [MsgAction.COPY, MsgAction.EDIT]
+    actions = [MsgAction.COPY, MsgAction.EDIT, MsgAction.DELETE, MsgAction.STEER]
     frame_color = "USER"
 
 class PicoMsg(MsgType):
     name = "pico"
     title = "pico"
-    actions = [MsgAction.COPY, MsgAction.RETRY, MsgAction.STOP]
+    actions = [MsgAction.COPY, MsgAction.EDIT, MsgAction.RETRY, MsgAction.DELETE, MsgAction.STOP, MsgAction.PAUSE, MsgAction.RESUME]
     frame_color = "PICO"
 
 class SysMsg(MsgType):
@@ -67,7 +70,7 @@ class ThinkingMsg(PicoMsg):
     title = "thinking"
     frame_color = "MUTED"
     content_color = "MUTED"
-    actions = [MsgAction.COPY, MsgAction.RETRY, MsgAction.DELETE, MsgAction.STOP]
+    actions = [MsgAction.COPY, MsgAction.EDIT, MsgAction.RETRY, MsgAction.DELETE, MsgAction.STOP, MsgAction.PAUSE, MsgAction.RESUME]
 
 class ToolCallMsg(MsgType):
     name = "tool"

@@ -133,6 +133,35 @@ class StopCommand(Command):
         else:
             ui.chat_history_panel.add_message("Stop command not supported by this UI.", msg_type=SysMsg())
 
+
+class ResumeCommand(Command):
+    def __init__(self):
+        super().__init__("resume", "Resume a paused generation")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if hasattr(ui, 'handle_resume_action'):
+            ui.handle_resume_action(None)
+        else:
+            ui.chat_history_panel.add_message("Resume not supported.", msg_type=SysMsg())
+
+
+class PrefillCommand(Command):
+    def __init__(self):
+        super().__init__("prefill", "Submit a message and pause for thinking prefill editing")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        user_text = " ".join(args).strip()
+        if not user_text:
+            ui.chat_history_panel.add_message(
+                "Usage: /prefill <message>  — submits the message and pauses so you can edit the thinking prefill before generation starts.",
+                msg_type=SysMsg()
+            )
+            return
+        if hasattr(ui, 'handle_prefill_command'):
+            ui.handle_prefill_command(user_text)
+        else:
+            ui.chat_history_panel.add_message("Prefill not supported.", msg_type=SysMsg())
+
 class StatusCommand(Command):
     def __init__(self):
         super().__init__("status", "Show system and connection status")
@@ -1413,6 +1442,8 @@ COMMANDS: Dict[str, Command] = {
     "compact":     CompactCommand(),
     "exit":        ExitCommand(),
     "stop":        StopCommand(),
+    "resume":      ResumeCommand(),
+    "prefill":     PrefillCommand(),
     "status":      StatusCommand(),
     "server":      ServerCommand(),
     "tools":       ToolsCommand(),

@@ -86,6 +86,10 @@ class Message:
         self.tool_output: Optional[str] = None
         self.tool_status: Optional[str] = None  # "approved", "denied", "completed", etc.
         self.show_output: bool = False  # Toggle for output visibility (press 'o' to show out: line)
+
+        # Steering / queue state
+        self.is_queued: bool = False   # UserMsg waiting while generation is active
+        self.is_paused: bool = False   # PicoMsg/ThinkingMsg cancelled via pause action
         
         # Generation metrics
         self.metrics_tokens: int = 0
@@ -107,23 +111,33 @@ class Message:
         self.box.mark_changed()  # Finalization affects actions display
     
     def get_active_actions(self):
-        """Get the list of active actions based on message state.
-        
-        Returns actions excluding STOP if message is finalized.
-        """
+        """Get the list of active actions based on message state."""
         actions = list(self.type.actions)
-        
-        # Remove STOP action if message is finalized
-        
-        if isinstance(self.type, msg_types.PicoMsg): # Pico logic
-            if self.finalized:
-                actions = [a for a in actions if a != MsgAction.STOP]
-        
-            if not self.finalized:
-                actions = [a for a in actions if a != MsgAction.DELETE]
-        
-        
-        
+
+        if isinstance(self.type, msg_types.UserMsg):
+            # STEER only visible while this message is sitting in the queue
+            if not self.is_queued:
+                actions = [a for a in actions if a != MsgAction.STEER]
+
+        elif isinstance(self.type, msg_types.PicoMsg):  # includes ThinkingMsg
+            if self.is_paused:
+                # Paused: copy, edit prefill, resume, delete
+                keep = {MsgAction.COPY, MsgAction.EDIT, MsgAction.RESUME, MsgAction.DELETE}
+                actions = [a for a in actions if a in keep]
+            elif self.finalized:
+                # Finalized: hide streaming-only actions
+                actions = [a for a in actions if a not in (
+                    MsgAction.STOP, MsgAction.PAUSE, MsgAction.RESUME
+                )]
+                # Only ThinkingMsg makes sense to edit as a thinking prefill
+                if not isinstance(self.type, msg_types.ThinkingMsg):
+                    actions = [a for a in actions if a != MsgAction.EDIT]
+            else:
+                # Live streaming: hide destructive/post-gen actions
+                actions = [a for a in actions if a not in (
+                    MsgAction.EDIT, MsgAction.DELETE, MsgAction.RETRY, MsgAction.RESUME
+                )]
+
         return actions
     
     def update_actions(self):

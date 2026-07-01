@@ -106,10 +106,75 @@ class ChatActionHandlers:
             self.chat_history_panel.add_message(f"Copy failed: {e}", msg_type=SysMsgError())
     
     def handle_edit_action(self, message):
-        """Handle edit action for a focused message (user messages or command errors)."""
+        """Handle edit action for a focused message.
+
+        - Paused AI message: open the captured thinking prefill for editing.
+        - Finalized AI message: open message content as thinking prefill; on submit
+          the model will regenerate from that point.
+        - User message: re-open the message text for editing (wipes subsequent msgs).
+        """
         logger = logging.getLogger("tui")
         logger.info("Edit action triggered")
-        
+
+        # --- Paused AI message: edit the thinking prefill ---
+        if getattr(message, 'is_paused', False):
+            prefill = getattr(self.agent, '_pending_thinking_prefill', None) or ""
+            self.input_component.update(prefill)
+            self.editing_prefill_for_resume = True
+            self._last_focus_id = "input"
+            self._update_focus_states()
+            self.chat_history_panel.clear_focus()
+            return
+
+        # --- Finalized AI message: edit as thinking prefill for regeneration ---
+        from pico_chat.ui.tui.msg_types import PicoMsg as _PicoMsg, ThinkingMsg as _ThinkingMsg, UserMsg as _UserMsg, SysMsgError as _SysMsgError
+        if isinstance(message.type, _PicoMsg):
+            self.stop_generation()
+            # Find the nearest preceding user message (needed for resume)
+            try:
+                msg_index = self.chat_history_panel.messages.index(message)
+            except ValueError:
+                return
+            user_msg = None
+            preceding_thinking_msg = None
+            for i in range(msg_index - 1, -1, -1):
+                m = self.chat_history_panel.messages[i]
+                if isinstance(m.type, _UserMsg):
+                    user_msg = m
+                    break
+                if preceding_thinking_msg is None and isinstance(m.type, _ThinkingMsg):
+                    preceding_thinking_msg = m
+            if user_msg is None:
+                self.chat_history_panel.add_message(
+                    "Can't edit: no preceding user message found.",
+                    msg_type=_SysMsgError()
+                )
+                return
+
+            # Determine what to put in the input:
+            # - ThinkingMsg → its own content IS the thinking, use directly
+            # - PicoMsg (content) → look for a preceding ThinkingMsg; if none, start blank
+            if isinstance(message.type, _ThinkingMsg):
+                prefill_text = message.base_text
+            elif preceding_thinking_msg is not None:
+                prefill_text = preceding_thinking_msg.base_text
+            else:
+                prefill_text = ""
+
+            self.input_component.update(prefill_text)
+            # Set up pause context so on_user_submit can resume with the edited prefill
+            self._paused_user_input = user_msg.base_text
+            self._paused_user_msg   = user_msg
+            self.editing_prefill_for_resume = True
+            self._last_focus_id = "input"
+            self._update_focus_states()
+            self.chat_history_panel.clear_focus()
+            return
+
+        # --- Normal user message edit ---
+        # Stop any active generation so we don't race output
+        self.stop_generation()
+
         # Store which message is being edited
         try:
             self.editing_message_index = self.chat_history_panel.messages.index(message)
@@ -127,7 +192,30 @@ class ChatActionHandlers:
         
         # Clear message focus
         self.chat_history_panel.clear_focus()
-    
+
+    def handle_delete_action(self, message):
+        """Delete a message and all messages after it from both UI and harness."""
+        logger = logging.getLogger("tui")
+        logger.info("Delete action triggered")
+
+        self.stop_generation()
+
+        try:
+            idx = self.chat_history_panel.messages.index(message)
+        except ValueError:
+            return
+
+        # Remove from harness (inclusive: removes this message and everything after)
+        if message.harness_message_ids:
+            harness_id = message.harness_message_ids[0]
+            self.agent.delete_messages_after_id(harness_id, inclusive=True)
+
+        # Remove from UI: this message and all after it
+        to_remove = len(self.chat_history_panel.messages) - idx
+        for _ in range(to_remove):
+            self.chat_history_panel.remove_last_message()
+
+
     def handle_retry_action(self, message):
         """Handle retry action for a message (regenerate response)."""
         logger = logging.getLogger("tui")
@@ -254,3 +342,172 @@ class ChatActionHandlers:
             logger.info(f"Tool output {'shown' if message.show_output else 'hidden'}")
         else:
             logger.warning("Output action called on non-tool message")
+
+    # ------------------------------------------------------------------
+    # Steer / Pause / Resume
+    # ------------------------------------------------------------------
+
+    def handle_steer_action(self, message):
+        """Inject the queued user message as a thinking prefill for the current
+        (or next) generation, then cancel-and-restart that generation.
+
+        The steer message is consumed: it's visually replaced by a SysMsg and
+        the original user input is re-queued so the LLM answers it with the
+        enriched thinking prefix.
+        """
+        logger = logging.getLogger("tui")
+        logger.info("Steer action triggered")
+
+        from pico_chat.ui.tui.msg_types import UserMsg
+
+        if not isinstance(message.type, UserMsg) or not message.is_queued:
+            logger.warning("Steer action called on non-queued UserMsg")
+            return
+
+        steer_content = strip_ansi(message.base_text).strip()
+        if not steer_content:
+            return
+
+        # Build the prefill: existing thinking so far + the steer text
+        current_reasoning = self.agent.get_current_reasoning()
+        if current_reasoning:
+            prefill = current_reasoning + "\n" + steer_content
+        else:
+            prefill = steer_content
+
+        self.agent.set_thinking_prefill(prefill)
+        logger.info(f"Thinking prefill set ({len(prefill)} chars)")
+
+        # Mark message as consumed (no longer queued as a user message)
+        message.is_queued = False
+        message.is_steered = True   # prevent agent_worker from processing it normally
+        message.box.mark_changed()
+
+        # Signal agent_worker to re-queue the active user input after cancellation
+        self._requeue_after_cancel = True
+
+        # Cancel current generation so it restarts with the prefill
+        self.stop_generation()
+
+        # Switch focus back to input
+        self._last_focus_id = "input"
+        self._update_focus_states()
+
+    def handle_pause_action(self, message):
+        """Cancel the current generation and capture the thinking accumulated so
+        far as a prefill.  The message is marked as paused so the user can
+        resume later.
+        """
+        logger = logging.getLogger("tui")
+        logger.info("Pause action triggered")
+
+        if not self.stop_generation():
+            logger.info("No active generation to pause")
+            self.chat_history_panel.add_message("No active generation to pause.", msg_type=SysMsg())
+            return
+
+        # Capture reasoning so far as the resume prefill
+        current_reasoning = self.agent.get_current_reasoning()
+        if current_reasoning:
+            self.agent.set_thinking_prefill(current_reasoning)
+
+        # Mark the message as paused if a real message object was supplied
+        if message is not None:
+            message.is_paused = True
+            message.set_title("paused")
+            message.box.mark_changed()
+
+        # Store pause context so /resume and handle_resume_action can restart
+        self._paused_user_input = getattr(self, "_active_user_input", None)
+        self._paused_user_msg   = getattr(self, "_active_user_msg", None)
+        logger.info("Generation paused; thinking prefill captured for resume")
+
+        self._last_focus_id = "input"
+        self._update_focus_states()
+
+    def handle_resume_action(self, message):
+        """Re-queue the original user message so it is regenerated from where
+        thinking was paused.
+        """
+        logger = logging.getLogger("tui")
+        logger.info("Resume action triggered")
+
+        paused_input = getattr(self, "_paused_user_input", None)
+        paused_msg   = getattr(self, "_paused_user_msg", None)
+
+        if not paused_input or not paused_msg:
+            self.chat_history_panel.add_message(
+                "Nothing to resume.", msg_type=SysMsg()
+            )
+            return
+
+        # Remove the user message and everything after from harness so it can be
+        # re-added cleanly (with thinking prefill injected at call time).
+        if paused_msg.harness_message_ids:
+            harness_id = paused_msg.harness_message_ids[0]
+            self.agent.delete_messages_after_id(harness_id, inclusive=True)
+        paused_msg.harness_message_ids = []
+
+        # Remove all UI messages after the original user message
+        try:
+            idx = self.chat_history_panel.messages.index(paused_msg)
+            to_remove = len(self.chat_history_panel.messages) - idx - 1
+            for _ in range(to_remove):
+                self.chat_history_panel.remove_last_message()
+        except ValueError:
+            pass
+
+        # Restore visual state of user message (no longer paused)
+        paused_msg.is_paused = False
+
+        # Re-queue the original user input (thinking prefill already set)
+        self.chat_history_panel.auto_scroll = True
+        self.message_queue.put_nowait((paused_input, paused_msg))
+
+        # Clear pause state
+        self._paused_user_input = None
+        self._paused_user_msg   = None
+
+        self._last_focus_id = "input"
+        self._update_focus_states()
+
+    def handle_prefill_command(self, user_text: str):
+        """Submit a user message without starting generation.
+
+        Adds the user message to harness history and shows an empty paused
+        response so the user can press [e] to type the thinking prefill,
+        then [u] (or /resume) to start generation from that point.
+        """
+        logger = logging.getLogger("tui")
+        logger.info(f"Prefill command: {user_text[:60]}")
+
+        # Stop any active generation first
+        self.stop_generation()
+
+        from pico_chat.ui.tui.msg_types import UserMsg, PicoMsg
+
+        # Add user message directly to harness history (no generation)
+        harness_id = self.agent._add_message_to_history("user", user_text)
+
+        # Create UI user message linked to the harness entry
+        user_msg = self.chat_history_panel.add_message(user_text, msg_type=UserMsg())
+        user_msg.harness_message_ids = [harness_id]
+        user_msg.finalize()
+
+        # Create an empty paused response message the user will edit
+        paused_response = self.chat_history_panel.add_message("", msg_type=PicoMsg())
+        paused_response.is_paused = True
+        paused_response.set_title("paused — press [e] to edit thinking prefill")
+        paused_response.finalize()
+
+        # Store pause context so [u] / /resume works
+        self._paused_user_input = user_text
+        self._paused_user_msg   = user_msg
+
+        self.chat_history_panel.auto_scroll = True
+        # Move focus to the paused response so [e] is immediately available
+        last_idx = len(self.chat_history_panel.messages) - 1
+        self.chat_history_panel.set_focused_message(last_idx)
+        # Switch keyboard focus to the chat panel
+        self._last_focus_id = "chat"
+        self._update_focus_states()

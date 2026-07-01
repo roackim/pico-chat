@@ -100,6 +100,12 @@ class Harness:
         self.server: LLMServer = create_server(chosen_config)
         self.debug_stream.log("INIT", f"Server initialized: {chosen_config.name} ({chosen_config.type}) at {chosen_config.base_url}")
 
+        # Steering / pause state
+        # Updated live on every Thinking chunk so the UI can snapshot it.
+        self._current_reasoning: str = ""
+        # Set before a generation starts to prefill the assistant <thinking> block.
+        self._pending_thinking_prefill: Optional[str] = None
+
     def switch_workspace(self, new_path: str) -> list[str]:
         """Change the workspace directory and rebuild project context.
 
@@ -229,6 +235,15 @@ class Harness:
     def set_user_response(self, text: str):
         """Called by the UI when a response to a tool's prompt is ready."""
         self._user_response_queue.put_nowait(text)
+
+    def set_thinking_prefill(self, content: str):
+        """Queue content to be prepended as the assistant <thinking> prefix on
+        the next LLM call.  Subsequent calls overwrite any pending prefill."""
+        self._pending_thinking_prefill = content
+
+    def get_current_reasoning(self) -> str:
+        """Return the reasoning accumulated so far in the active generation."""
+        return self._current_reasoning
 
     def abort_subagents(self):
         """Called by the UI when the user wants to abort waiting background subagents."""
@@ -688,6 +703,9 @@ class Harness:
         content_buffer = ""
         in_thinking_block = False
         current_thinking_open_tag = None
+
+        # Reset live reasoning accumulator for this generation
+        self._current_reasoning = ""
         
         # Use server's create_completion (handles retries automatically)
         chunk_count = 0
@@ -745,6 +763,7 @@ class Harness:
                 # Count tokens and yield content
                 total_tokens += estimate_tokens(reasoning)
                 full_reasoning += reasoning
+                self._current_reasoning += reasoning
                 yield chunks.Thinking(content=reasoning)
                 
                 # Yield metrics update periodically
@@ -851,6 +870,7 @@ class Harness:
                                 if self.state != AgentState.THINKING:
                                     self.state = AgentState.THINKING
                                 full_reasoning += thinking_content
+                                self._current_reasoning += thinking_content
                                 yield chunks.Thinking(content=thinking_content)
                                 
                                 # Yield metrics update periodically
@@ -879,6 +899,7 @@ class Harness:
                                     if self.state != AgentState.THINKING:
                                         self.state = AgentState.THINKING
                                     full_reasoning += safe_content
+                                    self._current_reasoning += safe_content
                                     yield chunks.Thinking(content=safe_content)
                                     
                                     # Yield metrics update periodically
@@ -1299,8 +1320,21 @@ class Harness:
                         if tool_call_id == "MISSING!":
                             logger.error("Tool message is missing tool_call_id - this will cause API errors!")
                 
+                # Inject pending thinking prefill: append a partial assistant message
+                # so the model continues thinking from the steered/resumed position.
+                prefill_messages = list(messages)
+                if self._pending_thinking_prefill:
+                    open_tag = THINKING_TAGS[0][0]  # "<think>" — most widely supported
+                    prefill = self._pending_thinking_prefill
+                    if not prefill.endswith('\n'):
+                        prefill += '\n'
+                    prefill_content = f"{open_tag}\n{prefill}"
+                    prefill_messages = messages + [{"role": "assistant", "content": prefill_content}]
+                    logger.debug(f"Injecting thinking prefill ({len(prefill)} chars)")
+                    self._pending_thinking_prefill = None
+
                 # Stream LLM response
-                async for chunk in self._stream_llm_response(messages):
+                async for chunk in self._stream_llm_response(prefill_messages):
                     yield chunk
                 
                 # Collect results from instance variables
