@@ -534,12 +534,27 @@ class chatTUI(ChatActionHandlers):
             
             except Exception as e: # Errors during generation or processing
                 import logging
+                import httpx
+                import httpcore
                 logger = logging.getLogger("tui")
    
-                recoverable_exceptions = [openai.APIConnectionError, openai.InternalServerError]
+                network_exceptions = (
+                    httpx.RemoteProtocolError,
+                    httpx.ReadError,
+                    httpx.ConnectError,
+                    httpx.ReadTimeout,
+                    httpcore.RemoteProtocolError,
+                    httpcore.ReadError,
+                    httpcore.ConnectError,
+                )
+
+                recoverable_exceptions = (
+                    openai.APIConnectionError,
+                    openai.InternalServerError,
+                ) + network_exceptions
                 
-                # Check if it's a recoverable error
-                is_recoverable = type(e) in recoverable_exceptions
+                # Check if it's a recoverable error (use isinstance for subclass coverage)
+                is_recoverable = isinstance(e, recoverable_exceptions)
                 
                 # Special case: 503 model loading errors should show a better message
                 if isinstance(e, openai.InternalServerError) and e.status_code == 503:
@@ -554,10 +569,17 @@ class chatTUI(ChatActionHandlers):
                 
                 if is_recoverable:
                     logger.warning(f"Recoverable error: {type(e).__name__}: {str(e)}")
-                    self.chat_history_panel.add_message(
-                        message=f"{str(e)}",
-                        msg_type=SysMsgError()
-                    )
+                    # Give a friendlier message for raw network errors
+                    if isinstance(e, network_exceptions):
+                        self.chat_history_panel.add_message(
+                            message="Server closed the connection mid-stream (the model may have crashed). Response may be incomplete.",
+                            msg_type=SysMsgError()
+                        )
+                    else:
+                        self.chat_history_panel.add_message(
+                            message=f"{str(e)}",
+                            msg_type=SysMsgError()
+                        )
                     
                 else: # raise for non-recoverable errors
                     logger.error(f"Non-recoverable error: {type(e).__name__}: {str(e)}", exc_info=True)
