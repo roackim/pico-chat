@@ -106,31 +106,39 @@ class ChatActionHandlers:
             self.chat_history_panel.add_message(f"Copy failed: {e}", msg_type=SysMsgError())
     
     def handle_edit_action(self, message):
-        """Handle edit action for a focused message.
+        """Handle edit action — opens an in-place editor inside the message box.
 
-        - Paused AI message: open the captured thinking prefill for editing.
-        - Finalized AI message: open message content as thinking prefill; on submit
-          the model will regenerate from that point.
-        - User message: re-open the message text for editing (wipes subsequent msgs).
+        Raw (unrendered) text is shown with a cursor; Enter confirms, Esc cancels.
+        - Paused AI message → edit captured thinking prefill
+        - Finalized ThinkingMsg → edit reasoning as thinking prefill for regeneration
+        - Finalized PicoMsg (content) → find preceding ThinkingMsg and edit that
+        - UserMsg → edit message text; wipes subsequent messages on confirm
         """
         logger = logging.getLogger("tui")
-        logger.info("Edit action triggered")
+        logger.info("Edit action triggered (inline)")
 
-        # --- Paused AI message: edit the thinking prefill ---
+        from pico_chat.ui.tui.msg_types import PicoMsg as _PicoMsg, ThinkingMsg as _ThinkingMsg, UserMsg as _UserMsg, SysMsgError as _SysMsgError
+
+        # --- Paused AI message: edit the captured thinking prefill ---
         if getattr(message, 'is_paused', False):
             prefill = getattr(self.agent, '_pending_thinking_prefill', None) or ""
-            self.input_component.update(prefill)
-            self.editing_prefill_for_resume = True
-            self._last_focus_id = "input"
+            paused_input = getattr(self, '_paused_user_input', None)
+            paused_msg_ref = getattr(self, '_paused_user_msg', None)
+
+            def _submit_paused(text):
+                self.agent.set_thinking_prefill(text)
+                self._paused_user_input = paused_input
+                self._paused_user_msg   = paused_msg_ref
+                self.handle_resume_action(None)
+
+            self.chat_history_panel.start_inline_edit(message, prefill, _submit_paused)
+            self._last_focus_id = "history"
             self._update_focus_states()
-            self.chat_history_panel.clear_focus()
             return
 
-        # --- Finalized AI message: edit as thinking prefill for regeneration ---
-        from pico_chat.ui.tui.msg_types import PicoMsg as _PicoMsg, ThinkingMsg as _ThinkingMsg, UserMsg as _UserMsg, SysMsgError as _SysMsgError
+        # --- Finalized AI message (ThinkingMsg / PicoMsg): edit as thinking prefill ---
         if isinstance(message.type, _PicoMsg):
             self.stop_generation()
-            # Find the nearest preceding user message (needed for resume)
             try:
                 msg_index = self.chat_history_panel.messages.index(message)
             except ValueError:
@@ -150,10 +158,6 @@ class ChatActionHandlers:
                     msg_type=_SysMsgError()
                 )
                 return
-
-            # Determine what to put in the input:
-            # - ThinkingMsg → its own content IS the thinking, use directly
-            # - PicoMsg (content) → look for a preceding ThinkingMsg; if none, start blank
             if isinstance(message.type, _ThinkingMsg):
                 prefill_text = message.base_text
             elif preceding_thinking_msg is not None:
@@ -161,37 +165,51 @@ class ChatActionHandlers:
             else:
                 prefill_text = ""
 
-            self.input_component.update(prefill_text)
-            # Set up pause context so on_user_submit can resume with the edited prefill
-            self._paused_user_input = user_msg.base_text
-            self._paused_user_msg   = user_msg
-            self.editing_prefill_for_resume = True
-            self._last_focus_id = "input"
+            _paused_input = user_msg.base_text
+            _paused_msg   = user_msg
+
+            def _submit_ai(text):
+                self.agent.set_thinking_prefill(text)
+                self._paused_user_input = _paused_input
+                self._paused_user_msg   = _paused_msg
+                self.handle_resume_action(None)
+
+            self.chat_history_panel.start_inline_edit(message, prefill_text, _submit_ai)
+            self._last_focus_id = "history"
             self._update_focus_states()
-            self.chat_history_panel.clear_focus()
             return
 
-        # --- Normal user message edit ---
-        # Stop any active generation so we don't race output
+        # --- Normal user message: edit text in-place, wipe subsequent messages ---
         self.stop_generation()
 
-        # Store which message is being edited
-        try:
-            self.editing_message_index = self.chat_history_panel.messages.index(message)
-        except ValueError:
-            self.editing_message_index = None
-        
-        # Populate input field with message content
-        # For command errors, use the original command text if available
-        text_to_edit = message.command_text if message.command_text else message.base_text
-        self.input_component.update(text_to_edit)
-        
-        # Switch focus to input
-        self._last_focus_id = "input"
+        def _submit_user(text):
+            try:
+                idx = self.chat_history_panel.messages.index(message)
+            except ValueError:
+                return
+            # Delete harness messages from this message forward (inclusive)
+            if message.harness_message_ids:
+                harness_id = message.harness_message_ids[0]
+                self.agent.delete_messages_after_id(harness_id, inclusive=True)
+            message.harness_message_ids = []
+            # Update the message text in-place
+            message.set_text(text)
+            # Remove all subsequent UI messages
+            messages_to_remove = len(self.chat_history_panel.messages) - idx - 1
+            for _ in range(messages_to_remove):
+                self.chat_history_panel.remove_last_message()
+            # Re-queue
+            self.chat_history_panel.auto_scroll = True
+            self.message_queue.put_nowait((text, message))
+
+        self.chat_history_panel.start_inline_edit(
+            message,
+            message.command_text if message.command_text else message.base_text,
+            _submit_user
+        )
+        self._last_focus_id = "history"
         self._update_focus_states()
-        
-        # Clear message focus
-        self.chat_history_panel.clear_focus()
+
 
     def handle_delete_action(self, message):
         """Delete a message and all messages after it from both UI and harness."""

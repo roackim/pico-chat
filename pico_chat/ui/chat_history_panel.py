@@ -59,6 +59,10 @@ class ChatHistoryPanel(TextComponent):
         self.on_resume_action: Optional[callable] = None
         self.on_delete_action: Optional[callable] = None
 
+        # In-place editing state
+        self._inline_editing_msg = None  # Message currently being edited in-place
+        self._inline_cancel_cb = None    # Optional cancel callback
+
     def set_compositor(self, compositor):
         """Set the compositor for updates."""
         self.compositor = compositor
@@ -93,7 +97,53 @@ class ChatHistoryPanel(TextComponent):
             if self.focused_message_index < len(self.messages) - 1:
                 self.auto_scroll = False
         self._request_repaint()
-    
+
+    def start_inline_edit(self, message, initial_text: str, on_submit, on_cancel=None):
+        """Replace the message's rendered content with an editable InputComponent.
+
+        Args:
+            message:      The Message to edit in-place.
+            initial_text: Text to pre-populate the editor with.
+            on_submit:    Callable(text: str) — called when the user confirms.
+            on_cancel:    Optional callable() — called when the user presses Esc.
+        """
+        from pico_chat.ui.tui.components.input.input import InputComponent
+
+        # Stop any previous inline edit first
+        self.stop_inline_edit()
+
+        editor = InputComponent(prompt="")
+        editor.parent = message.box
+
+        # Initial layout — will be corrected on the next render pass
+        box = message.box
+        inner_w = max(1, (box.width or 40) - 2)
+        inner_h = max(1, (box.height or 3) - 2)
+        editor.set_layout(box.x + 1, box.y + 1, inner_w, inner_h)
+        editor.update(initial_text)
+        editor.set_focused(True)
+
+        def _submit_wrapper(text):
+            self.stop_inline_edit()
+            on_submit(text)
+
+        editor.keyboard_handler.on_submit = _submit_wrapper
+
+        message.box.inline_editor = editor
+        message.box.mark_changed()
+        self._inline_editing_msg = message
+        self._inline_cancel_cb = on_cancel
+        self._request_repaint()
+
+    def stop_inline_edit(self):
+        """Remove the active inline editor and restore normal message rendering."""
+        if self._inline_editing_msg is not None:
+            self._inline_editing_msg.box.inline_editor = None
+            self._inline_editing_msg.box.mark_changed()
+            self._inline_editing_msg = None
+        self._inline_cancel_cb = None
+        self._request_repaint()
+
     def move_focus_up(self) -> bool:
         """Move focus to the previous message.
         
@@ -396,6 +446,19 @@ class ChatHistoryPanel(TextComponent):
 
     def handle_input(self, event: Any) -> bool:
         """Handle mouse wheel for scrolling and keyboard navigation."""
+        # --- In-place inline editor takes priority over all other input ---
+        if isinstance(event, str) and self.has_keyboard_focus and self._inline_editing_msg is not None:
+            editor = self._inline_editing_msg.box.inline_editor
+            if editor is not None:
+                if event == '\x1b':  # Esc → cancel edit
+                    cb = self._inline_cancel_cb
+                    self.stop_inline_edit()
+                    if cb:
+                        cb()
+                    return True
+                editor.handle_input(event)
+                return True
+
         # Handle keyboard input only if this panel has keyboard focus
         if isinstance(event, str) and self.has_keyboard_focus:
             if event == '\x1b[A':  # Up arrow

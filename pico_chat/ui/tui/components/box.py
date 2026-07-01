@@ -27,6 +27,9 @@ class Box(Component):
         self.subbuffer: Optional[SubBuffer] = None
         self._last_size = (0, 0)  # Track size changes
 
+        # Optional in-place editor (replaces child rendering while active)
+        self.inline_editor = None
+
     @property
     def children(self):
         return [self.child]
@@ -84,8 +87,22 @@ class Box(Component):
         if self.subbuffer:
             self.subbuffer.set_position(x, y)
 
+        # Keep inline editor layout in sync with the box inner area,
+        # honouring the parent message's left/right padding if available.
+        if self.inline_editor is not None:
+            lpad = getattr(self.parent_msg, 'left_pad', 0) if self.parent_msg else 0
+            rpad = getattr(self.parent_msg, 'right_pad', 0) if self.parent_msg else 0
+            ex = x + 1 + lpad
+            ew = max(1, width - 2 - lpad - rpad)
+            self.inline_editor.set_layout(ex, y + 1, ew, max(1, height - 2))
+
     def get_preferred_height(self, width: int) -> int:
         """Box adds 2 rows of height for borders (top/bottom), unless in compact unfocused mode."""
+        if self.inline_editor is not None:
+            lpad = getattr(self.parent_msg, 'left_pad', 0) if self.parent_msg else 0
+            rpad = getattr(self.parent_msg, 'right_pad', 0) if self.parent_msg else 0
+            inner_w = max(1, width - 2 - lpad - rpad)
+            return self.inline_editor.get_preferred_height(inner_w) + 2
         if hasattr(self.child, 'get_preferred_height'):
             # In compact mode when unfocused, no borders
             if self.compact_when_unfocused and not self.focused:
@@ -123,9 +140,10 @@ class Box(Component):
         # Phase 2: Blit SubBuffer to main buffer (always happens, position updates are free!)
         self.subbuffer.blit(buffer, clip_rect=getattr(buffer, 'clip_rect', None))
         
-        # Phase 3: Render cursor overlay for InputComponent (outside SubBuffer caching)
-        if hasattr(self.child, 'render_cursor'):
-            self.child.render_cursor(buffer)
+        # Phase 3: Render cursor overlay (outside SubBuffer caching)
+        cursor_target = self.inline_editor if self.inline_editor is not None else self.child
+        if hasattr(cursor_target, 'render_cursor'):
+            cursor_target.render_cursor(buffer)
     
     def _render_to_subbuffer(self):
         """Render box content to its SubBuffer using local coordinates (0,0)."""
@@ -193,7 +211,8 @@ class Box(Component):
         # We need to create a temporary buffer that maps to our SubBuffer
         # For now, create a wrapper buffer that redirects to SubBuffer
         temp_buffer = self._create_subbuffer_wrapper()
-        self.child.render(temp_buffer)
+        render_target = self.inline_editor if self.inline_editor is not None else self.child
+        render_target.render(temp_buffer)
 
         # 4. Bottom + Right borders
         for i in range(1, self.height - 1):

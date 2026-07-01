@@ -781,7 +781,9 @@ class chatTUI(ChatActionHandlers):
                     return self._original_handle_input(event)
 
             # Shortcuts to focus input: 'i' or Enter (when not already in input)
-            if (event == 'i' or event == '\r') and self._last_focus_id != "input":
+            # Skip when an inline editor is active (Enter must go to the editor)
+            if (event == 'i' or event == '\r') and self._last_focus_id != "input" \
+                    and not self.chat_history_panel._inline_editing_msg:
                 self.chat_history_panel.clear_focus()
                 self._last_focus_id = "input"
                 self._update_focus_states()
