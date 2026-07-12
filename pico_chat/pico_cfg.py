@@ -24,6 +24,16 @@ DEFAULT_MARKDOWN_STYLES: Dict[str, Dict[str, Any]] = {
     "paragraph":  {},
 }
 
+# Default syntax highlight element styles.
+# Each key is a highlight type; values are dicts with "fg" as a hex string.
+DEFAULT_SYNTAX_HIGHLIGHT_STYLES: Dict[str, Dict[str, str]] = {
+    "keyword":  {"fg": "#FF6464"},
+    "function": {"fg": "#64DC78"},
+    "string":   {"fg": "#DCC850"},
+    "comment":  {"fg": "#808080"},
+    "plain":    {"fg": "#DCDCDC"},
+}
+
 Permission = Literal["allow", "ask", "deny"]
 
 
@@ -94,6 +104,11 @@ class Config:
         for _k, _v in DEFAULT_MARKDOWN_STYLES.items():
             self.markdown_styles[_k] = dict(_v)
 
+        # Syntax highlight element styles (type_name -> {fg})
+        self.syntax_highlight_styles: Dict[str, Dict[str, str]] = {}
+        for _k, _v in DEFAULT_SYNTAX_HIGHLIGHT_STYLES.items():
+            self.syntax_highlight_styles[_k] = dict(_v)
+
         # Load config from file if path provided or default exists
         if config_path:
             self._load_from_file(Path(config_path))
@@ -128,6 +143,12 @@ class Config:
                 for element, style_dict in data["markdown_styles"].items():
                     if element in self.markdown_styles:
                         self.markdown_styles[element].update(style_dict)
+
+            # Load syntax highlight styles
+            if "syntax_highlight" in data:
+                for element, style_dict in data["syntax_highlight"].items():
+                    if element in self.syntax_highlight_styles:
+                        self.syntax_highlight_styles[element].update(style_dict)
 
             # Load other settings
             if "settings" in data:

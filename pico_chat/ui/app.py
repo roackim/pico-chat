@@ -1,4 +1,6 @@
-"""Pico-Chat TUI Application."""
+"""
+Pico-Chat TUI Application.
+"""
 
 import sys
 import os
@@ -236,6 +238,10 @@ class chatTUI(ChatActionHandlers):
                     msg = self.active_tool_messages.get(tool_id)
                     preserve_active_text_stream = current_msg_type in (ThinkingMsg, PicoMsg)
 
+                    # Flush any incomplete text message before showing tool draft
+                    if current_msg_type in (ThinkingMsg, PicoMsg) and current_msg:
+                        current_msg.finalize()
+
                     if not msg:
                         if current_msg_type == SysMsg:
                             # Replace processing message with tool draft
@@ -260,6 +266,10 @@ class chatTUI(ChatActionHandlers):
                 elif isinstance(chunk, chunks.ToolStatusChange):
                     # Handle tool status change
                     tool_id = chunk.tool_call_id
+
+                    # Flush any incomplete text message before showing tool status
+                    if current_msg_type in (ThinkingMsg, PicoMsg) and current_msg:
+                        current_msg.finalize()
                     
                     if chunk.status == chunks.ToolStatus.PERMISSION_REQUESTED:
                         msg = self.active_tool_messages.get(tool_id)
@@ -486,7 +496,7 @@ class chatTUI(ChatActionHandlers):
                     user_input, user_msg = completed.result()
                     import logging
                     logger = logging.getLogger("tui")
-                    logger.debug(f"Agent worker received user input")
+                    logger.debug("Agent worker received user input")
 
                     # Skip messages that were consumed as steer injections
                     if getattr(user_msg, 'is_steered', False):

@@ -1,1 +1,38 @@
+
+[x] Msg Rendering
+    [x] pre render / format thoughts too (AT LEAST \n)
+        - Normalised in _format_line_wrap: trailing whitespace stripped, consecutive blank lines collapsed
+        - append() strips leading whitespace from every chunk
+    [x] Code render
+        - respect indentation (hard-break wrapping for code blocks, preserves leading spaces)
+        - apply basic syntax highlighting
+            - keyword lists for 15+ languages (Python, JS, TS, Lua, Rust, C, C++, Bash, SQL, Go, Java, Ruby, PHP, TOML, YAML, JSON)
+            - function call detection (identifier followed by parenthesis)
+            - also highlights: strings, comments, numbers
+    [x] Agent messages are missing the single whitespace padding on the left
+        - MarkdownComponent now accepts left_pad parameter, applied in render/wrap
+        - Wired through Message constructor
+    [x] When the model makes a tool call right after a message, the message is incomplete
+        - current_msg.finalize() called before transitioning to ToolDraft or ToolStatusChange
+        - Ensures the text message is flushed and rendered completely before the tool message appears
+    [!] render properly \n\n and \n from thinking messages (interpret as new line)
+    [!] markdown title / subsections etc have spaces stripped out
+    [!] render tables properly with AsciiTable vendored module
+    [!] when a Pico Msg is finished, do not display empty trailing lines
+
+[ ] When editing in a message in place, allow for the fuzzy @ to work too
+
 [ ] allow to delete a queued message by simply removing from the queue instead of regenerating the convo
+[ ] deleting a non convo message should not stop generation
+
+[ ] for permission tool:
+    - change prefix from > to ? while asking, make colors more visible too
+
+[ ] Better mouse support
+    [ ] Support mouse selection inside a message    
+    [ ] make actions clickable like "[c] copy" 
+    
+[ ] improve the output action
+    - make it reversible, so that if you click it again, it will undo the action
+    - tools: avoid duplicating the cmd in the output 
+

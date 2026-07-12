@@ -18,7 +18,7 @@ CMD_DEFAULT_ALLOW = {
     'ls', 'find', 'tree', 'file', 'which',                      # File discovery   
     'grep', 'awk', 'sed', 'cut', 'sort', 'uniq', 'wc',          # Text processing
     'echo', 'pwd', 'basename', 'dirname', 'realpath', 'date',   # Utilities
-    'cp', 'mv', 'mkdir', 'touch',                         # File writing (non-destructive)
+    'cp', 'mv', 'mkdir', 'touch', 'cd'                          # File writing (non-destructive)
 }
 
 CMD_DEFAULT_ASK = {

@@ -56,6 +56,7 @@ class StyledSegment:
     bg: Optional[tuple[int, int, int]] = None
     bold: bool = False
     reverse: bool = False
+    code_block: bool = False  # If True, skip word-wrap and hard-break instead
 
     @property
     def display_width(self) -> int:
@@ -85,6 +86,7 @@ class CodeBlockLine:
     """A line inside a fenced code block. Not inline-parsed."""
     text: str
     lang: str = ""
+    highlighted: bool = False  # Whether syntax highlighting was applied
 
 
 @dataclass
@@ -121,6 +123,13 @@ class EmptyLine:
     pass
 
 
+@dataclass
+class TableLine:
+    """A line belonging to a markdown table (header, separator, or data row)."""
+    cells: List[str]
+    is_separator: bool = False  # True for the --- separator row
+
+
 Block = (
     ParagraphLine
     | HeaderLine
@@ -130,6 +139,7 @@ Block = (
     | QuoteLine
     | HrLine
     | EmptyLine
+    | TableLine
 )
 
 
@@ -146,9 +156,24 @@ class BlockParser:
         i = 0
         in_code_block = False
         code_fence = ""  # the opening fence (``` or ~~~) optionally with lang
+        _current_code_lang = ""
+
+        # --- Table state machine ---
+        in_table = False
 
         while i < len(lines):
             line = lines[i]
+
+            # --- Table state machine ---
+            if in_table:
+                tbl = self._parse_table_line(line)
+                if tbl is not None:
+                    blocks.append(tbl)
+                    i += 1
+                    continue
+                else:
+                    in_table = False
+                    # Fall through to normal parsing
 
             # --- Code block state machine ---
             if in_code_block:
@@ -158,7 +183,8 @@ class BlockParser:
                     in_code_block = False
                     i += 1
                     continue
-                blocks.append(CodeBlockLine(text=line))
+                # Preserve raw line (including leading whitespace) for code blocks
+                blocks.append(CodeBlockLine(text=line, lang=_current_code_lang))
                 i += 1
                 continue
 
@@ -168,6 +194,7 @@ class BlockParser:
                 fence_char = stripped[0]
                 code_fence = fence_char * 3
                 lang = stripped[len(code_fence):].strip()
+                _current_code_lang = lang
                 in_code_block = True
                 i += 1
                 continue
@@ -214,10 +241,39 @@ class BlockParser:
                 i += 1
                 continue
 
+            # Table: look ahead for header + separator pattern
+            tbl = self._parse_table_line(line)
+            if tbl is not None and not tbl.is_separator:
+                # Peek ahead for separator row
+                j = i + 1
+                while j < len(lines) and lines[j].strip() == "":
+                    j += 1
+                if j < len(lines) and self._is_table_separator(lines[j]):
+                    in_table = True
+                    blocks.append(tbl)  # header row
+                    i += 1
+                    # Consume separator row
+                    blocks.append(self._parse_table_line(lines[i]) or TableLine(cells=[""]))
+                    i += 1
+                    continue
+
             # Default: paragraph
             blocks.append(ParagraphLine(raw=line))
             i += 1
 
+        return blocks
+
+    # --- Table detection (post-parse pass) ---
+
+    def _collect_tables(self, blocks: List[Block]) -> List[Block]:
+        """Merge consecutive TableLine blocks into grouped table runs.
+
+        Scans the block list for runs of TableLine blocks separated only by
+        other TableLine blocks (header → separator → data rows).  Returns a
+        new block list where consecutive table lines are kept as-is (the
+        Markdown renderer groups them).
+        """
+        # Simple pass-through — the Markdown renderer handles grouping.
         return blocks
 
     # --- helpers ---
@@ -288,6 +344,40 @@ class BlockParser:
         indent = len(line) - len(line.lstrip())
         text = stripped[i + 2:]
         return OrderedListItemLine(number=number, text=text, indent=indent)
+
+    def _parse_table_line(self, line: str) -> Optional[TableLine]:
+        """Try to parse a markdown table line (header, separator, or data row).
+
+        A table line must start and end with '|' and contain at least two cells.
+        """
+        stripped = line.strip()
+        if not stripped.startswith("|") or not stripped.endswith("|"):
+            return None
+        # Remove leading/trailing pipes
+        inner = stripped[1:-1].strip()
+        if not inner:
+            return None
+        cells = [c.strip() for c in inner.split("|")]
+        if len(cells) < 2:
+            return None
+        # Check if this is a separator row (only dashes, colons, spaces)
+        is_separator = all(
+            all(c in " -:=" for c in cell) for cell in cells
+        ) and any("-" in cell for cell in cells)
+        return TableLine(cells=cells, is_separator=is_separator)
+
+    def _is_table_separator(self, line: str) -> bool:
+        """Check if a line is a table separator (--- row)."""
+        stripped = line.strip()
+        if not stripped.startswith("|") or not stripped.endswith("|"):
+            return False
+        inner = stripped[1:-1].strip()
+        cells = [c.strip() for c in inner.split("|")]
+        return (
+            len(cells) >= 2
+            and all(all(c in " -:=" for c in cell) for cell in cells)
+            and any("-" in cell for cell in cells)
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -434,9 +524,27 @@ class Markdown:
         blocks = self._block_parser.parse(text)
         result: List[List[StyledSegment]] = []
 
-        for block in blocks:
+        i = 0
+        while i < len(blocks):
+            block = blocks[i]
+
+            # Group consecutive TableLine blocks into a table
+            if isinstance(block, TableLine):
+                table_blocks: List[TableLine] = []
+                while i < len(blocks) and isinstance(blocks[i], TableLine):
+                    table_blocks.append(blocks[i])
+                    i += 1
+                rendered = self._render_table(table_blocks)
+                result.extend(rendered)
+                continue
+
             rendered = self._render_block(block)
             result.extend(rendered)
+            i += 1
+
+        # Strip trailing empty lines
+        while result and not result[-1]:
+            result.pop()
 
         return result
 
@@ -465,7 +573,17 @@ class Markdown:
 
         if isinstance(block, CodeBlockLine):
             style = _get_style("code_block")
-            return [[StyledSegment(block.text, **style)]]
+            base_fg = style["fg"]
+            # Apply syntax highlighting
+            from pico_chat.ui.tui.syntax_highlight import highlight_line, _get_highlight_color
+            hl_segments = highlight_line(block.text, block.lang)
+            result_segs: List[StyledSegment] = []
+            for text, hl_type in hl_segments:
+                seg_fg = _get_highlight_color(hl_type)
+                if seg_fg is None:
+                    seg_fg = base_fg
+                result_segs.append(StyledSegment(text, fg=seg_fg, bg=style["bg"], code_block=True))
+            return [result_segs]
 
         if isinstance(block, QuoteLine):
             style = _get_style("quote")
@@ -521,6 +639,44 @@ class Markdown:
         markers = ["", "## ", "### ", "#### ", "##### ", "###### ", "####### "]
         return markers[level] if level < len(markers) else ""
 
+    def _render_table(self, table_blocks: List[TableLine]) -> List[List[StyledSegment]]:
+        """Render a group of TableLine blocks as an ASCII table.
+
+        Uses the vendored AsciiTable module.  The first non-separator row
+        is treated as headers; subsequent non-separator rows are data.
+        """
+        from pico_chat.ui.tui.ascii_table import AsciiTable, TableStyle
+
+        headers: List[str] = []
+        rows: List[List[str]] = []
+        for tbl in table_blocks:
+            if tbl.is_separator:
+                continue
+            if not headers:
+                headers = tbl.cells
+            else:
+                rows.append(tbl.cells)
+
+        if not headers:
+            return [[]]
+
+        style = TableStyle(style_name="squared", inner_vbar=True, inner_hbar=False, h_padding=1)
+        table = AsciiTable(headers=headers, rows=rows, style=style)
+        table_str = table.to_string()
+
+        # Convert table string lines into StyledSegment lines.
+        # Use code_block=True so _wrap_line hard-breaks instead of word-wrapping,
+        # preserving the table's carefully aligned spacing.
+        style_cfg = _get_style("table") if "table" in pico_cfg.config.markdown_styles else _get_style("paragraph")
+        result: List[List[StyledSegment]] = []
+        for line in table_str.split("\n"):
+            if line.strip():
+                result.append([StyledSegment(line, code_block=True, **style_cfg)])
+            else:
+                result.append([])
+
+        return result
+
 
 # ---------------------------------------------------------------------------
 # MarkdownComponent — TUI component
@@ -533,7 +689,7 @@ class MarkdownComponent(Component):
     where the full text changes between calls.
     """
 
-    def __init__(self, text: str = "", fg=None, bg=None, id: Optional[str] = None):
+    def __init__(self, text: str = "", fg=None, bg=None, id: Optional[str] = None, left_pad: int = 0):
         super().__init__(id)
         self.fg = fg
         self.bg = bg
@@ -542,6 +698,7 @@ class MarkdownComponent(Component):
         self._parsed_lines: List[List[StyledSegment]] = []
         self._wrapped_lines: List[List[StyledSegment]] = []
         self._last_wrap_width = -1
+        self.left_pad = left_pad
         self._do_parse_and_wrap(text)
 
     def update(self, text: str):
@@ -551,12 +708,17 @@ class MarkdownComponent(Component):
         self._do_parse_and_wrap(text)
         self.mark_changed()
 
+    def _effective_wrap_width(self) -> int:
+        """Width available for content after left padding."""
+        return max(0, self.width - self.left_pad)
+
     def _do_parse_and_wrap(self, text: str):
         self._parsed_lines = self._md.parse(text)
         # Re-wrap if width is set
-        if self.width > 0:
-            self._wrapped_lines = self._wrap_all(self._parsed_lines, self.width)
-            self._last_wrap_width = self.width
+        eff = self._effective_wrap_width()
+        if eff > 0:
+            self._wrapped_lines = self._wrap_all(self._parsed_lines, eff)
+            self._last_wrap_width = eff
         else:
             self._wrapped_lines = self._parsed_lines
 
@@ -564,17 +726,19 @@ class MarkdownComponent(Component):
         old_width = self.width
         super().set_layout(x, y, width, height)
         # Re-wrap on width change
-        if width != old_width and width > 0:
-            self._wrapped_lines = self._wrap_all(self._parsed_lines, width)
-            self._last_wrap_width = width
+        eff = self._effective_wrap_width()
+        if eff > 0 and eff != self._last_wrap_width:
+            self._wrapped_lines = self._wrap_all(self._parsed_lines, eff)
+            self._last_wrap_width = eff
 
     def get_preferred_height(self, width: int) -> int:
         """Calculate height needed for wrapped content."""
-        if width <= 0:
+        eff = max(0, width - self.left_pad)
+        if eff <= 0:
             return 0
-        if self._last_wrap_width != width:
-            self._wrapped_lines = self._wrap_all(self._parsed_lines, width)
-            self._last_wrap_width = width
+        if self._last_wrap_width != eff:
+            self._wrapped_lines = self._wrap_all(self._parsed_lines, eff)
+            self._last_wrap_width = eff
         return len(self._wrapped_lines)
 
     # --- Wrapping ---
@@ -591,11 +755,17 @@ class MarkdownComponent(Component):
         """Wrap a single line of segments to max_width.
 
         Splits at word boundaries (spaces between segments or within segments).
+        For code block lines (segments with code_block=True), hard-breaks
+        instead of word-wrapping to preserve indentation.
         Returns a list of wrapped lines, each being a list of segments.
         """
         # Special case: HR sentinel — return as-is, component.render handles it
         if len(segments) == 1 and segments[0].text == "hr":
             return [segments]
+
+        # Code block lines: hard-break to preserve indentation
+        if segments and segments[0].code_block:
+            return self._hard_break_line(segments, max_width)
 
         # Split segments into "words" (runs of non-space text with their styles)
         words = self._split_into_words(segments)
@@ -608,13 +778,15 @@ class MarkdownComponent(Component):
         current_line: List[StyledSegment] = []
         current_width = 0
 
-        for word, word_width in words:
-            needed = (current_width + 1 + word_width) if current_line else word_width
+        for word, word_width, trailing_spaces in words:
+            # Account for trailing spaces in the needed width
+            space_width = trailing_spaces if trailing_spaces else (1 if current_line else 0)
+            needed = current_width + space_width + word_width
             if needed <= max_width:
-                # Fits on current line
-                if current_line:
-                    current_line.append(StyledSegment(" "))
-                    current_width += 1
+                # Fits on current line — add spaces then word
+                num_spaces = trailing_spaces if trailing_spaces else (1 if current_line else 0)
+                current_line.append(StyledSegment(" " * num_spaces))
+                current_width += num_spaces
                 current_line.extend(word)
                 current_width += word_width
             else:
@@ -641,34 +813,66 @@ class MarkdownComponent(Component):
 
         return wrapped if wrapped else [[]]
 
-    def _split_into_words(self, segments: List[StyledSegment]) -> List[tuple[List[StyledSegment], int]]:
-        """Split segments into words separated by spaces.
-
-        Returns list of (segments_for_word, word_width).
-        """
-        words: List[tuple[List[StyledSegment], int]] = []
-        current_word: List[StyledSegment] = []
+    def _hard_break_line(self, segments: List[StyledSegment], max_width: int) -> List[List[StyledSegment]]:
+        """Hard-break a line of segments at max_width, preserving all characters
+        including spaces (for code blocks with indentation)."""
+        result: List[List[StyledSegment]] = []
+        current: List[StyledSegment] = []
+        current_width = 0
 
         for seg in segments:
-            # Split segment text by spaces, preserving style
+            # Break segment text character by character if needed
+            for ch in seg.text:
+                ch_width = wcswidth(ch)
+                if ch_width < 0:
+                    ch_width = 1
+
+                if current and current_width + ch_width > max_width:
+                    # Flush current line
+                    result.append(current)
+                    current = []
+                    current_width = 0
+
+                current.append(StyledSegment(ch, seg.fg, seg.bg, seg.bold, seg.reverse, seg.code_block))
+                current_width += ch_width
+
+        if current:
+            result.append(current)
+        elif not result:
+            result.append([])
+
+        return result
+
+    def _split_into_words(self, segments: List[StyledSegment]) -> List[tuple[List[StyledSegment], int, int]]:
+        """Split segments into words separated by spaces.
+
+        Returns list of (segments_for_word, word_width, trailing_spaces).
+        trailing_spaces records how many consecutive spaces followed this word,
+        so that _wrap_line can restore them.
+        """
+        words: List[tuple[List[StyledSegment], int, int]] = []
+        current_word: List[StyledSegment] = []
+        trailing = 0
+
+        for seg in segments:
+            # Split segment text by spaces, preserving style.
+            # idx > 0 means there was a space separator before this part.
             parts = seg.text.split(" ")
             for idx, part in enumerate(parts):
-                if part:
-                    current_word.append(StyledSegment(part, seg.fg, seg.bg, seg.bold, seg.reverse))
-                else:
-                    # Space — flush current word
+                if idx > 0:
+                    # Space separator — flush current word, count the space
                     if current_word:
                         w = sum(s.display_width for s in current_word)
-                        words.append((list(current_word), w))
+                        words.append((list(current_word), w, trailing))
                         current_word = []
-                    # If multiple spaces, emit empty word for spacing
-                    if idx > 0 or (idx == 0 and seg.text[0:1] == " "):
-                        # Only add spacer if it's not the leading space
-                        pass
+                        trailing = 0
+                    trailing += 1
+                if part:
+                    current_word.append(StyledSegment(part, seg.fg, seg.bg, seg.bold, seg.reverse))
 
         if current_word:
             w = sum(s.display_width for s in current_word)
-            words.append((list(current_word), w))
+            words.append((list(current_word), w, trailing))
 
         return words
 
@@ -725,10 +929,13 @@ class MarkdownComponent(Component):
                 hr_style = _get_style("hr")
                 hr_char = "\u2500"  # box-drawing horizontal
                 style_fg = hr_style["fg"] if hr_style["fg"] else (default_fg.r, default_fg.g, default_fg.b) if isinstance(default_fg, RGB) else None
-                buffer.write_str(self.x, self.y + y, hr_char * self.width, fg=style_fg, max_width=self.width)
+                # Apply left padding to HR too
+                buffer.write_str(self.x, self.y + y, " " * self.left_pad, fg=style_fg, max_width=self.width)
+                buffer.write_str(self.x + self.left_pad, self.y + y, hr_char * (self.width - self.left_pad), fg=style_fg, max_width=self.width - self.left_pad)
                 continue
 
-            curr_x = 0
+            # Start each line with left padding
+            curr_x = self.left_pad
             for seg in line:
                 if curr_x >= self.width:
                     break

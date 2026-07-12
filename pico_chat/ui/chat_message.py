@@ -73,7 +73,7 @@ class Message:
 
         if render_markdown:
             self.formatted_text = ""  # Not used for markdown messages
-            self.component = MarkdownComponent(text, fg=content_color)
+            self.component = MarkdownComponent(text, fg=content_color, left_pad=left_pad)
         else:
             self.formatted_text = self._format_line_wrap()
             self.component = TextComponent(self.formatted_text, fg=content_color)
@@ -177,6 +177,10 @@ class Message:
         """Format the message text with smart word wrapping and padding.
         
         Uses the provided left and right padding for each line.
+        Normalises the text first: strips trailing whitespace on every line
+        and collapses runs of blank lines into a single blank line so that
+        streaming artefacts (extra \\n from chunk boundaries) don't bloat
+        the display.  Existing intentional newlines are preserved.
         """
         if self.max_width is None or self.max_width <= 0:
             return self.base_text
@@ -186,20 +190,38 @@ class Message:
         if content_width < 1:
             content_width = 1
         
-        # Wrap text into lines based on content_width
-        # We wrap each line of base_text separately to preserve existing newlines
+        # Convert literal \n escape sequences to real newlines (thinking messages)
+        base_text = self.base_text.replace('\\n', '\n')
+        
+        # Strip trailing newlines from the whole block
+        base_text = base_text.rstrip('\n')
+        
+        # Split into raw lines
+        raw_lines = base_text.split('\n')
+        
+        # Normalise: strip trailing whitespace from each line, collapse
+        # consecutive blank lines into one, and remove trailing blank lines.
+        normalised: list[str] = []
+        for line in raw_lines:
+            stripped = line.rstrip()
+            # Collapse multiple consecutive blank lines into a single one
+            if not stripped and normalised and normalised[-1] == "":
+                continue
+            normalised.append(stripped)
+        
+        # Strip trailing blank lines
+        while normalised and normalised[-1] == "":
+            normalised.pop()
+        
+        # Wrap each normalised line and apply padding
         lines = []
-        base_text = self.base_text.rstrip('\n')
-        for line in base_text.split('\n'):
+        for line in normalised:
             if not line:
-                # Add an empty line if there's a newline in the middle of text
                 lines.append("")
                 continue
-                
-            # Wrap the line
+            
             wrapped = wrap_text(line, content_width, padding_width=0, first_line_padding=False)
             for w_line in wrapped.split('\n'):
-                # Apply left padding
                 lines.append(" " * self.left_pad + w_line)
         
         return "\n".join(lines)
@@ -241,9 +263,6 @@ class Message:
 
     def append(self, text: str):
         """Append text to the message and reformat."""
-        # If message is currently empty or whitespace-only, strip leading whitespace from first append
-        if not self.base_text.strip():
-            text = text.lstrip()
         self.base_text += text
         self.reformat(self.max_width)
     
