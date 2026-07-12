@@ -117,9 +117,9 @@ class ToolPermissionsProfile:
         """Get run permissions."""
         return self.run
     
-    def get_memory_permission(self) -> Permission:
-        """Get memory operation permission."""
-        return self.memory
+    # def get_memory_permission(self) -> Permission: # TODO: remove
+        # """Get memory operation permission."""
+        # return self.memory
     
     def get_search_permission(self) -> Permission:
         """Get search operation permission."""

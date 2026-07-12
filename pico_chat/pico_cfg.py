@@ -78,7 +78,7 @@ class Config:
         self.debug_log_enabled: bool = False  # Write debug_stream.log to disk
 
         # Reasoning / thinking trace settings
-        self.preserve_reasoning_traces: bool = False  # Preserve  thinking/ response blocks in history for multi-turn reasoning
+        self.preserve_reasoning_traces: bool = True  # Preserve <think> blocks in history for multi-turn reasoning
 
         # Context building settings
         self.context_format: Literal["tree", "flat"] = "tree"  # Tree format saves tokens by avoiding path repetition

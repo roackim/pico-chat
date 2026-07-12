@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Dict
 
 from pico_chat.harness.tools import MinimalToolset, ToolError
-from pico_chat.harness.memory_tools import MemoryTools
 from pico_chat.harness.iteration_tools import IterationTools
 
 
@@ -169,164 +168,6 @@ class RunTool(ToolWrapper):
             return self.toolset.run(command)
         except ToolError as e:
             return str(e)
-
-
-class MemorizeTool(ToolWrapper):
-    """Store information in memory"""
-    
-    def __init__(self, memory_tools: MemoryTools):
-        super().__init__(
-            name="memorize",
-            description=(
-                "Store, update or forget information in memory. "
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "key": {
-                        "type": "string",
-                        "description": "Unique identifier for this memory (e.g., 'project_goal', 'main_config_location')"
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "Information to store (can be text or structured data)"
-                    }
-                },
-                "required": ["key", "content"]
-            }
-        )
-        self.memory_tools = memory_tools
-    
-    def execute(self, key: str, content: str) -> str:
-        return self.memory_tools.memorize(key, content)
-
-
-class ForgetTool(ToolWrapper):
-    """Remove information from memory"""
-    
-    def __init__(self, memory_tools: MemoryTools):
-        super().__init__(
-            name="forget",
-            description="Remove a memory item that is no longer needed or was incorrect",
-            parameters={
-                "type": "object",
-                "properties": {
-                    "key": {
-                        "type": "string",
-                        "description": "Unique identifier of the memory to remove"
-                    }
-                },
-                "required": ["key"]
-            }
-        )
-        self.memory_tools = memory_tools
-    
-    def execute(self, key: str) -> str:
-        return self.memory_tools.forget(key)
-
-
-class LoopTool(ToolWrapper):
-    """Start unified iteration"""
-    
-    def __init__(self, iteration_tools: IterationTools):
-        super().__init__(
-            name="loop",
-            description=(
-                "Start iteration over files, tasks, or any list. "
-                "Supports glob patterns, explicit lists, and references to previous tool outputs."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "items": {
-                        "oneOf": [
-                            {"type": "string"},
-                            {"type": "array", "items": {"type": "string"}}
-                        ],
-                        "description": (
-                            "Items to iterate:\n"
-                            "- '@' - Use last run() output\n"
-                            "- Glob pattern: '*.py' or 'auth/**/*.py'\n"
-                            "- Newline string: 'file1\\nfile2\\nfile3' (auto-split)\n"
-                            "- List: ['file1', 'file2', 'task1']"
-                        )
-                    }
-                },
-                "required": ["items"]
-            }
-        )
-        self.iteration_tools = iteration_tools
-    
-    def execute(self, items: str | list[str]) -> str:
-        return self.iteration_tools.loop(items)
-
-
-class LoopNextTool(ToolWrapper):
-    """Get next item in iteration"""
-    
-    def __init__(self, iteration_tools: IterationTools):
-        super().__init__(
-            name="loop_next",
-            description=(
-                "Get the next item in the current iteration. "
-                "Call this repeatedly to process each item. "
-                "Returns the item with progress, or completion message when done."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        )
-        self.iteration_tools = iteration_tools
-    
-    def execute(self) -> str:
-        return self.iteration_tools.loop_next()
-
-
-class LoopItrDoneTool(ToolWrapper):
-    """Reflection checkpoint for current iteration item"""
-    
-    def __init__(self, iteration_tools: IterationTools):
-        super().__init__(
-            name="loop_itr_done",
-            description=(
-                "Mark current iteration item as done and reflect on the outcome. "
-                "Use this to validate your work before proceeding to the next item. "
-                "Returns a reflection prompt asking if you're satisfied with the work."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        )
-        self.iteration_tools = iteration_tools
-    
-    def execute(self) -> str:
-        return self.iteration_tools.loop_itr_done()
-
-
-class LoopAbortTool(ToolWrapper):
-    """Abort current iteration"""
-    
-    def __init__(self, iteration_tools: IterationTools):
-        super().__init__(
-            name="loop_abort",
-            description=(
-                "Abort the current iteration (e.g., if you realize the scope is too large). "
-                "Returns confirmation of how many files were processed before aborting."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        )
-        self.iteration_tools = iteration_tools
-    
-    def execute(self) -> str:
-        return self.iteration_tools.loop_abort()
 
 
 import asyncio as _asyncio
@@ -550,7 +391,7 @@ class SearchWikiTool(ToolWrapper):
             return f"[search_wiki] {str(e)}"
 
 
-def create_minimal_tools(
+def create_toolset(
     workspace_path: str | Path,
     confirmation_callback: Optional[Callable[[str], bool]] = None,
     memory_store: Optional[Dict[str, Dict]] = None,
@@ -598,29 +439,16 @@ def create_minimal_tools(
         search_max_results = 3
         search_limit = None
     
-    tools["search_web"] = SearchWebTool(search_tools, max_results=search_max_results, search_limit=search_limit)
+    tools["search_web"]  = SearchWebTool(search_tools, max_results=search_max_results, search_limit=search_limit)
     tools["search_wiki"] = SearchWikiTool(search_tools, max_results=search_max_results, search_limit=search_limit)
-
-    # Memory tools disabled - conversation history serves as working memory
-    # To re-enable: uncomment and ensure memory_store is passed to create_minimal_tools()
-    # if memory_store is not None:
-    #     memory_tools = MemoryTools(memory_store)
-    #     tools["memorize"] = MemorizeTool(memory_tools)
-    #     tools["forget"] = ForgetTool(memory_tools)
-
-    # Add iteration tools if iteration state is provided
-    if iteration_state is not None:
-        iteration_tools = IterationTools(workspace_path, iteration_state, get_tool_output)
-        tools["loop"] = LoopTool(iteration_tools)
-        tools["loop_next"] = LoopNextTool(iteration_tools)
-        tools["loop_itr_done"] = LoopItrDoneTool(iteration_tools)
-        tools["loop_abort"] = LoopAbortTool(iteration_tools)
 
     # Add subagent tools if within depth limit
     from pico_chat import pico_cfg
+    
     _pending = pending_subagents if pending_subagents is not None else []
     if depth < pico_cfg.config.subagent_max_depth:
         tools["subagent"] = SubagentTool(workspace_path, depth, _pending)
+        
     tools["wait_for_subagents"] = WaitForSubagentsTool(_pending)
 
     return tools

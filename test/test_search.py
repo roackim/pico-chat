@@ -330,10 +330,10 @@ class TestSearchIntegration:
     
     def test_search_tools_in_create_minimal_tools(self, tmp_path):
         """Test that search tools are included in minimal toolset."""
-        from pico_chat.harness.tool_wrappers import create_minimal_tools
+        from pico_chat.harness.tool_wrappers import create_toolset
         
         # Main agent (depth=0)
-        tools = create_minimal_tools(workspace_path=tmp_path, depth=0)
+        tools = create_toolset(workspace_path=tmp_path, depth=0)
         
         assert "search_web" in tools
         assert "search_wiki" in tools
@@ -342,10 +342,10 @@ class TestSearchIntegration:
     
     def test_search_tools_main_agent_config(self, tmp_path):
         """Test that main agent gets correct search configuration."""
-        from pico_chat.harness.tool_wrappers import create_minimal_tools
+        from pico_chat.harness.tool_wrappers import create_toolset
         
         # Main agent (depth=0)
-        tools = create_minimal_tools(workspace_path=tmp_path, depth=0)
+        tools = create_toolset(workspace_path=tmp_path, depth=0)
         
         search_web = tools["search_web"]
         search_wiki = tools["search_wiki"]
@@ -358,10 +358,10 @@ class TestSearchIntegration:
     
     def test_search_tools_subagent_config(self, tmp_path):
         """Test that subagent gets correct search configuration."""
-        from pico_chat.harness.tool_wrappers import create_minimal_tools
+        from pico_chat.harness.tool_wrappers import create_toolset
         
         # Subagent (depth=1)
-        tools = create_minimal_tools(workspace_path=tmp_path, depth=1)
+        tools = create_toolset(workspace_path=tmp_path, depth=1)
         
         search_web = tools["search_web"]
         search_wiki = tools["search_wiki"]
@@ -374,9 +374,9 @@ class TestSearchIntegration:
     
     def test_search_tool_schema_generation(self, tmp_path):
         """Test that search tools generate proper OpenAI schemas."""
-        from pico_chat.harness.tool_wrappers import create_minimal_tools
+        from pico_chat.harness.tool_wrappers import create_toolset
         
-        tools = create_minimal_tools(workspace_path=tmp_path, depth=0)
+        tools = create_toolset(workspace_path=tmp_path, depth=0)
         
         web_schema = tools["search_web"].get_schema()
         wiki_schema = tools["search_wiki"].get_schema()

@@ -15,7 +15,7 @@ from pico_chat.harness.llm_server import create_server, LLMServer
 from pico_chat.harness.llm_server_config import server_config
 
 # Import the minimal toolset
-from pico_chat.harness.tool_wrappers import create_minimal_tools
+from pico_chat.harness.tool_wrappers import create_toolset
 
 import os
 
@@ -36,13 +36,6 @@ class Harness:
         self.history = []
         self.depth = depth
 
-        # Memory system
-        self.memory = {}  # Current memory state
-        self.memory_snapshots = {}  # Snapshots keyed by user message ID
-        
-        # Iteration system
-        self.iteration = {}  # Current iteration state (loop tracking)
-        
         # Tool output history for @ references
         self.tool_output_history = []  # [(tool_name, result), ...] - last 10
 
@@ -62,13 +55,10 @@ class Harness:
         tool_permissions = scaffolder if depth > 0 else None
         self._tool_permissions = tool_permissions  # used by _check_tool_permission
 
-        self.tools_map = create_minimal_tools(
+        self.tools_map = create_toolset(
             workspace_path=self.workspace,
             # Subagents are read-only; they never need to ask the user for approval.
             confirmation_callback=None if depth > 0 else self._request_user_confirmation,
-            memory_store=self.memory,
-            iteration_state=self.iteration,
-            get_tool_output=self._get_tool_output,
             permissions=tool_permissions,
             depth=depth,
             pending_subagents=self._pending_subagents,
@@ -105,6 +95,8 @@ class Harness:
         self._current_reasoning: str = ""
         # Set before a generation starts to prefill the assistant <thinking> block.
         self._pending_thinking_prefill: Optional[str] = None
+        # Tracks which open tag the last generation actually used (None = reasoning_content path).
+        self._last_detected_thinking_tag: Optional[str] = None
 
     def switch_workspace(self, new_path: str) -> list[str]:
         """Change the workspace directory and rebuild project context.
@@ -168,25 +160,6 @@ class Harness:
             return self.history
         return self.history[last_compaction_idx:]
 
-    def _memory_json(self) -> str:
-        """Return compact JSON representation of memory, including explicit empty list."""
-        memory_items = list(self.memory.values())
-        return json.dumps(memory_items, separators=(',', ':'), ensure_ascii=False)
-    
-    def _loop_status(self) -> str:
-        """Return formatted loop status for system prompt injection."""
-        if not self.iteration.get("active"):
-            return ""
-        
-        current = self.iteration.get("current_index", 0)
-        total = self.iteration.get("total", 0)
-        
-        if current < total:
-            current_item = self.iteration["items"][current]
-            return f"LOOP: {current_item} [{current+1}/{total}]"
-        else:
-            return ""
-    
     def _get_tool_output(self, ref: str) -> Optional[str]:
         """
         Get a previous tool output by reference.
@@ -225,10 +198,6 @@ class Harness:
             **kwargs
         }
         self.history.append(msg)
-        
-        # Take memory snapshot on user messages (for rollback support)
-        if role == "user":
-            self.memory_snapshots[msg_id] = self.memory.copy()
         
         return msg_id
 
@@ -328,17 +297,9 @@ class Harness:
             else:
                 return "allow"
         
-        elif tool_name in ["memorize", "forget"]:
-            # Memory operations
-            return permissions.get_memory_permission()
-        
         elif tool_name in ["search_web", "search_wiki"]:
             # Search operations
             return permissions.get_search_permission()
-        
-        elif tool_name in ["loop", "loop_next", "loop_itr_done", "loop_abort"]:
-            # Iteration operations - auto-allow (read-only tracking)
-            return "allow"
         
         elif tool_name in ["subagent", "wait_for_subagents"]:
             # Subagent operations are always approved
@@ -389,9 +350,6 @@ class Harness:
     def clear_history(self):
         """Clear the conversation history for the agent."""
         self.history = []
-        self.memory = {}
-        self.memory_snapshots = {}
-        self.iteration = {}
         self.debug_stream.log("CLEAR", "Conversation history cleared")
     
     def delete_messages_after_id(self, message_id: str, inclusive: bool = True) -> bool:
@@ -406,27 +364,11 @@ class Harness:
         """
         for i, msg in enumerate(self.history):
             if msg.get("id") == message_id:
-                # Restore memory to this snapshot (if user message)
-                # Use clear() + update() to preserve the dict reference that MemoryTools holds
-                if message_id in self.memory_snapshots:
-                    self.memory.clear()
-                    self.memory.update(self.memory_snapshots[message_id])
-                
-                # Collect deleted messages for snapshot cleanup
-                delete_from = i if inclusive else i + 1
-                deleted_msgs = self.history[delete_from:]
-                
                 # Delete messages
                 if inclusive:
                     self.history = self.history[:i]
                 else:
                     self.history = self.history[:i+1]
-                
-                # Cleanup orphaned snapshots
-                for deleted_msg in deleted_msgs:
-                    deleted_id = deleted_msg.get("id")
-                    if deleted_id in self.memory_snapshots:
-                        del self.memory_snapshots[deleted_id]
                 
                 self.debug_stream.log("DELETE_AFTER_ID", f"Deleted messages after ID {message_id} (inclusive={inclusive})")
                 return True
@@ -484,9 +426,8 @@ class Harness:
             current_tokens = current_tokens - marker_tokens + compacted_tokens
         
         # Add system prompt estimation (system message is added during _build_messages)
-        # Rough estimate: project context + base system prompt + memory
+        # Rough estimate: project context + base system prompt
         system_estimate = estimate_tokens(self.project_context) + 500
-        system_estimate += estimate_tokens(self._memory_json())
         
         current_tokens += system_estimate
         
@@ -618,16 +559,14 @@ class Harness:
             context_window=context_window_str
         )
         
-        # Always append memory state so empty memory is explicit as MEMORY:[]
-        system_msg["content"] += f"\n\nMEMORY:{self._memory_json()}"
-        
-        # Append loop status if iteration is active
-        loop_status = self._loop_status()
-        if loop_status:
-            system_msg["content"] += f"\n{loop_status}"
-        
         messages = [system_msg]
         messages.extend(self._get_effective_history())
+        # Log how much reasoning context is in history
+        think_msgs = [m for m in messages if isinstance(m.get('content'), str) and '<think>' in m.get('content', '')]
+        if think_msgs:
+            logger.info(f"[reasoning] {len(think_msgs)} message(s) in history contain <think> blocks")
+        else:
+            logger.debug("[reasoning] No <think> blocks in history messages")
         return messages
 
     async def get_current_context(self) -> List[Dict[str, Any]]:
@@ -652,14 +591,6 @@ class Harness:
             model_name=model_name,
             context_window=context_window_str
         )
-        
-        # Always append memory state so empty memory is explicit as MEMORY:[]
-        system_msg["content"] += f"\n\nMEMORY:{self._memory_json()}"
-        
-        # Append loop status if iteration is active
-        loop_status = self._loop_status()
-        if loop_status:
-            system_msg["content"] += f"\n{loop_status}"
         
         messages = [system_msg]
         messages.extend(self._get_effective_history())
@@ -703,6 +634,8 @@ class Harness:
         content_buffer = ""
         in_thinking_block = False
         current_thinking_open_tag = None
+        # Persists after the block closes — None means reasoning_content path was used
+        detected_thinking_open_tag = None
 
         # Reset live reasoning accumulator for this generation
         self._current_reasoning = ""
@@ -830,6 +763,7 @@ class Harness:
                             # Enter thinking block
                             in_thinking_block = True
                             current_thinking_open_tag = open_tag
+                            detected_thinking_open_tag = open_tag  # persist across close
                             # Move past the opening tag (but don't include it in output)
                             content_buffer = content_buffer[earliest_pos + len(open_tag):]
                         else:
@@ -1001,6 +935,7 @@ class Harness:
         # Store results in instance variables for caller to access
         self._last_full_content = full_content
         self._last_full_reasoning = full_reasoning
+        self._last_detected_thinking_tag = detected_thinking_open_tag  # None means reasoning_content API path
         self._last_tool_calls = tool_calls_list
 
     async def _execute_tool_calls(
@@ -1199,8 +1134,6 @@ class Harness:
             "context_used": 0,
             "context_max": 0,
             "context_percentage": 0.0,
-            "memory_items": len(self.memory),
-            "memory_tokens": sum(item["metadata"].get("token_size", 0) for item in self.memory.values()),
         }
         
         # Check connection
@@ -1324,7 +1257,8 @@ class Harness:
                 # so the model continues thinking from the steered/resumed position.
                 prefill_messages = list(messages)
                 if self._pending_thinking_prefill:
-                    open_tag = THINKING_TAGS[0][0]  # "<think>" — most widely supported
+                    # Use the same tag the model used last turn so the format is consistent.
+                    open_tag = self._last_detected_thinking_tag or THINKING_TAGS[0][0]
                     prefill = self._pending_thinking_prefill
                     if not prefill.endswith('\n'):
                         prefill += '\n'
@@ -1341,18 +1275,25 @@ class Harness:
                 full_content = self._last_full_content
                 full_reasoning = self._last_full_reasoning
                 tool_calls_list = self._last_tool_calls
+                # Tag the model actually used (None for reasoning_content field path)
+                detected_tag = getattr(self, '_last_detected_thinking_tag', None)
                 
                 logger.debug(f"LLM response complete. Content length: {len(full_content) if full_content else 0}, Reasoning length: {len(full_reasoning) if full_reasoning else 0}, Tool calls: {len(tool_calls_list) if tool_calls_list else 0}")
                 
                 # Optionally reconstruct full output with thinking tags for multi-turn reasoning
                 if pico_cfg.config.preserve_reasoning_traces and full_reasoning:
-                    # Reconstruct the original interleaved format so the model sees
-                    # its own chain-of-thought on subsequent turns.
-                    # Use DeepSeek-R1-style <thinking>...</thinking> response tags (de facto standard).
-                    reconstructed = f"<thinking>\n{full_reasoning}\n</thinking>\n\n{full_content}"
-                    full_content_for_history = reconstructed
+                    # Use the tag the model produced this turn; fall back to THINKING_TAGS[0]
+                    # (<think>) when reasoning arrived via the reasoning_content API field.
+                    open_tag = detected_tag or THINKING_TAGS[0][0]
+                    close_tag = next(c for o, c in THINKING_TAGS if o == open_tag)
+                    full_content_for_history = f"{open_tag}\n{full_reasoning}\n{close_tag}\n\n{full_content}"
+                    logger.info(f"[reasoning] Stored {len(full_reasoning)} chars of reasoning in history (tag={open_tag!r})")
                 else:
                     full_content_for_history = full_content if full_content else None
+                    if full_reasoning:
+                        logger.warning(f"[reasoning] preserve_reasoning_traces=False, dropping {len(full_reasoning)} chars of reasoning")
+                    else:
+                        logger.debug("[reasoning] No reasoning to preserve this turn")
                 
                 # Add assistant message to history with pre-generated ID
                 msg = {
