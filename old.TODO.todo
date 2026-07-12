@@ -1,0 +1,243 @@
+[x] commands to implement:
+    [x] /help - list available commands
+    [x] /clear - clear the chat history
+    [x] /exit - exit the application
+    [x] /status - show infos about connection, model, context etc
+    [x] /stop - stop the current generation
+    [x] /retry - retry the last assistant message
+    [-] /connect - connect to a different LLM server (prompt for URL, API key, etc)
+        [x] done through /server command
+    [ ] /config - show and edit configuration (e.g. model parameters, tools, etc)
+
+[ ] discussions history management:
+    [ ] list conversations
+    [ ] switch between conversations
+    [ ] delete conversations
+    [ ] export / import conversations
+
+Ideas:
+[!] /theme - switch between themes
+[!] /export - export conversation history to a file (e.g. markdown, json, etc)
+[!] /import - import conversation history from a file
+[?] /memory - manage work memory (list items, forget some, edit some, etc)
+    [ ] Not sure is this is really needed. The LLM should be able to manage its own memory.
+    
+    [ ] possibly add bangs ? !important to mark as to memorize or something. 
+    !instructions to mark as system instructions, etc. This way the LLM can decide what to memorize and what not, and we can also use it to give it instructions on how to manage its memory.
+        [ ] add /instruct command to instruct the LLM important infos that it should remember for the whole conversation
+            -> then store into the system prompt or something like that.
+        
+            examples:
+                /instruct in the shell, always use `pixi run` prefix to access python environment for the project.
+                /instruct when coding assembly always use GNU assembly syntax and not intel
+                /instruct when modifying a file, always document your approach in a comment at the top of the code unit your are modifying.
+        
+        [ ] Support for global instructions ? 
+            - kinda on the territory of custom system prompts
+
+[ ] Cache component rasterization result for performance optimization
+
+[x] Memory / Context management:
+    [x] Tools: memorize / forget important info, events, etc
+        Currently key: content based
+        
+    [?] Long term memory management
+        [ ] key, desc, content for heavier info like documents, long term memory, etc
+            [ ] provide all key, desc
+            [ ] provide recall(key) tool to access the heavy content 
+
+
+[ ] Pico agentic problems
+    [o] Did not iterate the whole repo
+        [x] added loop tool to iterate from harness
+    [ ] Did not use memory while iterating the repo
+
+[ ] UI tool improvement: 
+    [ ] drafting when writing content of tool call (UI hangs up currently)
+    [ ] writing / patch -> just the number of lines not full in UI
+
+[ ] Inject current context window size ?
+    [ ] Properly compute it ? Seems overstated (taking things into account that is not passed to the LLM ?)
+[ ] Memory should maybe not need feedback / waiting ? 
+
+[ ] Better tool UI feedback especially non shell tools.
+    move approved | completed bellow
+    
+    > memorize random_number_session_1
+    > status approved, completed
+    > output:
+    ...
+    
+    > run bash cat | grep | sed etc
+    > status approved, completed
+    > output:
+    ...
+    
+[x] Context Builder Switch to tree for token efficiency
+
+[ ] Better implicit focus of input 
+    [ ] when new messages arrive (e.g. when the user is not actively scrolling up in the history)
+    [ ] when nothing focused ?
+    [ ] shortcut to focus input (e.g. i ? enter ? t ?)
+
+[ ] reasoning budget - llamacpp supports this
+
+[-] Re-Inject reasoning / tool call content to the LLM for successive messages
+    [-] Feature to summerize the reasoning / tool call content to avoid hitting context limits too fast
+    [-] Option to include / exclude certain types of content (e.g. only tool calls, only reasoning, etc)
+
+[ ] Live Markdown rendering
+    [ ] Special for code
+        [ ] Split into multiple messages e? 
+            - md
+            - code block (without md rendering, maybe with syntax highlighting, no line wrapping ?, etc)
+            - md
+            
+[x] When scrolling up in the history, anchor the hist to not scroll down 
+    when new messages come in until the user scrolls back to the bottom (like in slack, discord, etc)
+    and when a message is being written
+
+
+[ ] add a status line on top of input field 
+    [ ] Copied to clipboard ! (with timeout ? / overwrite)
+    [ ] Add an indicator for down message like "+3 messages"
+    
+
+[x] When focusing a message scroll to see it
+[x] When focused add message footer with commands
+            like: [c] copy  [e] edit
+    [x] add said commands
+    [ ] allow / deny prompt
+
+[ ] split harness.py
+
+[x] check for different thinking tags for different models
+
+[?] split command:
+    - splits the terminal in 2 vertical panels, seperate conversations in each panel ?
+        [?] think more about the use case for this. Should not be so difficult to implement.
+        [ ] maybe the vsplit should be attached to the conversation
+            - can monitor the status, use commands without polluting the main conversation
+            - could imagine having a 2nd AI but without tools access in the vsplit for testing, brainstorming, general questions etc
+
+[ ] Steer the model while generating (e.g user message in the middle of generation)
+
+[x] Focus / Select messages in the history (UP/DOWN to navigate, changing focus, MOUSE click to focus)
+    [x] Add vim like actions for focused message 
+        - e to edit user messages, c to copy, r to retry assistant messages, etc
+        
+    [ ] Allow / Deny button on the 'Interactive' commands from tool calls (e.g pico wants to open a file, [allow] / [deny], etc)
+        -> spawn a system message with the tool call content and buttons for allow / deny
+        -> should be clickable with mouse or keyboard with LEFT/RIGHT to select button and ENTER to confirm
+            -> or maybe also Y / N
+
+[x] containerize tool calls for security (e.g. file access, command execution, etc)
+    [x] Bubblewrap 
+    [ ] Docker
+    [ ] Podman
+    ---
+    [ ] Evalutate the need for multiple containerization options
+
+[x] Input field: dynamic height when line wrapping
+[x] Input field: ergonomics (ctrl+w, cursor movement, home/end, ctrl+backspace etc)
+[x] Input field: @file = upward menu with fuzzy file seach current dir
+[ ] Input and History: support mouse selection and copy
+
+[x] Scroll with mouse wheel (either in history or input when focused (if long enough to scroll))
+
+[?] Scroll bars for panels when content exceeds visible area ?
+    
+[?]  expandable thinking while focused to show intermediate thoughts / tool calls if the model is configured to stream those
+    - [expand] [collapse] button to toggle visibility of intermediate thoughts / tool calls
+    - show last N lines of intermediate thoughts / tool calls in the history panel while generating
+        
+[x] Sky Color plugging
+[x] Styles
+
+[ ] Add timestamps to messages
+[x] Add message thinking status (static)
+[x] Add message thinking status (dynamic, animated)
+[ ] Add support for multiple conversations / threads
+[x] PATCH tool problems 
+    patch: Invalid patch format: Missing '<<<<<<< SEARCH' marker 
+
+[ ] Git integration ?
+    [!] Must be optionnal / disabled by config
+    
+    [ ] Must be in an initialized repo -> solves the file boundaries problem
+    [ ] /session -> branch code session wide
+        pico_dev_UUID
+    [ ] /save -> mark commit as start of feature, when done -> squash ?
+    [ ] /snapshot -> save current changes to a commit
+    [ ] /rollback -> git reset --hard snapshot_commit (! dangerous !)
+        [ ] Verify we are on a pico_<branch> branch
+        [ ] Verify the commit hash is present in the /snapshot history
+        
+    [ ] /push
+    [ ] Give LLM git tools (Not via shell ! from harness, as described up)
+
+[?] Multi agent ?
+    [?] Is there a real need ? especially with local ai ?
+    [ ] For each parallel agent: 
+        - Duplicate the codebase 
+        - Create own Branch
+        - Merge How ?? 
+    [ ] Seems complexe with non obvious benefits
+    [ ] Extremely out of scope for now
+
+BUGS:
+
+[ ] Sending a message while waiting for [a] allow -> bad order queue
+
+[x] Fuzzy search broken by Tree repr of context builder
+
+[x] /status does not show context_pressure info !! -> use token_estimation.py
+[x] AFTER RETRY the next user message gets eaten (disappears from the history BUT sent to the LLM)
+
+[x] Exception model
+[x] CTRL + V does not work anymore
+
+[x] /command doesn't work after space as first char
+    - spaces as first chars were stored but not rendered
+    - commands works as first char
+
+[x] Once a tool call happened, /status doesn't work anymore
+    - /help and /clear work
+
+[x] When tool calling fails, the error is not sent to the LLM, causing it to get stuck waiting for the tool response that will never come (e.g. patch tool with invalid patch format)
+    - Need to catch tool call errors and send them back to the LLM as a message in the conversation so it can react accordingly (e.g. retry, ask user for clarification, etc)
+    
+[x] CTRL + V in terminal causes issues 
+    - pastes content but also triggers some keybindings (like \n => submit, etc)
+       needs to be fixed for better ergonomics
+       
+[x] Fix cursor blip / flcikering with big terminals
+    [x] Disable cursor, emulate one
+    [x] Re-enable cursor after program closes OR ctrl+c
+
+LONG TERM:
+[o] Config
+    [ ] Save / Load config from file
+[x] Theme support
+[x] Containerization for security
+
+[x] Open Router support
+    [x] Needs testing and debugging
+[ ] Plugin system for tools, prompts, etc
+    [ ] Custom commands / tools
+    [ ] Custom System prompts / Personalities
+    [ ] Custom prompts aliases like @docs to quickly ask for documentation 
+[x] Context builder
+    [x] needs improving, problems when running like at / or $HOME
+
+    
+Cool test prompts:
+* Can you explain to me how a PRNG LCG works ?
+* Make a python script binairo.py to generate a binairo puzzle and its solution. (Sudoku variant)
+
+ROADMAP:
+[x] 1: focus / select messages
+[-] 2: buttons working
+[x] 3: bublewrap containerization of tool calls ! [really important for security]
+[o] 4: inference interactivity (steering, stopping, showing intermediate thoughts, etc)
+[ ] 5: markdown rendering improvements (tables, code blocks, etc)
