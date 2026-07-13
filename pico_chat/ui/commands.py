@@ -232,10 +232,6 @@ class ServerAddCommand(Command):
         """
         Add a named server configuration.
         Usage: /server add <name> <type> <model/url> [provider]
-        Examples:
-          /server add my-claude openrouter anthropic/claude-3.5-sonnet
-          /server add my-claude openrouter anthropic/claude-3.5-sonnet Anthropic
-          /server add local llamacpp http://localhost:8080/v1
         """
         if len(args) < 3:
             command_text = "/server add " + " ".join(args) if args else "/server add"
@@ -256,273 +252,50 @@ class ServerAddCommand(Command):
         server_type = args[1].lower()
         model_or_url = args[2]
         provider = args[3] if len(args) > 3 else None
+        command_text = "/server add " + " ".join(args)
+
+        from pico_chat.harness.server_service import ServerService
+        svc = ServerService()
 
         if server_type == "openrouter":
-            await self._add_openrouter(ui, model_or_url, server_name, provider, args)
+            placeholder = ui.chat_history_panel.add_message(
+                f"Validating OpenRouter model {model_or_url}...",
+                msg_type=SysMsg(),
+                title="server"
+            )
+            try:
+                result = await svc.add_openrouter(server_name, model_or_url, provider)
+            except Exception as e:
+                result = type("R", (), {"ok": False, "message": f"Error adding server: {e}"})()
+
+            msg_type = SysMsg() if result.ok else SysMsgError()
+            new_msg = ui.chat_history_panel.new_message(result.message, msg_type=msg_type, title="server")
+            if not result.ok:
+                new_msg.command_text = command_text
+            ui.chat_history_panel.replace_message(placeholder, new_msg)
+
         elif server_type == "llamacpp":
-            await self._add_llamacpp(ui, model_or_url, server_name, args)
+            placeholder = ui.chat_history_panel.add_message(
+                f"Testing connection to {model_or_url}...",
+                msg_type=SysMsg(),
+                title="server"
+            )
+            try:
+                result = await svc.add_llamacpp(server_name, model_or_url)
+            except Exception as e:
+                result = type("R", (), {"ok": False, "message": f"Error adding server: {e}"})()
+
+            msg_type = SysMsg() if result.ok else SysMsgError()
+            new_msg = ui.chat_history_panel.new_message(result.message, msg_type=msg_type, title="server")
+            ui.chat_history_panel.replace_message(placeholder, new_msg)
+
         else:
-            command_text = "/server add " + " ".join(args)
             ui.chat_history_panel.add_message(
                 f"Unknown server type: {server_type}\n"
                 "Supported types: openrouter, llamacpp",
                 msg_type=SysMsgError(),
                 command_text=command_text
             )
-    
-    async def _add_openrouter(self, ui: ChatUIProtocol, model_id: str, server_name: str, provider: str = None, args: list = None):
-        """Add an OpenRouter server configuration.
-        
-        Args:
-            model_id: Model ID like "anthropic/claude-3.5-sonnet"
-            server_name: Custom name for this server config
-            provider: Optional routing preference (e.g., "Anthropic", "DeepInfra")
-            args: Original command args for error context
-        """
-        import httpx
-        logger = logging.getLogger("tui")
-        
-        # Reconstruct command for error context
-        command_text = "/server add " + " ".join(args) if args else "/server add"
-        
-        # Check for API key
-        api_key = os.getenv("OPENROUTER_API_KEY", "")
-        if not api_key:
-            ui.chat_history_panel.add_message(
-                "OpenRouter API key not found.\n"
-                "Set environment variable: export OPENROUTER_API_KEY=sk-or-...\n"
-                "Get your key at: https://openrouter.ai/keys",
-                msg_type=SysMsgError(),
-                command_text=command_text
-            )
-            return
-        
-        placeholder = ui.chat_history_panel.add_message(
-            f"Validating OpenRouter model {model_id}...",
-            msg_type=SysMsg(),
-            title="server"
-        )
-        
-        try:
-            from pico_chat.harness.llm_server_config import LLMServerConfig
-            from pico_chat.harness.llm_server import create_server
-            from pico_chat import pico_cfg
-            import httpx
-            
-            # First, validate that the model exists in OpenRouter's catalog
-            # and check provider if specified
-            model_info = None
-            try:
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(
-                        "https://openrouter.ai/api/v1/models",
-                        timeout=5.0
-                    )
-                    if response.status_code == 200:
-                        data = response.json()
-                        models = data.get("data", [])
-                        
-                        # Find the specific model
-                        for model in models:
-                            if model.get("id") == model_id:
-                                model_info = model
-                                break
-                        
-                        if not model_info:
-                            error_msg = ui.chat_history_panel.new_message(
-                                f"Model '{model_id}' not found in OpenRouter catalog.\n\n"
-                                "Browse available models at: https://openrouter.ai/models\n"
-                                "Model IDs should be in format: provider/model-name\n"
-                                "(e.g., anthropic/claude-3.5-sonnet, openai/gpt-4)",
-                                msg_type=SysMsgError(),
-                                title="server"
-                            )
-                            error_msg.command_text = command_text
-                            ui.chat_history_panel.replace_message(placeholder, error_msg)
-                            return
-                        
-                        # Validate provider if specified
-                        if provider and model_info:
-                            # Get supported providers from model info
-                            supported_providers = model_info.get("supported_providers", [])
-                            
-                            # If the API provides provider info, validate against it
-                            if supported_providers:
-                                provider_ids = [p.get("id") if isinstance(p, dict) else p for p in supported_providers]
-                                # Case-insensitive match
-                                provider_lower = provider.lower()
-                                valid_providers_lower = [p.lower() for p in provider_ids if p]
-                                
-                                if provider_lower not in valid_providers_lower:
-                                    error_msg = ui.chat_history_panel.new_message(
-                                        f"Provider '{provider}' is not supported for model '{model_id}'.\n\n"
-                                        f"Supported providers: {', '.join(provider_ids)}\n\n"
-                                        "Leave provider empty to use OpenRouter's default routing.",
-                                        msg_type=SysMsgError(),
-                                        title="server"
-                                    )
-                                    error_msg.command_text = command_text
-                                    ui.chat_history_panel.replace_message(placeholder, error_msg)
-                                    return
-                            # else: API didn't provide provider info, trust the user's choice
-                    else:
-                        # Can't validate, but warn user
-                        logger.warning(f"Could not fetch OpenRouter models list: HTTP {response.status_code}")
-            except Exception as e:
-                # Network error - can't validate, but continue (user might be offline but model might be valid)
-                logger.warning(f"Failed to validate OpenRouter model: {e}")
-            
-            # Test connection with API key
-            test_config = LLMServerConfig(
-                name=server_name,
-                type="openrouter",
-                base_url="https://openrouter.ai/api/v1",
-                api_key=api_key,  # Use the actual API key value
-                model=model_id,
-                max_context=None,
-                timeout=5.0,
-                retry_attempts=1,
-                retry_delay=1.0,
-                provider=provider
-            )
-            
-            test_server = create_server(test_config)
-            online = await test_server.check_connection()
-            
-            if not online:
-                error_msg = ui.chat_history_panel.new_message(
-                    f"Failed to connect to OpenRouter\n"
-                    "Check your API key and internet connection.\n"
-                    "Get your key at: https://openrouter.ai/keys",
-                    msg_type=SysMsgError(),
-                    title="server"
-                )
-                error_msg.command_text = command_text
-                ui.chat_history_panel.replace_message(placeholder, error_msg)
-                return
-            
-            # Save config only after successful connection test
-            server_config = {
-                "type": "openrouter",
-                "base_url": "https://openrouter.ai/api/v1",
-                "api_key_env": "OPENROUTER_API_KEY",
-                "model": model_id,
-                "timeout": 30.0,
-                "retry_attempts": 3,
-                "retry_delay": 2.0,
-            }
-            
-            # Add provider routing if specified
-            if provider:
-                server_config["provider"] = provider
-            
-            pico_cfg.config.save_server(server_name, server_config, set_active=False)
-            
-            provider_msg = f"\nProvider: {provider}" if provider else ""
-            success_msg = ui.chat_history_panel.new_message(
-                f"Added server '{server_name}'\n"
-                f"Type: OpenRouter\n"
-                f"Model: {model_id}{provider_msg}\n\n"
-                f"Use '/server use {server_name}' to activate",
-                msg_type=SysMsg(),
-                title="server"
-            )
-            ui.chat_history_panel.replace_message(placeholder, success_msg)
-            
-        except Exception as e:
-            error_msg = ui.chat_history_panel.new_message(
-                f"Error adding server: {e}",
-                msg_type=SysMsgError(),
-                title="server"
-            )
-            ui.chat_history_panel.replace_message(placeholder, error_msg)
-    
-    async def _add_llamacpp(self, ui: ChatUIProtocol, url: str, server_name: str, args: list = None):
-        """Add a llamacpp server configuration.
-        
-        Args:
-            url: Server URL
-            server_name: Custom name for this server config
-            args: Original command args for error context
-        """
-        # Normalize URL
-        if not url.startswith("http"):
-            url = f"http://{url}"
-        if not url.endswith("/v1"):
-            url = f"{url}/v1"
-        
-        placeholder = ui.chat_history_panel.add_message(
-            f"Testing connection to {url}...",
-            msg_type=SysMsg(),
-            title="server"
-        )
-        
-        try:
-            from pico_chat.harness.llm_server_config import LLMServerConfig
-            from pico_chat.harness.llm_server import create_server
-            from pico_chat import pico_cfg
-            
-            # Test connection first
-            test_config = LLMServerConfig(
-                name=server_name,
-                type="llamacpp",
-                base_url=url,
-                api_key="EMPTY",
-                model=None,
-                max_context=None,
-                timeout=2.0,
-                retry_attempts=3,
-                retry_delay=1.0
-            )
-            
-            test_server = create_server(test_config)
-            online = await test_server.check_connection()
-            
-            if not online:
-                error_msg = ui.chat_history_panel.new_message(
-                    f"Failed to connect to {url}\n"
-                    "Server is not responding. Check the URL and ensure the server is running.",
-                    msg_type=SysMsgError(),
-                    title="server"
-                )
-                ui.chat_history_panel.replace_message(placeholder, error_msg)
-                return
-            
-            # Get model info
-            model_name = await test_server.get_model_name()
-            context_window = await test_server.get_context_window()
-            
-            # Save config
-            server_config = {
-                "type": "llamacpp",
-                "base_url": url,
-                "api_key": "EMPTY",
-                "timeout": 30.0,
-                "retry_attempts": 3,
-                "retry_delay": 2.0,
-            }
-            
-            pico_cfg.config.save_server(server_name, server_config, set_active=False)
-            
-            success_msg = ui.chat_history_panel.new_message(
-                f"Added server '{server_name}'\n"
-                f"Type: llamacpp\n"
-                f"URL: {url}\n"
-                f"Model: {model_name}\n"
-                f"Context: {context_window:,} tokens\n\n"
-                f"Use '/server use {server_name}' to activate",
-                msg_type=SysMsg(),
-                title="server"
-            )
-            ui.chat_history_panel.replace_message(placeholder, success_msg)
-            
-        except Exception as e:
-            error_msg = ui.chat_history_panel.new_message(
-                f"Error adding server: {e}",
-                msg_type=SysMsgError(),
-                title="server"
-            )
-            ui.chat_history_panel.replace_message(placeholder, error_msg)
 
 
 class ServerListCommand(Command):
@@ -530,12 +303,10 @@ class ServerListCommand(Command):
         super().__init__("list", "List all configured servers")
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        from pico_chat import pico_cfg
-        from pico_chat.ui.tui.colors import theme
-        
-        servers = pico_cfg.config.servers
-        active = pico_cfg.config.active_server
-        
+        from pico_chat.harness.server_service import ServerService
+        svc = ServerService()
+        servers = svc.list_servers()
+
         if not servers:
             ui.chat_history_panel.add_message(
                 "No servers configured.\n\n"
@@ -545,43 +316,37 @@ class ServerListCommand(Command):
                 msg_type=SysMsg()
             )
             return
-        
-        # Use compact, colorful one-line display
+
         color = str(theme.DEFAULT)
         muted = str(theme.MUTED)
         active_color = str(theme.SUCCESS)
         reset = theme.reset()
-        
+
         msg = f"{color}Configured servers:{reset}\n\n"
-        
-        for name, config in sorted(servers.items()):
-            server_type = config.get("type", "unknown")
-            
-            # Build single-line display
-            # Format: name (type) - details
-            if name == active:
+
+        from pico_chat import pico_cfg
+        for name, server_type, is_active in servers:
+            cfg = pico_cfg.config.servers[name]
+            if is_active:
                 line = f"{active_color}{name}{reset}"
             else:
                 line = f"{color}{name}{reset}"
-            
             line += f" {muted}({server_type}){reset}"
-            
-            # Add type-specific details on same line
+
             if server_type == "openrouter":
-                model = config.get("model", "unknown")
-                provider = config.get("provider")
+                model = cfg.get("model", "unknown")
+                provider = cfg.get("provider")
                 if provider:
                     line += f" {muted}- {model} via {provider}{reset}"
                 else:
                     line += f" {muted}- {model}{reset}"
             elif server_type == "llamacpp":
-                url = config.get("base_url", "unknown")
+                url = cfg.get("base_url", "unknown")
                 line += f" {muted}- {url}{reset}"
-            
+
             msg += line + "\n"
-        
+
         msg += f"\n{muted}Use '/server use <name>' to switch{reset}"
-        
         ui.chat_history_panel.add_message(msg, msg_type=SysMsg())
 
 
@@ -597,83 +362,18 @@ class ServerUseCommand(Command):
                 msg_type=SysMsgError()
             )
             return
-        
-        server_name = args[0]
-        
-        from pico_chat import pico_cfg
-        
-        if server_name not in pico_cfg.config.servers:
-            ui.chat_history_panel.add_message(
-                f"Server '{server_name}' not found.\n\n"
-                f"Use '/server list' to see available servers",
-                msg_type=SysMsgError()
-            )
+
+        from pico_chat.harness.server_service import ServerService
+        svc = ServerService()
+        result = svc.switch_server(args[0])
+
+        if not result.ok:
+            ui.chat_history_panel.add_message(result.message, msg_type=SysMsgError())
             return
-        
+
         try:
-            # Update active server in config
-            config_path = pico_cfg.get_config_path()
-            import toml
-            
-            if config_path.exists():
-                data = toml.load(config_path)
-            else:
-                data = {}
-            
-            if "settings" not in data:
-                data["settings"] = {}
-            data["settings"]["active_server"] = server_name
-            
-            with open(config_path, "w") as f:
-                toml.dump(data, f)
-            
-            pico_cfg.config.active_server = server_name
-            
-            # Switch server at runtime
-            from pico_chat.harness.llm_server_config import LLMServerConfig, get_server_config
-            import os
-            
-            server_dict = pico_cfg.config.servers[server_name]
-            server_type = server_dict.get("type", "unknown")
-            
-            # Get API key from environment variable if specified
-            api_key = server_dict.get("api_key", "")
-            api_key_env = server_dict.get("api_key_env")
-            if api_key_env:
-                api_key = os.getenv(api_key_env, api_key)
-            
-            new_config = LLMServerConfig(
-                name=server_name,
-                type=server_type,
-                base_url=server_dict.get("base_url", "http://localhost:8080/v1"),
-                api_key=api_key,
-                model=server_dict.get("model"),
-                max_context=server_dict.get("max_context"),
-                timeout=server_dict.get("timeout", 30.0),
-                retry_attempts=server_dict.get("retry_attempts", 3),
-                retry_delay=server_dict.get("retry_delay", 2.0),
-                provider=server_dict.get("provider"),
-            )
-            
-            # Switch the server in the running harness
-            ui.agent.switch_server(new_config)
-            
-            # Compact single-line message
-            if server_type == "openrouter":
-                model = server_dict.get("model", "unknown")
-                provider = server_dict.get("provider")
-                if provider:
-                    msg = f"Switched to {server_name} (openrouter) - {model} via {provider}"
-                else:
-                    msg = f"Switched to {server_name} (openrouter) - {model}"
-            elif server_type == "llamacpp":
-                url = server_dict.get("base_url", "unknown")
-                msg = f"Switched to {server_name} (llamacpp) - {url}"
-            else:
-                msg = f"Switched to {server_name} ({server_type})"
-            
-            ui.chat_history_panel.add_message(msg, msg_type=SysMsg())
-            
+            ui.agent.switch_server(result.new_config)
+            ui.chat_history_panel.add_message(result.message, msg_type=SysMsg())
         except Exception as e:
             ui.chat_history_panel.add_message(
                 f"Error switching server: {e}",
@@ -693,116 +393,23 @@ class ServerRemoveCommand(Command):
                 msg_type=SysMsgError()
             )
             return
-        
-        server_name = args[0]
-        
-        from pico_chat import pico_cfg
-        
-        if server_name not in pico_cfg.config.servers:
-            ui.chat_history_panel.add_message(
-                f"Server '{server_name}' not found.\n\n"
-                f"Use '/server list' to see available servers",
-                msg_type=SysMsgError()
-            )
+
+        from pico_chat.harness.server_service import ServerService
+        svc = ServerService()
+        result = svc.remove_server(args[0])
+
+        if not result.ok:
+            ui.chat_history_panel.add_message(result.message, msg_type=SysMsgError())
             return
-        
-        try:
-            config_path = pico_cfg.get_config_path()
-            import toml
-            
-            if config_path.exists():
-                data = toml.load(config_path)
-                
-                if "servers" in data and server_name in data["servers"]:
-                    # Check if this is the active server
-                    is_active = (pico_cfg.config.active_server == server_name)
-                    
-                    # Remove the server
-                    del data["servers"][server_name]
-                    
-                    # If it was active, switch to another server or clear active
-                    switched_to = None
-                    if is_active:
-                        remaining_servers = list(data["servers"].keys())
-                        if remaining_servers:
-                            # Switch to the first remaining server
-                            new_active = remaining_servers[0]
-                            if "settings" not in data:
-                                data["settings"] = {}
-                            data["settings"]["active_server"] = new_active
-                            pico_cfg.config.active_server = new_active
-                            switched_to = new_active
-                            
-                            # Switch server in running harness
-                            try:
-                                from pico_chat.harness.llm_server_config import LLMServerConfig
-                                import os
-                                
-                                server_dict = data["servers"][new_active]
-                                server_type = server_dict.get("type", "unknown")
-                                
-                                # Get API key from environment variable if specified
-                                api_key = server_dict.get("api_key", "")
-                                api_key_env = server_dict.get("api_key_env")
-                                if api_key_env:
-                                    api_key = os.getenv(api_key_env, api_key)
-                                
-                                new_config = LLMServerConfig(
-                                    name=new_active,
-                                    type=server_type,
-                                    base_url=server_dict.get("base_url", "http://localhost:8080/v1"),
-                                    api_key=api_key,
-                                    model=server_dict.get("model"),
-                                    max_context=server_dict.get("max_context"),
-                                    timeout=server_dict.get("timeout", 30.0),
-                                    retry_attempts=server_dict.get("retry_attempts", 3),
-                                    retry_delay=server_dict.get("retry_delay", 2.0),
-                                    provider=server_dict.get("provider"),
-                                )
-                                
-                                ui.agent.switch_server(new_config)
-                            except Exception as e:
-                                # If switch fails, just log it but don't fail the removal
-                                import logging
-                                logger = logging.getLogger("tui")
-                                logger.warning(f"Failed to switch to new server after removal: {e}")
-                        else:
-                            # No servers left, clear active_server
-                            if "settings" in data and "active_server" in data["settings"]:
-                                del data["settings"]["active_server"]
-                            pico_cfg.config.active_server = "llamacpp_default"
-                    
-                    # Save updated config
-                    with open(config_path, "w") as f:
-                        toml.dump(data, f)
-                    
-                    # Remove from runtime config
-                    del pico_cfg.config.servers[server_name]
-                    
-                    # Build response message
-                    msg = f"Removed server '{server_name}'"
-                    if switched_to:
-                        msg += f"\nSwitched to '{switched_to}'"
-                    elif is_active:
-                        msg += "\nNo servers configured"
-                    
-                    ui.chat_history_panel.add_message(msg, msg_type=SysMsg())
-                else:
-                    ui.chat_history_panel.add_message(
-                        f"Server '{server_name}' not found in config file",
-                        msg_type=SysMsgError()
-                    )
-            else:
-                ui.chat_history_panel.add_message(
-                    "Config file not found",
-                    msg_type=SysMsgError()
-                )
-                
-        except Exception as e:
-            ui.chat_history_panel.add_message(
-                f"Error removing server: {e}",
-                msg_type=SysMsgError()
-            )
+
+        # If the active server was removed and we switched, apply the switch
+        if result.new_config is not None:
+            try:
+                ui.agent.switch_server(result.new_config)
+            except Exception as e:
+                logger.warning(f"Failed to switch to new server after removal: {e}")
+
+        ui.chat_history_panel.add_message(result.message, msg_type=SysMsg())
 
 
 class ServerInfoCommand(Command):
@@ -818,47 +425,41 @@ class ServerInfoCommand(Command):
             )
             return
 
-        server_name = args[0]
-        from pico_chat import pico_cfg
-        from pico_chat.ui.tui.colors import theme
+        from pico_chat.harness.server_service import ServerService
+        svc = ServerService()
+        info = svc.get_server_info(args[0])
 
-        servers = pico_cfg.config.servers
-        if server_name not in servers:
+        if info is None:
             ui.chat_history_panel.add_message(
-                f"Server '{server_name}' not found.\n\n"
+                f"Server '{args[0]}' not found.\n\n"
                 "Use '/server list' to see available servers",
                 msg_type=SysMsgError()
             )
             return
 
-        cfg = servers[server_name]
-        active = pico_cfg.config.active_server
         color = str(theme.WARNING)
         reset = theme.reset()
 
-        msg = color + f"Name             : {reset}{server_name}"
-        if server_name == active:
+        msg = color + f"Name             : {reset}{info.name}"
+        if info.is_active:
             msg += f" {color}(active){reset}"
         msg += "\n"
-        msg += color + f"Type             : {reset}{cfg.get('type', 'unknown')}\n"
+        msg += color + f"Type             : {reset}{info.server_type}\n"
 
-        server_type = cfg.get("type", "")
-        if server_type == "openrouter":
-            msg += color + f"Model            : {reset}{cfg.get('model', 'unknown')}\n"
-            provider = cfg.get("provider")
-            if provider:
-                msg += color + f"Provider         : {reset}{provider}\n"
-            msg += color + f"Base URL         : {reset}{cfg.get('base_url', 'unknown')}\n"
-            api_key_env = cfg.get("api_key_env", "")
-            msg += color + f"API Key Env      : {reset}{api_key_env}\n"
-        elif server_type == "llamacpp":
-            msg += color + f"Base URL         : {reset}{cfg.get('base_url', 'unknown')}\n"
+        if info.server_type == "openrouter":
+            msg += color + f"Model            : {reset}{info.model or 'unknown'}\n"
+            if info.provider:
+                msg += color + f"Provider         : {reset}{info.provider}\n"
+            msg += color + f"Base URL         : {reset}{info.base_url or 'unknown'}\n"
+            msg += color + f"API Key Env      : {reset}{info.api_key_env or ''}\n"
+        elif info.server_type == "llamacpp":
+            msg += color + f"Base URL         : {reset}{info.base_url or 'unknown'}\n"
 
-        msg += color + f"Timeout          : {reset}{cfg.get('timeout', 30.0)}s\n"
-        msg += color + f"Retry Attempts   : {reset}{cfg.get('retry_attempts', 3)}\n"
-        msg += color + f"Retry Delay      : {reset}{cfg.get('retry_delay', 2.0)}s\n"
-        if cfg.get("max_context"):
-            msg += color + f"Max Context      : {reset}{cfg['max_context']:,} tokens\n"
+        msg += color + f"Timeout          : {reset}{info.timeout}s\n"
+        msg += color + f"Retry Attempts   : {reset}{info.retry_attempts}\n"
+        msg += color + f"Retry Delay      : {reset}{info.retry_delay}s\n"
+        if info.max_context:
+            msg += color + f"Max Context      : {reset}{info.max_context:,} tokens\n"
 
         ui.chat_history_panel.add_message(msg.rstrip(), msg_type=SysMsg(), title="server")
 
@@ -1200,16 +801,7 @@ class OpenRouterBalanceCommand(Command):
         super().__init__("balance", "Show OpenRouter account credit balance")
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        import httpx
-
-        api_key = os.getenv("OPENROUTER_API_KEY", "")
-        if not api_key:
-            ui.chat_history_panel.add_message(
-                "OpenRouter API key not found.\n"
-                "Set environment variable: export OPENROUTER_API_KEY=sk-or-...",
-                msg_type=SysMsgError(),
-            )
-            return
+        from pico_chat.harness.server_service import ServerService
 
         placeholder = ui.chat_history_panel.add_message(
             "Fetching OpenRouter balance...",
@@ -1217,56 +809,38 @@ class OpenRouterBalanceCommand(Command):
             title="openrouter",
         )
 
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    "https://openrouter.ai/api/v1/credits",
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    timeout=10.0,
-                )
+        svc = ServerService()
+        ok, message, balance = await svc.get_openrouter_balance()
 
-            if response.status_code != 200:
-                error_msg = ui.chat_history_panel.new_message(
-                    f"OpenRouter API error: HTTP {response.status_code}",
-                    msg_type=SysMsgError(),
-                    title="openrouter",
-                )
-                ui.chat_history_panel.replace_message(placeholder, error_msg)
-                return
-
-            data = response.json().get("data", {})
-            total_credits = data.get("total_credits", 0.0)
-            total_usage = data.get("total_usage", 0.0)
-            remaining = total_credits - total_usage
-
-            color = str(theme.WARNING)
-            reset = theme.reset()
-
-            if remaining > 5:
-                balance_color = theme.SUCCESS
-            elif remaining > 1:
-                balance_color = theme.WARNING
-            else:
-                balance_color = theme.ERROR
-
-            msg  = color + f"Remaining        : {reset}{balance_color}${remaining:.4f}{reset}\n"
-            msg += color + f"Total Credits    : {reset}${total_credits:.4f}\n"
-            msg += color + f"Total Usage      : {reset}${total_usage:.4f}\n"
-
-            result_msg = ui.chat_history_panel.new_message(
-                msg.rstrip(),
-                msg_type=SysMsg(),
-                title="openrouter",
-            )
-            ui.chat_history_panel.replace_message(placeholder, result_msg)
-
-        except Exception as e:
+        if not ok:
             error_msg = ui.chat_history_panel.new_message(
-                f"Failed to fetch balance: {e}",
+                message,
                 msg_type=SysMsgError(),
                 title="openrouter",
             )
             ui.chat_history_panel.replace_message(placeholder, error_msg)
+            return
+
+        color = str(theme.WARNING)
+        reset = theme.reset()
+
+        if balance.remaining > 5:
+            balance_color = theme.SUCCESS
+        elif balance.remaining > 1:
+            balance_color = theme.WARNING
+        else:
+            balance_color = theme.ERROR
+
+        msg  = color + f"Remaining        : {reset}{balance_color}${balance.remaining:.4f}{reset}\n"
+        msg += color + f"Total Credits    : {reset}${balance.total_credits:.4f}\n"
+        msg += color + f"Total Usage      : {reset}${balance.total_usage:.4f}\n"
+
+        result_msg = ui.chat_history_panel.new_message(
+            msg.rstrip(),
+            msg_type=SysMsg(),
+            title="openrouter",
+        )
+        ui.chat_history_panel.replace_message(placeholder, result_msg)
 
 
 class OpenRouterCommand(Command):
