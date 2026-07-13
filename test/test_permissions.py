@@ -24,13 +24,14 @@ from conftest import NoopDebugStream, StubReadTool, run_harness_tool_call
 
 
 def _build_harness_stub(tmp_path, read_tool):
+    from pico_chat.harness.permission_gate import PermissionGate
     harness = Harness.__new__(Harness)
     harness.debug_stream = NoopDebugStream()
     harness.state = AgentState.IDLE
     harness.history = []
     harness.workspace = str(tmp_path)
     harness.tools_map = {"read": read_tool}
-    harness._user_response_queue = asyncio.Queue()
+    harness._permission_gate = PermissionGate(workspace=str(tmp_path), permissions=None)
     harness._tool_permissions = None
     return harness
 
@@ -694,7 +695,8 @@ class TestHarnessRunPermissionFlow:
         harness.history = []
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
-        harness._user_response_queue = asyncio.Queue()
+        from pico_chat.harness.permission_gate import PermissionGate
+        harness._permission_gate = PermissionGate(workspace=str(tmp_path), permissions=None)
         harness._tool_permissions = None
         
         tool_call = {
@@ -744,7 +746,8 @@ class TestHarnessRunPermissionFlow:
         harness.history = []
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
-        harness._user_response_queue = asyncio.Queue()
+        from pico_chat.harness.permission_gate import PermissionGate
+        harness._permission_gate = PermissionGate(workspace=str(tmp_path), permissions=None)
         harness._tool_permissions = None
         harness.set_user_response("yes")
         
@@ -794,7 +797,8 @@ class TestHarnessRunPermissionFlow:
         harness.history = []
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
-        harness._user_response_queue = asyncio.Queue()
+        from pico_chat.harness.permission_gate import PermissionGate
+        harness._permission_gate = PermissionGate(workspace=str(tmp_path), permissions=None)
         harness._tool_permissions = None
         harness.set_user_response("allow")
         
@@ -844,7 +848,8 @@ class TestHarnessRunPermissionFlow:
         harness.history = []
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
-        harness._user_response_queue = asyncio.Queue()
+        from pico_chat.harness.permission_gate import PermissionGate
+        harness._permission_gate = PermissionGate(workspace=str(tmp_path), permissions=None)
         harness._tool_permissions = None
         
         tool_call = {
@@ -893,7 +898,8 @@ class TestHarnessRunPermissionFlow:
         harness.history = []
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
-        harness._user_response_queue = asyncio.Queue()
+        from pico_chat.harness.permission_gate import PermissionGate
+        harness._permission_gate = PermissionGate(workspace=str(tmp_path), permissions=None)
         harness._tool_permissions = None
         harness.set_user_response("no")
         
@@ -944,7 +950,8 @@ class TestHarnessRunPermissionFlow:
         harness.history = []
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
-        harness._user_response_queue = asyncio.Queue()
+        from pico_chat.harness.permission_gate import PermissionGate
+        harness._permission_gate = PermissionGate(workspace=str(tmp_path), permissions=None)
         harness._tool_permissions = None
         harness.set_user_response("yes")
         

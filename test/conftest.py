@@ -13,6 +13,7 @@ import pytest
 
 from pico_chat.harness.harness import Harness
 from pico_chat.harness.llm_status import AgentState
+from pico_chat.harness.permission_gate import PermissionGate
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +115,7 @@ def harness_stub(tmp_path, stub_read_tool):
     harness.history = []
     harness.workspace = str(tmp_path)
     harness.tools_map = {"read": stub_read_tool}
-    harness._user_response_queue = asyncio.Queue()
+    harness._permission_gate = PermissionGate(workspace=str(tmp_path), permissions=None)
     harness._tool_permissions = None
     return harness
 

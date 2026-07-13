@@ -13,6 +13,8 @@ from pico_chat.harness.system_prompt import get_system_message
 from pico_chat.harness import chunks
 from pico_chat.harness.llm_server import create_server, LLMServer
 from pico_chat.harness.llm_server_config import server_config
+from pico_chat.harness.permission_gate import PermissionGate
+from pico_chat.harness.thinking_parser import ThinkingTagParser, MetricsState
 
 # Import the minimal toolset
 from pico_chat.harness.tool_wrappers import create_toolset
@@ -21,11 +23,6 @@ import os
 
 logger = logging.getLogger(__name__)
 
-# Supported thinking tag delimiters
-THINKING_TAGS = [
-    ("<think>", "</think>"),
-    ("<thinking>", "</thinking>"),
-]
 
 COMPACTION_MARKER_PREFIX = "[COMPACTION_SUMMARY]"
 
@@ -35,9 +32,6 @@ class Harness:
         self.state = AgentState.IDLE
         self.history = []
         self.depth = depth
-
-        # User input queue for tool confirmations and prompts
-        self._user_response_queue = asyncio.Queue()
 
         # Background subagent tracking
         self._pending_subagents: list = []      # [{index, task, future}, ...]
@@ -50,7 +44,13 @@ class Harness:
         # Subagents use scaffolder (read-only) permissions
         from pico_chat.harness.tool_permissions import scaffolder
         tool_permissions = scaffolder if depth > 0 else None
-        self._tool_permissions = tool_permissions  # used by _check_tool_permission
+        self._tool_permissions = tool_permissions  # used by PermissionGate
+
+        # Permission gate owns the user-response queue and path resolution
+        self._permission_gate = PermissionGate(
+            workspace=self.workspace,
+            permissions=tool_permissions,
+        )
 
         self.tools_map = create_toolset(
             workspace_path=self.workspace,
@@ -200,7 +200,7 @@ class Harness:
 
     def set_user_response(self, text: str):
         """Called by the UI when a response to a tool's prompt is ready."""
-        self._user_response_queue.put_nowait(text)
+        self._permission_gate.set_user_response(text)
 
     def set_thinking_prefill(self, content: str):
         """Queue content to be prepended as the assistant <thinking> prefix on
@@ -217,121 +217,24 @@ class Harness:
 
     async def _wait_for_user_input(self, prompt: str) -> str:
         """Wait for the user to provide text via the UI."""
-        # Note: The UI is responsible for seeing the prompt (yielded below) 
-        # and then calling set_user_response.
-        return await self._user_response_queue.get()
-    
+        return await self._permission_gate.wait_for_user_input(prompt)
+
     def _check_tool_permission(self, tool_name: str, args: dict) -> str:
-        """Check tool permission status.
-        
-        Returns:
-            "allow" - auto-approve
-            "ask" - need user permission
-            "deny" - auto-deny
-        """
-        from pico_chat.harness.tool_permissions import permissions as global_permissions
-        permissions = self._tool_permissions if self._tool_permissions is not None else global_permissions
+        """Check tool permission status. Delegates to PermissionGate."""
+        return self._permission_gate.check(tool_name, args)
 
-        if tool_name == "read":
-            path = args.get("path", "")
-            from pathlib import Path
-            try:
-                if Path(path).is_absolute():
-                    target = Path(path).resolve()
-                else:
-                    target = (Path(self.workspace) / path).resolve()
-                is_inside = target.relative_to(Path(self.workspace).resolve())
-                return permissions.get_read_permission(True)
-            except:
-                return permissions.get_read_permission(False)
-        
-        elif tool_name == "write":
-            path = args.get("path", "")
-            from pathlib import Path
-            try:
-                if Path(path).is_absolute():
-                    target = Path(path).resolve()
-                else:
-                    target = (Path(self.workspace) / path).resolve()
-                is_inside = target.relative_to(Path(self.workspace).resolve())
-                return permissions.get_write_permission(True)
-            except:
-                return permissions.get_write_permission(False)
-        
-        elif tool_name == "patch":
-            path = args.get("path", "")
-            from pathlib import Path
-            try:
-                if Path(path).is_absolute():
-                    target = Path(path).resolve()
-                else:
-                    target = (Path(self.workspace) / path).resolve()
-                target.relative_to(Path(self.workspace).resolve())
-                return permissions.get_patch_permission(True)
-            except Exception:
-                return permissions.get_patch_permission(False)
-        
-        elif tool_name == "run":
-            # Run command permission - check the actual command
-            from pico_chat.harness.security import SecurityChecker, CommandAction
-            command = args.get("command", "")
-            run_perms = permissions.get_run_permission()
-            
-            # Use SecurityChecker to properly evaluate the command
-            checker = SecurityChecker(run_perms, confirmation_callback=None)
-            allowed, message = checker.check_chain(command)
-            
-            # SecurityChecker returns (bool, str) tuple
-            # If not allowed, check if it's a hard deny or ask
-            if not allowed:
-                # Parse the message to determine if it's ASK or DENY
-                # Commands in DENY list will have "blocked" in message
-                # Commands requiring confirmation will have "requires confirmation"
-                if "blocked" in message.lower() or "not in allowlist" in message.lower():
-                    return "deny"
-                else:
-                    return "ask"
-            else:
-                return "allow"
-        
-        elif tool_name in ["search_web", "search_wiki"]:
-            # Search operations
-            return permissions.get_search_permission()
-        
-        elif tool_name in ["subagent", "wait_for_subagents"]:
-            # Subagent operations are always approved
-            return "allow"
-
-        return "ask"  # Default to asking
-    
     def _build_permission_prompt(self, tool_name: str, args: dict) -> str:
         """Build a human-readable permission prompt for a tool call."""
-        if tool_name == "read":
-            return f"Allow reading file: {args.get('path', 'unknown')}?"
-        elif tool_name == "write":
-            return f"Allow writing to file: {args.get('path', 'unknown')}?"
-        elif tool_name == "patch":
-            path = args.get('path', 'unknown')
-            return f"Allow patching file: {path}?"
-        elif tool_name == "run":
-            command = args.get('command', 'unknown')
-            # Truncate long commands
-            if len(command) > 100:
-                command = command[:97] + "..."
-            return f"Allow running command: {command}?"
-        return f"Allow {tool_name}?"
-    
+        return PermissionGate.build_prompt(tool_name, args)
+
     def _request_user_confirmation(self, command: str) -> bool:
         """
-        Request user confirmation for a command.
-        
-        NOTE: This is a synchronous callback used by the security checker.
+        Synchronous callback used by the security checker.
+
         Since we handle permissions asynchronously via ToolWaitInput chunks,
         we return True here to pass the security check, and handle the actual
         user confirmation in the async tool execution flow.
         """
-        # Return True to pass security check - actual permission handling
-        # happens via ToolWaitInput in the async chat loop
         return True
 
 
@@ -588,68 +491,46 @@ class Harness:
         return messages
 
     async def _stream_llm_response(self, messages: List[Dict[str, Any]]) -> AsyncGenerator[chunks.Chunk, None]:
-        """
-        Stream LLM response and collect content/tool calls.
-        
-        Yields: chunks.Chunk subclasses:
-            - chunks.Thinking: Reasoning content
-            - chunks.Content: Regular response content
-            - chunks.GenerationMetrics: Live performance metrics
-        
-        Sets instance variables:
-        - self._last_full_content: Complete response content
-        - self._last_tool_calls: Tool calls from the response
+        """Stream LLM response and collect content/tool calls.
+
+        Yields: chunks.Chunk subclasses (Thinking, Content, ToolDraft, GenerationMetrics).
+        Sets: self._last_full_content, _last_full_reasoning, _last_tool_calls,
+              _last_detected_thinking_tag.
         """
         from pico_chat.harness.token_estimation import estimate_tokens
         from pico_chat import pico_cfg
-        
+
         self.state = AgentState.THINKING
         self.debug_stream.log("REQUEST", messages)
-        
-        # Track time-to-first-token (TTFT)
+
         request_start_time = time.perf_counter()
         first_chunk_received = False
         ttft_ms = None
-        
-        # Track generation metrics
-        generation_start_time = None
-        total_tokens = 0
-        last_metrics_update = 0
-        metrics_interval = pico_cfg.config.ui_metrics_refresh_interval
-        
-        full_content = ""
-        full_reasoning = ""
+
+        metrics = MetricsState()
+        parser = ThinkingTagParser()
         tool_calls_buffer: Dict[int, Dict[str, Any]] = {}
-        
-        # State for parsing thinking tags in content
-        content_buffer = ""
-        in_thinking_block = False
-        current_thinking_open_tag = None
-        # Persists after the block closes — None means reasoning_content path was used
-        detected_thinking_open_tag = None
 
         # Reset live reasoning accumulator for this generation
         self._current_reasoning = ""
-        
-        # Use server's create_completion (handles retries automatically)
+
+        metrics_interval = pico_cfg.config.ui_metrics_refresh_interval
+
         chunk_count = 0
         empty_chunks = 0
         async for chunk in self.server.create_completion(messages, tools=self.tool_schemas, stream=True):
             chunk_count += 1
-            
-            # Log chunk details for debugging empty responses
+
             if not chunk.choices:
                 empty_chunks += 1
                 logger.debug(f"Chunk {chunk_count}: No choices")
                 continue
-            
+
             delta = chunk.choices[0].delta
             finish_reason = chunk.choices[0].finish_reason
-            
-            # Log if we have a finish reason (end of stream)
+
             if finish_reason:
                 logger.debug(f"Chunk {chunk_count}: finish_reason={finish_reason}")
-                # Log the delta to see if there's any content or error
                 if hasattr(delta, 'content') and delta.content:
                     logger.debug(f"  Final delta content: {delta.content}")
                 if hasattr(delta, 'refusal') and delta.refusal:
@@ -658,190 +539,55 @@ class Harness:
                     logger.debug(f"  Final delta has tool calls")
                 if chunk_count <= 3:
                     logger.warning(f"Got finish_reason={finish_reason} on chunk {chunk_count} - very early finish! Possible API error or content filter.")
-                    # Log the full chunk for debugging
                     logger.debug(f"  Full chunk: {chunk}")
-            
-            # Log TTFT on first chunk
+
             if not first_chunk_received:
                 ttft = time.perf_counter() - request_start_time
                 ttft_ms = ttft * 1000
                 logger.info(f"Time-to-first-token: {ttft_ms:.0f}ms")
                 self.debug_stream.log("TTFT", f"{ttft_ms:.0f}ms")
                 first_chunk_received = True
-            
+                metrics.ttft_ms = ttft_ms
+
             if not chunk.choices:
                 continue
-                
+
             delta = chunk.choices[0].delta
-            
-            # 1. Handle Reasoning (DeepSeek/R1 style)
+
+            # 1. Handle Reasoning (DeepSeek/R1 style — reasoning_content API field)
             reasoning = getattr(delta, "reasoning_content", None)
             if reasoning:
                 if self.state != AgentState.THINKING:
                     self.state = AgentState.THINKING
-                
-                # Start tracking on first content
-                if generation_start_time is None:
-                    generation_start_time = time.perf_counter()
-                
-                # Count tokens and yield content
-                total_tokens += estimate_tokens(reasoning)
-                full_reasoning += reasoning
+                metrics.ensure_started()
+                metrics.add_tokens(reasoning, estimate_tokens)
                 self._current_reasoning += reasoning
                 yield chunks.Thinking(content=reasoning)
-                
-                # Yield metrics update periodically
-                current_time = time.perf_counter()
-                if current_time - last_metrics_update >= metrics_interval:
-                    duration = current_time - generation_start_time
-                    tokens_per_second = total_tokens / duration if duration > 0 else 0
-                    yield chunks.GenerationMetrics(
-                        tokens=total_tokens,
-                        tokens_per_second=tokens_per_second,
-                        ttft_ms=ttft_ms
-                    )
-                    last_metrics_update = current_time
-                
+                m = metrics.maybe_metrics(metrics_interval)
+                if m:
+                    yield m
                 continue
 
             # 2. Handle Content (with thinking tag parsing)
             content = delta.content
             if content:
-                # Start tracking on first content
-                if generation_start_time is None:
-                    generation_start_time = time.perf_counter()
-                
-                # Add to buffer for tag parsing
-                content_buffer += content
-                # Count tokens for this content chunk
-                total_tokens += estimate_tokens(content)
-                
-                # Parse for thinking tags
-                while content_buffer:
-                    if not in_thinking_block:
-                        # Look for opening thinking tag
-                        earliest_pos = len(content_buffer)
-                        found_tag = None
-                        
-                        for open_tag, close_tag in THINKING_TAGS:
-                            pos = content_buffer.find(open_tag)
-                            if pos != -1 and pos < earliest_pos:
-                                earliest_pos = pos
-                                found_tag = (open_tag, close_tag)
-                        
-                        if found_tag:
-                            open_tag, close_tag = found_tag
-                            # Yield content before the tag
-                            if earliest_pos > 0:
-                                before_content = content_buffer[:earliest_pos]
-                                if self.state != AgentState.ANSWERING:
-                                    self.state = AgentState.ANSWERING
-                                full_content += before_content
-                                yield chunks.Content(content=before_content)
-                                
-                                # Yield metrics update periodically
-                                current_time = time.perf_counter()
-                                if current_time - last_metrics_update >= metrics_interval:
-                                    duration = current_time - generation_start_time
-                                    tokens_per_second = total_tokens / duration if duration > 0 else 0
-                                    yield chunks.GenerationMetrics(
-                                        tokens=total_tokens,
-                                        tokens_per_second=tokens_per_second,
-                                        ttft_ms=ttft_ms
-                                    )
-                                    last_metrics_update = current_time
-                            
-                            # Enter thinking block
-                            in_thinking_block = True
-                            current_thinking_open_tag = open_tag
-                            detected_thinking_open_tag = open_tag  # persist across close
-                            # Move past the opening tag (but don't include it in output)
-                            content_buffer = content_buffer[earliest_pos + len(open_tag):]
-                        else:
-                            # No opening tag found, check if we might have a partial tag at the end
-                            # Keep the last N characters where N is the length of the longest open tag
-                            max_tag_len = max(len(tag[0]) for tag in THINKING_TAGS)
-                            if len(content_buffer) > max_tag_len:
-                                # Safe to yield everything except potential partial tag
-                                safe_content = content_buffer[:-max_tag_len]
-                                if self.state != AgentState.ANSWERING:
-                                    self.state = AgentState.ANSWERING
-                                full_content += safe_content
-                                yield chunks.Content(content=safe_content)
-                                
-                                # Yield metrics update periodically
-                                current_time = time.perf_counter()
-                                if current_time - last_metrics_update >= metrics_interval:
-                                    duration = current_time - generation_start_time
-                                    tokens_per_second = total_tokens / duration if duration > 0 else 0
-                                    yield chunks.GenerationMetrics(
-                                        tokens=total_tokens,
-                                        tokens_per_second=tokens_per_second,
-                                        ttft_ms=ttft_ms
-                                    )
-                                    last_metrics_update = current_time
-                                
-                                content_buffer = content_buffer[-max_tag_len:]
-                            break  # Wait for more content
+                metrics.ensure_started()
+                metrics.add_tokens(content, estimate_tokens)
+
+                for segment in parser.feed(content):
+                    if segment.is_thinking:
+                        if self.state != AgentState.THINKING:
+                            self.state = AgentState.THINKING
+                        self._current_reasoning += segment.text
+                        yield chunks.Thinking(content=segment.text)
                     else:
-                        # Look for closing tag matching the current open tag
-                        close_tag = next(close for open_, close in THINKING_TAGS if open_ == current_thinking_open_tag)
-                        close_pos = content_buffer.find(close_tag)
-                        
-                        if close_pos != -1:
-                            # Found closing tag - yield thinking content
-                            thinking_content = content_buffer[:close_pos]
-                            if thinking_content:
-                                if self.state != AgentState.THINKING:
-                                    self.state = AgentState.THINKING
-                                full_reasoning += thinking_content
-                                self._current_reasoning += thinking_content
-                                yield chunks.Thinking(content=thinking_content)
-                                
-                                # Yield metrics update periodically
-                                current_time = time.perf_counter()
-                                if current_time - last_metrics_update >= metrics_interval:
-                                    duration = current_time - generation_start_time
-                                    tokens_per_second = total_tokens / duration if duration > 0 else 0
-                                    yield chunks.GenerationMetrics(
-                                        tokens=total_tokens,
-                                        tokens_per_second=tokens_per_second,
-                                        ttft_ms=ttft_ms
-                                    )
-                                    last_metrics_update = current_time
-                            
-                            # Exit thinking block
-                            in_thinking_block = False
-                            current_thinking_open_tag = None
-                            # Move past the closing tag (don't include it in output)
-                            content_buffer = content_buffer[close_pos + len(close_tag):]
-                        else:
-                            # No closing tag yet, check if we might have a partial at the end
-                            if len(content_buffer) > len(close_tag):
-                                # Safe to yield as thinking content except potential partial
-                                safe_content = content_buffer[:-len(close_tag)]
-                                if safe_content:
-                                    if self.state != AgentState.THINKING:
-                                        self.state = AgentState.THINKING
-                                    full_reasoning += safe_content
-                                    self._current_reasoning += safe_content
-                                    yield chunks.Thinking(content=safe_content)
-                                    
-                                    # Yield metrics update periodically
-                                    current_time = time.perf_counter()
-                                    if current_time - last_metrics_update >= metrics_interval:
-                                        duration = current_time - generation_start_time
-                                        tokens_per_second = total_tokens / duration if duration > 0 else 0
-                                        yield chunks.GenerationMetrics(
-                                            tokens=total_tokens,
-                                            tokens_per_second=tokens_per_second,
-                                            ttft_ms=ttft_ms
-                                        )
-                                        last_metrics_update = current_time
-                                
-                                content_buffer = content_buffer[-len(close_tag):]
-                            break  # Wait for more content
-                
+                        if self.state != AgentState.ANSWERING:
+                            self.state = AgentState.ANSWERING
+                        yield chunks.Content(content=segment.text)
+                    m = metrics.maybe_metrics(metrics_interval)
+                    if m:
+                        yield m
+
             # 3. Handle Tool Calls
             if delta.tool_calls:
                 for tc in delta.tool_calls:
@@ -867,32 +613,23 @@ class Harness:
                         tool_name=tc_data["function"]["name"],
                         tool_args=tc_data["function"]["arguments"]
                     )
-        
-        # Flush any remaining content buffer at the end
-        if content_buffer:
-            if in_thinking_block:
-                # Unclosed thinking block - yield as thinking (model might have been cut off)
+
+        # Flush any remaining content buffer at end of stream
+        for segment in parser.flush():
+            if segment.is_thinking:
                 if self.state != AgentState.THINKING:
                     self.state = AgentState.THINKING
-                full_reasoning += content_buffer
-                yield chunks.Thinking(content=content_buffer)
+                self._current_reasoning += segment.text
+                yield chunks.Thinking(content=segment.text)
             else:
-                # Regular content
                 if self.state != AgentState.ANSWERING:
                     self.state = AgentState.ANSWERING
-                full_content += content_buffer
-                yield chunks.Content(content=content_buffer)
-        
+                yield chunks.Content(content=segment.text)
+
         # Yield final metrics
-        if generation_start_time is not None:
-            final_duration = time.perf_counter() - generation_start_time
-            final_tokens_per_second = total_tokens / final_duration if final_duration > 0 else 0
-            yield chunks.GenerationMetrics(
-                tokens=total_tokens,
-                tokens_per_second=final_tokens_per_second,
-                ttft_ms=ttft_ms,
-                duration_ms=final_duration * 1000
-            )
+        m = metrics.final_metrics()
+        if m:
+            yield m
 
         # Reconstruct tool calls list
         tool_calls_list = []
@@ -907,27 +644,29 @@ class Harness:
                         "arguments": tc_data["function"]["arguments"]
                     }
                 })
-        
+
         # Log results
+        full_content = parser.full_content
+        full_reasoning = parser.full_reasoning
         if full_content and not tool_calls_list:
             self.debug_stream.log("RESPONSE", full_content)
         if tool_calls_list:
             self.debug_stream.log("TOOL_CALLS", tool_calls_list)
-        
-        # Log if we got NOTHING (this is abnormal and indicates a problem)
+
         if not full_content and not tool_calls_list:
             logger.warning(f"LLM returned empty response - no content and no tool calls! Received {chunk_count} chunks ({empty_chunks} empty)")
-            logger.debug(f"Total tokens received: {total_tokens}")
+            logger.debug(f"Total tokens received: {metrics.total_tokens}")
             if chunk_count <= 3:
                 logger.warning("Very few chunks received - likely server error or immediate EOF")
         else:
             logger.debug(f"LLM response: {len(full_content)} chars content, {len(tool_calls_list)} tool calls from {chunk_count} chunks")
-        
-        # Store results in instance variables for caller to access
+
+        # Store results for caller
         self._last_full_content = full_content
         self._last_full_reasoning = full_reasoning
-        self._last_detected_thinking_tag = detected_thinking_open_tag  # None means reasoning_content API path
+        self._last_detected_thinking_tag = parser.detected_open_tag  # None = reasoning_content API path
         self._last_tool_calls = tool_calls_list
+
 
     async def _execute_tool_calls(
         self, 
