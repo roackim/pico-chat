@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 import logging
 import time
@@ -791,7 +792,7 @@ class Harness:
                 func = self.tools_map[tool_name]
                 
                 # Execute normally (sync or async)
-                if asyncio.iscoroutinefunction(func.execute):
+                if inspect.iscoroutinefunction(func.execute):
                     result = await func.execute(**args)
                 else:
                     result = func.execute(**args)
