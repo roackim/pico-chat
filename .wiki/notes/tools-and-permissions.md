@@ -61,9 +61,7 @@ See [notes/security.md](./security.md) for the security layer details.
 
 ## Iteration Tools (`iteration_tools.py`)
 
-`IterationTools` provides `loop`, `loop_next`, `loop_itr_done`, and `loop_abort` — used for multi-step processing over a list of items (e.g., processing multiple files). The LLM drives the loop by calling `loop_next` to advance and `loop_itr_done` to signal completion.
-
-**Note:** These tools are **no longer registered** in `create_toolset()` and are effectively dead code. Kept for potential future use.
+**Removed.** Previously provided `loop`, `loop_next`, `loop_itr_done` — was dead code and has been deleted.
 
 ## Subagent Tools (`tool_wrappers.py`)
 

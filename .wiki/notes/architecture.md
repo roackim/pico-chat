@@ -64,5 +64,32 @@ User types → InputComponent
 
 - **Custom TUI** — no curses or third-party TUI library; full control over rendering pipeline
 - **Streaming-first** — LLM output streams token-by-token to the buffer; no waiting for full response
-- **Permission gate** — every tool call goes through `ToolPermissionsProfile` before execution; the UI can pause to ask the user
+- **Permission gate** — every tool call goes through `PermissionGate` then `ToolPermissionsProfile` before execution; the UI can pause to ask the user
 - **Stateless tools** — tools are pure functions; harness owns all state
+- **Service layer** — server management and OpenRouter API calls are in `harness/server_service.py`; UI commands are thin adapters
+- **Thinking-tag parsing** — the thinking-tag state machine is in `harness/thinking_parser.py` for testability; handles both `<think>`/`</think>` and `<thinking>`/`</thinking>` across chunk boundaries;
+
+## Module Relationships
+
+```
+pico_chat/
+  harness/
+    harness.py           ← Orchestrator (delegates to modules below)
+    permission_gate.py   ← Tool permission checking + user-response queue
+    thinking_parser.py   ← Thinking-tag state machine + metrics emission
+    server_service.py    ← Server config CRUD + OpenRouter API (used by commands.py)
+    tool_wrappers.py     ← Tool → OpenAI schema adapters
+    tools.py             ← Tool implementations (read/write/patch/run/search)
+    tool_permissions.py  ← Permission profiles
+    security.py          ← SecurityChecker (chain + dangerous pattern detection)
+    llm_server.py        ← LLMServer ABC + concrete impls (llama.cpp, OpenRouter, OpenAI)
+    llm_server_config.py ← LLMServerConfig dataclass + config loading
+    ...
+
+  ui/
+    commands.py          ← Slash commands (thin UI adapters)
+    chat_action_handlers.py
+    app.py               ← Main TUI class
+    tui/
+      ...
+```

@@ -48,14 +48,12 @@ Slash command system.
 - Commands with sub-operations pass a `subcommands` dict to the constructor (e.g. `ServerCommand`)
 - Commands starting with `_` are hidden from `/help`
 - Registered commands: `help`, `clear`, `compact`, `exit`, `stop`, `resume`, `prefill`, `status`, `server`, `tools`, `debug`, `permissions`, `openrouter`, `cd`, `pwd`
+- Server management commands (`ServerAddCommand`, `ServerUseCommand`, etc.) delegate to `harness/server_service.py` — they are thin UI adapters that format and display results
 - See [notes/ui.md](../notes/ui.md) for how to add a new command.
 
 ### `logging_handlers.py`
 `TuiLogHandler` — Python `logging.Handler` that routes log records to the debug panel.
 Filters out high-volume noise from known verbose loggers.
-
-### `legacy_markdown_rendering.py`
-**Dead code.** Previous markdown renderer, disabled. Kept as reference. Do not modify or import.
 
 ---
 

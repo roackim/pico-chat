@@ -46,7 +46,8 @@ The `ui_` prefix is applied automatically: a TOML key `theme` under `[ui]` maps 
 - `config.get_active_server_config()` — returns the active server's raw dict, or `None`
 
 **General:**
-- `config.render_thinking` — whether to show `<think>` blocks- `config.preserve_reasoning_traces` — preserve `  thinking...  response` in history for multi-turn reasoning- `config.max_file_size`, `config.max_search_results`, `config.command_timeout`
+- `config.preserve_reasoning_traces` — preserve `<think>` tags and `reasoning_content` in history for multi-turn reasoning
+- `config.max_file_size`, `config.max_search_results`, `config.command_timeout`
 - `config.context_format` — `"tree"` or `"flat"` for context injection
 - `config.target_fps` — compositor render rate
 - `config.subagent_max_depth`, `config.subagent_timeout`, `config.subagent_max_context`, `config.subagent_server` — subagent limits (see [subagents.md](./subagents.md))
@@ -70,7 +71,6 @@ All other settings are read-only at runtime — no save mechanism exists for UI 
 
 ### Known gaps / unplugged settings
 
-- `config.log_file` — defined but not used (`TODO PLUG` in source)
 - `config.ui_box_style_focused` — defined but not wired up to any renderer
 
 ---
@@ -81,11 +81,10 @@ All other settings are read-only at runtime — no save mechanism exists for UI 
 
 Permission policies (`ALLOW` / `ASK` / `DENY`) for tool operations are a separate system, not stored in the TOML file and not part of `Config`. They live in `tool_permissions.py` as a standalone `permissions` object.
 
-`Config.get_permission(tool, is_inside_repo)` acts as a **bridge**: it dynamically imports `tool_permissions` and delegates to it. The dynamic import exists to avoid a circular import between `pico_cfg` and `harness`.
+Permission checking is handled by `PermissionGate` (`harness/permission_gate.py`), which owns the user-response queue and delegates to `ToolPermissionsProfile`.
 
 In practice this means:
 - Permission policies cannot be set via `config.toml`
-- `pico_cfg.config.get_permission()` is the only public API for querying permissions from outside the harness
 - For permission architecture details, see [notes/security.md](./security.md) and [notes/tools-and-permissions.md](./tools-and-permissions.md)
 
 ---

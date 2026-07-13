@@ -134,6 +134,8 @@ Each action has a keyboard shortcut key and a label displayed in the box border:
 
 Slash commands typed by the user (e.g. `/server`, `/status`, `/tools`, `/help`).
 
+Server management commands (`ServerAddCommand`, `ServerUseCommand`, etc.) are thin UI adapters — all business logic lives in `harness/server_service.py`. The commands call the service and render the results.
+
 ### Registered Commands
 
 `help`, `clear`, `compact`, `exit`, `stop`, `resume`, `prefill`, `status`, `server`, `tools`, `debug`, `permissions`, `openrouter`, `cd`, `pwd`

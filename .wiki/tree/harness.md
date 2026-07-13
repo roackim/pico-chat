@@ -1,6 +1,8 @@
 # pico_chat/harness/ — LLM Agent Core
 
-The agent backbone. Manages the LLM conversation loop, tool execution, security checks, context construction, and memory.
+The agent backbone. Manages the LLM conversation loop, tool execution, security checks, context construction, and server management.
+
+Key internal modules: `permission_gate.py` (permission checking), `thinking_parser.py` (thinking-tag state machine), `server_service.py` (server config operations). The `Harness` class in `harness.py` delegates to these.
 
 See [notes/architecture.md](../notes/architecture.md), [notes/tools-and-permissions.md](../notes/tools-and-permissions.md), and [notes/reasoning-traces.md](../notes/reasoning-traces.md) for conceptual details.
 
@@ -11,12 +13,33 @@ See [notes/architecture.md](../notes/architecture.md), [notes/tools-and-permissi
 ### `harness.py`
 `Harness` — main class. Owns the agent state machine and conversation history.
 - `chat(user_input)` — async generator; full agent turn (stream → handle tool calls)
-- `abort_subagents()` — signals the abort event to cancel waiting background subagents
-- `_check_tool_permission(tool, args)` — permission gate; returns `"allow"` / `"ask"` / `"deny"`
+- `_stream_llm_response()` — delegates thinking-tag parsing to `ThinkingTagParser`
+- `_execute_tool_calls()` — delegates permission checking to `PermissionGate`
 - `_auto_wait_subagents()` — drains pending background subagents after the main loop ends
 Key state: `AgentState` enum, message history list, active server, tool profile, `_pending_subagents` list, `_abort_subagents_event`.
 Subagents: instantiated with `depth > 0`; use the `scaffolder` permissions profile automatically.
 See [notes/subagents.md](../notes/subagents.md) for the full subagent lifecycle.
+
+### `permission_gate.py`
+`PermissionGate` — extracted from `Harness`. Encapsulates:
+- File-path inside/outside workspace resolution (deduped from 3 read/write/patch branches)
+- Permission checking against the active `ToolPermissionsProfile`
+- Permission prompt building (`build_prompt()`)
+- Async user-response queue for interactive prompts
+
+### `thinking_parser.py`
+`ThinkingTagParser` — extracted from `Harness._stream_llm_response`. Handles two input paths:
+- `reasoning_content` API field (DeepSeek/R1 style) — yielded directly
+- Inline `<thinking>`/`</thinking>` and `<think>`/`</think>` tags — state machine splits content into thinking/content segments across chunk boundaries
+`MetricsState` — periodic `GenerationMetrics` emission helper.
+
+### `server_service.py`
+`ServerService` — server management operations extracted from UI commands. Returns structured result dataclasses (`ServerAddResult`, `ServerSwitchResult`, `ServerRemoveResult`, `ServerInfo`, `OpenRouterBalance`). Handles:
+- OpenRouter model catalog validation and connection testing
+- llama.cpp URL normalisation and connection testing
+- TOML config persistence (`set_active_server`, `save_server` dedup)
+- OpenRouter credit balance fetching
+The UI `commands.py` is now a thin adapter that calls `ServerService` and renders the results.
 
 ### `llm_server.py`
 `LLMServer` abstract base. Concrete implementations: `LlamaServer` (llama.cpp HTTP), `OpenRouterServer` (cloud API).
@@ -61,8 +84,11 @@ Global `permissions` singleton (defaults to `permissive`).
 
 ### `security.py`
 `SecurityChecker` — evaluates shell commands before execution.
-`CommandCheck` result enum: `ALLOW`, `ASK`, `DENY`.
-Detects: dangerous patterns (find -exec, awk system, sed /e, eval) and chain operators (`;`, `&&`, `||`, `|`).
+`CommandCheck` result: `ALLOW`, `ASK`, `DENY`.
+`CommandAction` — the enum behind `CommandCheck.action`.
+`parse_operators(command)` — quote-aware command chain splitting (`|`, `&&`, `||`, `;`).
+`check_command(command, permissions)` — single-command check with dangerous-pattern escalation.
+`SecurityChecker.check_chain(command)` — uses quote-aware `parse_operators` to detect chains; respects `chain_policy`.
 See [notes/security.md](../notes/security.md).
 
 ### `context_builder.py`
@@ -75,15 +101,11 @@ See [notes/security.md](../notes/security.md).
 ### `system_prompt.py`
 `get_system_message()` — returns the agent's system prompt string. Defines agent behavior, tool usage instructions, and output format rules.
 
-### `iteration_tools.py`
-`IterationTools` — `loop`, `loop_next`, `loop_itr_done`, `loop_abort` for LLM-driven multi-step iteration over item lists.
-**Note:** These tools are no longer registered in `create_toolset()` and are effectively dead code. Kept for potential future use.
-
 ### `patch_parser.py`
 `PatchBlock` — parsed representation of a search/replace block.
-`parse_patch(text)` — extracts all blocks from LLM output.
-`apply_patch(filepath, blocks)` — applies blocks to the file; strict match required.
-Format: aider-style `<<<<<<< SEARCH / ======= / >>>>>>> REPLACE`.
+`parse_patch(text)` — extracts filename, search/replace text from aider-style markers.
+`apply_patch(content, patch)` — applies a patch with 3-mode cascade: exact → whitespace-normalized → indentation-normalized.
+`PatchParseError` — raised on invalid patch format.
 
 ### `chunks.py`
 `Chunk` base class and subtypes for streaming: `MessageStart`, `TextChunk`, `ToolCallChunk`, `MessageEnd`.
