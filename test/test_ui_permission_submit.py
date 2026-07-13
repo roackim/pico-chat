@@ -6,15 +6,12 @@ from pico_chat.ui.app import chatTUI
 from pico_chat.ui.tui.msg_types import SysMsg
 from pico_chat.harness import chunks
 
-
-class _StubAgent:
-    def list_files_and_folders(self):
-        return []
+from conftest import StubAgent, make_chunk_stream
 
 
 class TestPermissionPendingSubmit:
     def test_regular_message_blocked_while_permission_pending(self):
-        ui = chatTUI(_StubAgent())
+        ui = chatTUI(StubAgent())
         ui.pending_permission_prompt = "Allow running command: rm -rf /?"
 
         ui.on_user_submit("thanks")
@@ -28,7 +25,7 @@ class TestPermissionPendingSubmit:
         assert "Permission required for pending tool call" in last_msg.base_text
 
     def test_command_allowed_while_permission_pending(self):
-        ui = chatTUI(_StubAgent())
+        ui = chatTUI(StubAgent())
         ui.pending_permission_prompt = "Allow reading file: secret.txt?"
 
         ui.on_user_submit("/status")
@@ -40,7 +37,7 @@ class TestPermissionPendingSubmit:
 
 class TestCommandMenuNavigation:
     def test_up_arrow_stays_in_command_menu(self):
-        ui = chatTUI(_StubAgent())
+        ui = chatTUI(StubAgent())
         ui.root = type("_Root", (), {"handle_input": lambda self, event: ui.input_component.handle_input(event)})()
         ui._original_handle_input = ui.root.handle_input
 
@@ -65,14 +62,6 @@ class TestCommandMenuNavigation:
         assert ui.input_component.command_completion.menu.selected_index != selected_before
 
 
-def _make_chunk_stream(*chunk_list):
-    """Return an async generator that yields the given chunks."""
-    async def _gen():
-        for chunk in chunk_list:
-            yield chunk
-    return _gen()
-
-
 class TestPendingPermissionPromptClearing:
     """Regression tests: pending_permission_prompt must be cleared by incoming chunks,
     not only by explicit allow/deny key presses. Without the fix, auto-denied tool calls
@@ -80,7 +69,7 @@ class TestPendingPermissionPromptClearing:
 
     def test_auto_denied_chunk_clears_pending_prompt(self):
         """DENIED chunk (auto-deny path) must clear pending_permission_prompt."""
-        ui = chatTUI(_StubAgent())
+        ui = chatTUI(StubAgent())
         ui.pending_permission_prompt = "Allow running: sudo rm -rf /?"
 
         denied_chunk = chunks.ToolStatusChange(
@@ -97,7 +86,7 @@ class TestPendingPermissionPromptClearing:
                 pass
 
         # Patch agent.chat to yield the DENIED chunk then stop
-        ui.agent.chat = lambda _: _make_chunk_stream(denied_chunk)
+        ui.agent.chat = lambda _: make_chunk_stream(denied_chunk)
         asyncio.run(ui._process_generation("hello", ui.chat_history_panel.add_message("hello")))
 
         assert ui.pending_permission_prompt is None, (
@@ -106,7 +95,7 @@ class TestPendingPermissionPromptClearing:
 
     def test_auto_approved_chunk_clears_pending_prompt(self):
         """APPROVED chunk must clear pending_permission_prompt (covers auto-approve)."""
-        ui = chatTUI(_StubAgent())
+        ui = chatTUI(StubAgent())
         ui.pending_permission_prompt = "Allow reading: secrets.txt?"
 
         approved_chunk = chunks.ToolStatusChange(
@@ -117,7 +106,7 @@ class TestPendingPermissionPromptClearing:
             auto_decision=True,
         )
 
-        ui.agent.chat = lambda _: _make_chunk_stream(approved_chunk)
+        ui.agent.chat = lambda _: make_chunk_stream(approved_chunk)
         asyncio.run(ui._process_generation("hello", ui.chat_history_panel.add_message("hello")))
 
         assert ui.pending_permission_prompt is None, (
@@ -126,7 +115,7 @@ class TestPendingPermissionPromptClearing:
 
     def test_message_not_blocked_after_auto_denial(self):
         """After auto-denial clears the flag, subsequent messages must not be blocked."""
-        ui = chatTUI(_StubAgent())
+        ui = chatTUI(StubAgent())
         ui.pending_permission_prompt = "Allow running: sudo rm -rf /?"
 
         denied_chunk = chunks.ToolStatusChange(
@@ -138,7 +127,7 @@ class TestPendingPermissionPromptClearing:
             denial_reason="Auto-denied by security policy",
         )
 
-        ui.agent.chat = lambda _: _make_chunk_stream(denied_chunk)
+        ui.agent.chat = lambda _: make_chunk_stream(denied_chunk)
         asyncio.run(ui._process_generation("hello", ui.chat_history_panel.add_message("hello")))
 
         # Now submit a follow-up message – it must NOT be blocked

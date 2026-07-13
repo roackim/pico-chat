@@ -241,11 +241,17 @@ class SecurityChecker:
             - allowed: True if entire chain is safe to execute
             - message: Feedback message for the LLM
         """
-        # Simplified chain detection: if any operators exist anywhere (even in strings),
-        # consider it a chain and check chain_policy
-        has_operators = any(op in command for op in ['|', '&&', '||', ';'])
+        # Quote-aware chain detection: parse_operators respects quotes,
+        # so operators inside quoted strings (e.g. echo "a|b") are not
+        # treated as chain separators.
+        commands = parse_operators(command)
         
-        if has_operators:
+        if not commands:
+            return False, "Empty command"
+        
+        is_chain = len(commands) > 1
+        
+        if is_chain:
             # Treat as chain - check chain_policy
             if self.permissions.chain_policy == "deny":
                 return False, f"[ERROR] Command chains are blocked by policy"
@@ -256,12 +262,6 @@ class SecurityChecker:
                         return False, f"[DENIED] User denied command chain"
                 else:
                     return False, f"[DENIED] Command chain requires confirmation (no confirmation mechanism available)"
-        
-        # Parse into individual commands for single-command checks
-        commands = parse_operators(command)
-        
-        if not commands:
-            return False, "Empty command"
         
         # Check each command individually
         denied = []
@@ -291,5 +291,3 @@ class SecurityChecker:
         
         # All checks passed
         return True, f"[OK] Command validated ({len(commands)} command(s))"
-
-# TODO: rework message passing with proper status, like return status, str

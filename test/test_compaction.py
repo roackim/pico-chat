@@ -4,51 +4,8 @@ from pico_chat.harness.harness import Harness, COMPACTION_MARKER_PREFIX
 from pico_chat.harness.llm_status import AgentState
 
 
-class _NoopDebugStream:
-    def log(self, *args, **kwargs):
-        pass
-
-
-class _FakeServer:
-    def __init__(self):
-        self.last_messages = None
-
-    async def get_model_name(self):
-        return "test-model"
-
-    async def get_context_window(self):
-        return 32768
-
-    async def create_completion(self, messages, tools=None, stream=True):
-        self.last_messages = messages
-
-        class _Msg:
-            content = "Decisions: keep latest thread.\nOpen Tasks: continue implementation."
-
-        class _Choice:
-            message = _Msg()
-
-        class _Resp:
-            choices = [_Choice()]
-
-        yield _Resp()
-
-
-def _build_harness_stub():
-    harness = Harness.__new__(Harness)
-    harness.debug_stream = _NoopDebugStream()
-    harness.state = AgentState.IDLE
-    harness.history = []
-    harness.memory = {}
-    harness.memory_snapshots = {}
-    harness.workspace = "."
-    harness.project_context = "Project Root: .\nFiles:"
-    harness.server = _FakeServer()
-    return harness
-
-
-def test_effective_history_starts_from_last_compaction_marker():
-    harness = _build_harness_stub()
+def test_effective_history_starts_from_last_compaction_marker(harness_stub_compaction):
+    harness = harness_stub_compaction
     harness.history = [
         {"id": "u1", "role": "user", "content": "first"},
         {"id": "a1", "role": "assistant", "content": "first answer"},
@@ -61,8 +18,8 @@ def test_effective_history_starts_from_last_compaction_marker():
     assert [m["id"] for m in effective] == ["c1", "u2"]
 
 
-def test_compact_history_inserts_new_marker_and_becomes_effective_start():
-    harness = _build_harness_stub()
+def test_compact_history_inserts_new_marker_and_becomes_effective_start(harness_stub_compaction):
+    harness = harness_stub_compaction
     harness.history = [
         {"id": "u1", "role": "user", "content": "first"},
         {"id": "a1", "role": "assistant", "content": "first answer"},
@@ -80,8 +37,8 @@ def test_compact_history_inserts_new_marker_and_becomes_effective_start():
     assert effective[0]["id"] == result["message_id"]
 
 
-def test_deleting_compaction_marker_restores_full_history_behavior():
-    harness = _build_harness_stub()
+def test_deleting_compaction_marker_restores_full_history_behavior(harness_stub_compaction):
+    harness = harness_stub_compaction
     harness.history = [
         {"id": "u1", "role": "user", "content": "first"},
         {"id": "c1", "role": "assistant", "content": f"{COMPACTION_MARKER_PREFIX}\ncompacted_messages=1\noriginal_tokens=50\n\nsummary"},
@@ -96,8 +53,8 @@ def test_deleting_compaction_marker_restores_full_history_behavior():
     assert [m["id"] for m in effective] == ["u1", "u2"]
 
 
-def test_compact_history_summary_call_has_single_system_message_first():
-    harness = _build_harness_stub()
+def test_compact_history_summary_call_has_single_system_message_first(harness_stub_compaction):
+    harness = harness_stub_compaction
     harness.history = [
         {"id": "u1", "role": "user", "content": "first"},
         {"id": "a1", "role": "assistant", "content": "first answer"},

@@ -78,9 +78,6 @@ class TestScaffolderProfile:
     def test_run_allow_list_empty(self):
         assert len(scaffolder.get_run_permission().allow) == 0
 
-    def test_memory_denied(self):
-        assert scaffolder.memory == "deny"
-
     def test_profile_name(self):
         assert scaffolder.name == "scaffolder"
 

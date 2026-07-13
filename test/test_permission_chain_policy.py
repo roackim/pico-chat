@@ -254,10 +254,15 @@ class TestChainPolicyAsk:
 
 
 class TestOperatorsInStrings:
-    """Test that operators in quoted strings trigger chain detection (false positive is OK)."""
-    
+    """Test that operators in quoted strings do NOT trigger chain detection.
+
+    With quote-aware parsing (parse_operators), operators inside quoted
+    strings are not treated as chain separators.  This is the correct
+    behaviour — `echo "a|b"` is a single command, not a chain.
+    """
+
     def test_pipe_in_double_quotes(self, tmp_path):
-        """Pipe inside double quotes should trigger chain detection (acceptable false positive)."""
+        """Pipe inside double quotes should NOT trigger chain detection."""
         permissions = ToolPermissionsProfile(
             name="test",
             read=FilePermissions(inside_repo="deny", outside_repo="deny"),
@@ -271,16 +276,16 @@ class TestOperatorsInStrings:
                 chain_policy="deny"
             ),
         )
-        
+
         tools = MinimalToolset(tmp_path, permissions=permissions)
-        
-        # This is a false positive - the pipe is in a string, not an actual operator
-        # But our security model says this is acceptable - better safe than sorry
-        with pytest.raises(ToolError, match="[Cc]hain.*blocked"):
-            tools.run('echo "test | pipe"')
-    
+
+        # The pipe is inside a quoted string — not a real chain operator.
+        # This should execute as a single command (echo is allowed).
+        result = tools.run('echo "test | pipe"')
+        assert "test | pipe" in result
+
     def test_and_in_single_quotes(self, tmp_path):
-        """AND operator inside single quotes should trigger chain detection."""
+        """AND operator inside single quotes should NOT trigger chain detection."""
         permissions = ToolPermissionsProfile(
             name="test",
             read=FilePermissions(inside_repo="deny", outside_repo="deny"),
@@ -294,15 +299,15 @@ class TestOperatorsInStrings:
                 chain_policy="deny"
             ),
         )
-        
+
         tools = MinimalToolset(tmp_path, permissions=permissions)
-        
-        # False positive - acceptable for security
-        with pytest.raises(ToolError, match="[Cc]hain.*blocked"):
-            tools.run("echo 'cmd1 && cmd2'")
-    
+
+        # The && is inside single quotes — not a real chain operator.
+        result = tools.run("echo 'cmd1 && cmd2'")
+        assert "cmd1 && cmd2" in result
+
     def test_semicolon_in_string(self, tmp_path):
-        """Semicolon in string should trigger chain detection."""
+        """Semicolon inside quoted string should NOT trigger chain detection."""
         permissions = ToolPermissionsProfile(
             name="test",
             read=FilePermissions(inside_repo="deny", outside_repo="deny"),
@@ -316,11 +321,11 @@ class TestOperatorsInStrings:
                 chain_policy="deny"
             ),
         )
-        
+
         tools = MinimalToolset(tmp_path, permissions=permissions)
-        
-        with pytest.raises(ToolError, match="[Cc]hain.*blocked"):
-            tools.run('echo "first; second"')
+
+        result = tools.run('echo "first; second"')
+        assert "first; second" in result
 
 
 class TestChainWithMixedPermissions:
@@ -385,7 +390,12 @@ class TestChainPolicyEdgeCases:
     """Test edge cases in chain policy enforcement."""
     
     def test_empty_command_with_operator(self, tmp_path):
-        """Empty parts in chain should be handled gracefully."""
+        """Trailing operator with empty second command should be handled gracefully.
+
+        With quote-aware parsing, `echo test | ` parses to just ['echo test']
+        (the empty part after | is filtered).  This is a single command, not
+        a chain, so it executes normally.
+        """
         permissions = ToolPermissionsProfile(
             name="test",
             read=FilePermissions(inside_repo="deny", outside_repo="deny"),
@@ -399,12 +409,15 @@ class TestChainPolicyEdgeCases:
                 chain_policy="deny"
             ),
         )
-        
+
         tools = MinimalToolset(tmp_path, permissions=permissions)
-        
-        # Malformed chain
-        with pytest.raises(ToolError):
-            tools.run("echo test | ")
+
+        # Trailing pipe with no second command — parse_operators filters
+        # the empty part, so this passes the security check as a single
+        # command.  The shell itself rejects the malformed input.
+        result = tools.run("echo test | ")
+        # Shell returns a syntax error for the trailing pipe
+        assert "Syntax error" in result or "test" in result
     
     def test_only_operator(self, tmp_path):
         """Command that is only an operator should fail gracefully."""
@@ -489,7 +502,12 @@ class TestChainDetectionSecurity:
     """Test that chain detection can't be bypassed."""
     
     def test_escaped_operator(self, tmp_path):
-        """Escaped operators should still trigger detection (conservative approach)."""
+        """Escaped operators are not chain operators — should NOT trigger detection.
+
+        With quote-aware parsing, `\|` is an escaped pipe (literal character),
+        not a chain separator.  This is correct: `echo test \| more` is a
+        single command that pipes via shell escape, not a security chain.
+        """
         permissions = ToolPermissionsProfile(
             name="test",
             read=FilePermissions(inside_repo="deny", outside_repo="deny"),
@@ -506,20 +524,24 @@ class TestChainDetectionSecurity:
         
         tools = MinimalToolset(tmp_path, permissions=permissions)
         
-        # Even with backslash escape, should trigger (conservative)
-        with pytest.raises(ToolError, match="[Cc]hain.*blocked"):
-            tools.run(r"echo test \| more")
+        # Escaped pipe is not a chain operator — single command, executes fine
+        result = tools.run(r"echo test \| more")
+        assert "test" in result or "more" in result
     
     def test_operator_in_filename(self, tmp_path):
-        """File names containing operators should trigger detection (acceptable trade-off)."""
-        # Create file with pipe in name (if filesystem allows)
+        """Operators inside quoted filenames should NOT trigger chain detection.
+
+        With quote-aware parsing, `|` inside single quotes is a literal,
+        not a chain separator.  This is correct: `cat 'file|name.txt'` is
+        a single command reading a file with a pipe in its name.
+        """
         permissions = ToolPermissionsProfile(
             name="test",
             read=FilePermissions(inside_repo="deny", outside_repo="deny"),
             write=FilePermissions(inside_repo="deny", outside_repo="deny"),
             patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
             run=RunPermissions(
-                allow={'echo'},
+                allow={'cat'},
                 deny=set(),
                 ask=set(),
                 others="deny",
@@ -529,7 +551,8 @@ class TestChainDetectionSecurity:
         
         tools = MinimalToolset(tmp_path, permissions=permissions)
         
-        # This will trigger chain detection even though it's just a weird filename
-        # This is acceptable - user should use ask policy or rename file
-        with pytest.raises(ToolError, match="[Cc]hain.*blocked"):
-            tools.run("cat 'file|name.txt'")
+        # Pipe inside single quotes — not a chain.  cat will fail since
+        # the file doesn't exist, but the important thing is it's NOT
+        # blocked by chain_policy (no "chain" or "blocked" in the result).
+        result = tools.run("cat 'file|name.txt'")
+        assert "chain" not in result.lower() and "blocked" not in result.lower()

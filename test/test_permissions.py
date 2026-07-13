@@ -19,6 +19,21 @@ from pico_chat.harness.tool_permissions import (
 )
 import pico_chat.harness.tool_permissions as tool_permissions_module
 
+# Shared test helpers (from conftest)
+from conftest import NoopDebugStream, StubReadTool, run_harness_tool_call
+
+
+def _build_harness_stub(tmp_path, read_tool):
+    harness = Harness.__new__(Harness)
+    harness.debug_stream = NoopDebugStream()
+    harness.state = AgentState.IDLE
+    harness.history = []
+    harness.workspace = str(tmp_path)
+    harness.tools_map = {"read": read_tool}
+    harness._user_response_queue = asyncio.Queue()
+    harness._tool_permissions = None
+    return harness
+
 
 class TestReadPermissions:
     """Test read permission enforcement."""
@@ -134,47 +149,6 @@ class TestReadPermissions:
         assert tools.read("test.txt") == "content"
 
 
-class _NoopDebugStream:
-    def log(self, *args, **kwargs):
-        return None
-
-
-class _StubReadTool:
-    def __init__(self, result: str = "ok"):
-        self.result = result
-        self.called = False
-
-    def execute(self, **kwargs):
-        self.called = True
-        return self.result
-
-
-def _run_harness_tool_call(harness: Harness, tool_call: dict):
-    async def _collect():
-        messages = []
-        events = []
-        async for event in harness._execute_tool_calls([tool_call], messages):
-            events.append(event)
-        return events, messages
-
-    return asyncio.run(_collect())
-
-
-def _build_harness_stub(tmp_path, read_tool):
-    harness = Harness.__new__(Harness)
-    harness.debug_stream = _NoopDebugStream()
-    harness.state = AgentState.IDLE
-    harness.history = []
-    harness.memory = {}
-    harness.memory_snapshots = {}
-    harness.workspace = str(tmp_path)
-    harness.tools_map = {"read": read_tool}
-    harness._user_response_queue = asyncio.Queue()
-    harness._tool_permissions = None
-    harness.tool_output_history = []
-    return harness
-
-
 class TestHarnessReadPermissionFlow:
     """Test read permission ask/allow/deny through harness execution path."""
 
@@ -188,7 +162,7 @@ class TestHarnessReadPermissionFlow:
         )
         monkeypatch.setattr(tool_permissions_module, "permissions", profile)
 
-        read_tool = _StubReadTool("content")
+        read_tool = StubReadTool("content")
         harness = _build_harness_stub(tmp_path, read_tool)
         tool_call = {
             "id": "call_1",
@@ -198,7 +172,7 @@ class TestHarnessReadPermissionFlow:
             },
         }
 
-        events, messages = _run_harness_tool_call(harness, tool_call)
+        events, messages = run_harness_tool_call(harness, tool_call)
         statuses = [e.status for e in events]
 
         assert statuses == [chunks.ToolStatus.PERMISSION_REQUESTED, chunks.ToolStatus.DENIED]
@@ -221,7 +195,7 @@ class TestHarnessReadPermissionFlow:
         )
         monkeypatch.setattr(tool_permissions_module, "permissions", profile)
 
-        read_tool = _StubReadTool("content")
+        read_tool = StubReadTool("content")
         harness = _build_harness_stub(tmp_path, read_tool)
         harness.set_user_response("no")
         tool_call = {
@@ -232,7 +206,7 @@ class TestHarnessReadPermissionFlow:
             },
         }
 
-        events, messages = _run_harness_tool_call(harness, tool_call)
+        events, messages = run_harness_tool_call(harness, tool_call)
         statuses = [e.status for e in events]
 
         assert statuses == [chunks.ToolStatus.PERMISSION_REQUESTED, chunks.ToolStatus.DENIED]
@@ -255,7 +229,7 @@ class TestHarnessReadPermissionFlow:
         )
         monkeypatch.setattr(tool_permissions_module, "permissions", profile)
 
-        read_tool = _StubReadTool("stubbed content")
+        read_tool = StubReadTool("stubbed content")
         harness = _build_harness_stub(tmp_path, read_tool)
         tool_call = {
             "id": "call_3",
@@ -265,7 +239,7 @@ class TestHarnessReadPermissionFlow:
             },
         }
 
-        events, messages = _run_harness_tool_call(harness, tool_call)
+        events, messages = run_harness_tool_call(harness, tool_call)
         statuses = [e.status for e in events]
 
         assert statuses == [
@@ -715,16 +689,13 @@ class TestHarnessRunPermissionFlow:
 
         run_tool = _StubRunTool(".\n[exit:0]")
         harness = Harness.__new__(Harness)
-        harness.debug_stream = _NoopDebugStream()
+        harness.debug_stream = NoopDebugStream()
         harness.state = AgentState.IDLE
         harness.history = []
-        harness.memory = {}
-        harness.memory_snapshots = {}
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
         harness._user_response_queue = asyncio.Queue()
         harness._tool_permissions = None
-        harness.tool_output_history = []
         
         tool_call = {
             "id": "call_1",
@@ -734,7 +705,7 @@ class TestHarnessRunPermissionFlow:
             },
         }
 
-        events, messages = _run_harness_tool_call(harness, tool_call)
+        events, messages = run_harness_tool_call(harness, tool_call)
         statuses = [e.status for e in events]
 
         # Should auto-approve and execute
@@ -768,16 +739,13 @@ class TestHarnessRunPermissionFlow:
 
         run_tool = _StubRunTool("[exit:0]")
         harness = Harness.__new__(Harness)
-        harness.debug_stream = _NoopDebugStream()
+        harness.debug_stream = NoopDebugStream()
         harness.state = AgentState.IDLE
         harness.history = []
-        harness.memory = {}
-        harness.memory_snapshots = {}
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
         harness._user_response_queue = asyncio.Queue()
         harness._tool_permissions = None
-        harness.tool_output_history = []
         harness.set_user_response("yes")
         
         tool_call = {
@@ -788,7 +756,7 @@ class TestHarnessRunPermissionFlow:
             },
         }
 
-        events, messages = _run_harness_tool_call(harness, tool_call)
+        events, messages = run_harness_tool_call(harness, tool_call)
         statuses = [e.status for e in events]
 
         # Should ask user (dangerous pattern detected)
@@ -821,16 +789,13 @@ class TestHarnessRunPermissionFlow:
 
         run_tool = _StubRunTool("[exit:0]")
         harness = Harness.__new__(Harness)
-        harness.debug_stream = _NoopDebugStream()
+        harness.debug_stream = NoopDebugStream()
         harness.state = AgentState.IDLE
         harness.history = []
-        harness.memory = {}
-        harness.memory_snapshots = {}
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
         harness._user_response_queue = asyncio.Queue()
         harness._tool_permissions = None
-        harness.tool_output_history = []
         harness.set_user_response("allow")
         
         tool_call = {
@@ -841,7 +806,7 @@ class TestHarnessRunPermissionFlow:
             },
         }
 
-        events, messages = _run_harness_tool_call(harness, tool_call)
+        events, messages = run_harness_tool_call(harness, tool_call)
         statuses = [e.status for e in events]
 
         # Should ask user (git in ASK list)
@@ -874,16 +839,13 @@ class TestHarnessRunPermissionFlow:
 
         run_tool = _StubRunTool("[exit:0]")
         harness = Harness.__new__(Harness)
-        harness.debug_stream = _NoopDebugStream()
+        harness.debug_stream = NoopDebugStream()
         harness.state = AgentState.IDLE
         harness.history = []
-        harness.memory = {}
-        harness.memory_snapshots = {}
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
         harness._user_response_queue = asyncio.Queue()
         harness._tool_permissions = None
-        harness.tool_output_history = []
         
         tool_call = {
             "id": "call_4",
@@ -893,7 +855,7 @@ class TestHarnessRunPermissionFlow:
             },
         }
 
-        events, messages = _run_harness_tool_call(harness, tool_call)
+        events, messages = run_harness_tool_call(harness, tool_call)
         statuses = [e.status for e in events]
 
         # Should auto-deny
@@ -926,16 +888,13 @@ class TestHarnessRunPermissionFlow:
 
         run_tool = _StubRunTool("[exit:0]")
         harness = Harness.__new__(Harness)
-        harness.debug_stream = _NoopDebugStream()
+        harness.debug_stream = NoopDebugStream()
         harness.state = AgentState.IDLE
         harness.history = []
-        harness.memory = {}
-        harness.memory_snapshots = {}
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
         harness._user_response_queue = asyncio.Queue()
         harness._tool_permissions = None
-        harness.tool_output_history = []
         harness.set_user_response("no")
         
         tool_call = {
@@ -946,7 +905,7 @@ class TestHarnessRunPermissionFlow:
             },
         }
 
-        events, messages = _run_harness_tool_call(harness, tool_call)
+        events, messages = run_harness_tool_call(harness, tool_call)
         statuses = [e.status for e in events]
 
         # Should ask user, then deny
@@ -980,16 +939,13 @@ class TestHarnessRunPermissionFlow:
 
         run_tool = _StubRunTool("[exit:0]")
         harness = Harness.__new__(Harness)
-        harness.debug_stream = _NoopDebugStream()
+        harness.debug_stream = NoopDebugStream()
         harness.state = AgentState.IDLE
         harness.history = []
-        harness.memory = {}
-        harness.memory_snapshots = {}
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
         harness._user_response_queue = asyncio.Queue()
         harness._tool_permissions = None
-        harness.tool_output_history = []
         harness.set_user_response("yes")
         
         tool_call = {
@@ -1000,7 +956,7 @@ class TestHarnessRunPermissionFlow:
             },
         }
 
-        events, messages = _run_harness_tool_call(harness, tool_call)
+        events, messages = run_harness_tool_call(harness, tool_call)
         statuses = [e.status for e in events]
 
         # Should ask user (chain detected)
