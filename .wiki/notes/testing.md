@@ -21,11 +21,9 @@ pytest test/test_permissions.py
 | `test_benign_dangerous_commands.py` | Safe usages of commands that superficially match dangerous patterns |
 | `test_permission_chain_policy.py` | Chain operator detection (`;`, `&&`, `\|\|`, `\|`) and chain_policy enforcement |
 | `test_containerization.py` | bwrap (bubblewrap) sandboxing and command isolation |
-| `test_security.py` | General security checker behavior |
 | `test_buffer.py` | `Buffer`/`SubBuffer` rendering (cell operations, ANSI clipping, text writing) |
 | `test_compaction.py` | Conversation history compaction (summarization via LLM) |
 | `test_context_builder.py` | Git repo detection, file tree building guardrails |
-| `test_memory_visibility.py` | Memory isolation — old turn memories not visible to new context |
 | `test_token_estimation.py` | Heuristic token counting (code ratio, language vs. prose) |
 | `test_token_estimation_samples.py` | Regression tests on real code/text samples |
 | `test_ui_permission_submit.py` | Input blocked while awaiting permission prompt |

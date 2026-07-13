@@ -16,7 +16,6 @@ All tests use pytest. See [notes/testing.md](../notes/testing.md) for run instru
 | `test_buffer.py` | `ui/tui/buffer.py` | Cell operations, ANSI-aware text writing, SubBuffer clipping |
 | `test_compaction.py` | `harness/harness.py` | Conversation history summarization (requires LLM backend) |
 | `test_context_builder.py` | `harness/context_builder.py` | Git root detection, file tree building guardrails |
-| `test_memory_visibility.py` | `harness/memory_tools.py`, `harness.py` | Memory isolation — old turn memories excluded from new context |
 | `test_token_estimation.py` | `harness/token_estimation.py` | Heuristic token count accuracy (code ratio, prose vs. code) |
 | `test_token_estimation_samples.py` | `harness/token_estimation.py` | Regression tests on real code/text samples |
 | `test_ui_permission_submit.py` | `ui/app.py`, `ui/tui/components/input/` | Input blocked during active permission prompt |

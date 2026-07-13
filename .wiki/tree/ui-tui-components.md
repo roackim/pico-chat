@@ -26,6 +26,9 @@ Used as base for `ChatHistoryPanel`.
 ### `box.py`
 `Box` — wraps another component with a border, optional title, and optional action buttons.
 Focus state changes border color. Actions appear as labeled buttons in the border.
+Constructor params include `compact_when_unfocused` (render without borders when unfocused) and `parent_msg` (link to owning message).
+`inline_editor` attribute — when active, replaces the child component rendering to support in-place editing (used by `ChatHistoryPanel.start_inline_edit()`).
+`_render_compact_to_subbuffer()` — compact borderless render path.
 
 ### `menu.py`
 `SelectionMenu` — floating dropdown list.
@@ -38,6 +41,16 @@ Focus state changes border color. Actions appear as labeled buttons in the borde
 - Renders a capped list of log lines
 - Max line length enforced to prevent layout breakage
 - Toggled visible/hidden in the compositor overlay stack
+
+### `markdown.py`
+Live markdown parser and renderer. Parses markdown into display lines of `StyledSegment` objects, styled via `pico_cfg.config.markdown_styles`.
+- `StyledSegment` — text + fg/bg/bold/reverse/code_block
+- Block types: `ParagraphLine`, `HeaderLine`, `CodeBlockLine`, `UnorderedListItemLine`, `OrderedListItemLine`, `QuoteLine`, `HrLine`, `EmptyLine`, `TableLine`
+- `BlockParser` — splits raw text into blocks (handles code fences, tables, lists, quotes, HR)
+- `InlineParser` — parses inline `**bold**`, `*italic*`, `` `code` ``, `[text](url)`
+- `Markdown` — high-level wrapper; `parse(text)` returns `List[List[StyledSegment]]`; `_render_table()` renders `TableLine` groups via `AsciiTable`
+- `MarkdownComponent` — `Component` subclass; re-parses on every `update()` (suitable for streaming); segment-aware word wrapping with hard-break for code blocks
+See [notes/ui.md](../notes/ui.md) for the rendering overview.
 
 ---
 

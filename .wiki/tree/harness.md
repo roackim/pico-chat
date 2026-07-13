@@ -38,6 +38,10 @@ Pure functions — no internal state. See [notes/tools-and-permissions.md](../no
 - `get_schema()` — returns function schema for the LLM
 - `execute(args)` — parses LLM args and calls the underlying tool
 
+Individual wrappers: `ReadTool`, `WriteTool`, `PatchTool`, `RunTool`, `SearchWebTool`, `SearchWikiTool`, `SubagentTool`, `WaitForSubagentsTool`.
+
+`create_toolset(depth)` — factory that builds the active tool dict. Only registers: `read`, `write`, `patch`, `run`, `search_web`, `search_wiki`, `subagent`, `wait_for_subagents`. (Iteration/memory tools are no longer registered here.)
+
 Search wrappers:
 - `SearchWebTool` — DuckDuckGo web search with rate limiting
 - `SearchWikiTool` — Wikipedia search with rate limiting
@@ -49,7 +53,10 @@ Subagent wrappers:
 
 ### `tool_permissions.py`
 `ToolPermissionsProfile` — per-tool policy configuration (`ALLOW` / `ASK` / `DENY`).
-Permission constants and chain policy definitions.
+`Permission` Literal type; `FilePermissions` and `RunPermissions` dataclasses.
+`CMD_DEFAULT_ALLOW` / `CMD_DEFAULT_ASK` / `CMD_DEFAULT_DENY` — command classification sets.
+Predefined profiles: `strict`, `permissive`, `unrestricted`, `locked`, `TESTING`, `scaffolder`.
+Global `permissions` singleton (defaults to `permissive`).
 `get_search_permission()` — returns search operation policy (default: `ALLOW` in permissive/scaffolder profiles).
 
 ### `security.py`
@@ -62,17 +69,15 @@ See [notes/security.md](../notes/security.md).
 `build_harness_context()` — constructs the context injected alongside the system prompt.
 - Detects git repo root
 - Builds file tree (with guardrails to avoid huge trees)
+- Injects current date and time
 - Returns structured context string
 
 ### `system_prompt.py`
 `get_system_message()` — returns the agent's system prompt string. Defines agent behavior, tool usage instructions, and output format rules.
 
-### `memory_tools.py`
-`MemoryTools` — `memorize(key, value)` and `forget(key)`.
-Memories are stored in the `Harness` instance and injected into the system prompt context on each turn.
-
 ### `iteration_tools.py`
-`IterationTools` — loop/loop_next/loop_itr_done tools for LLM-driven multi-step iteration over item lists.
+`IterationTools` — `loop`, `loop_next`, `loop_itr_done`, `loop_abort` for LLM-driven multi-step iteration over item lists.
+**Note:** These tools are no longer registered in `create_toolset()` and are effectively dead code. Kept for potential future use.
 
 ### `patch_parser.py`
 `PatchBlock` — parsed representation of a search/replace block.

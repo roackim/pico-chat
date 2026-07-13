@@ -41,6 +41,7 @@ Key components:
 - `SelectionMenu` — floating dropdown with fuzzy filtering
 - `InputComponent` — multi-line editor (see below)
 - `DebugLogPanel` — scrolling log display
+- `MarkdownComponent` — live markdown renderer (see [Markdown Rendering](#markdown-rendering) below)
 
 ## Input Component (`tui/components/input/`)
 
@@ -69,15 +70,15 @@ Every message displayed in the chat history has a `MsgType` that controls its ti
 | Class | Title | Frame Color | Actions |
 |-------|-------|-------------|---------|
 | `MsgType` | *(base)* | DEFAULT | none |
-| `UserMsg` | "user" | USER | COPY, EDIT |
-| `PicoMsg` | "pico" | PICO | COPY, RETRY, STOP (→DELETE after finalize) |
-| `ThinkingMsg` | "thinking" | MUTED | COPY, RETRY, DELETE, STOP |
+| `UserMsg` | "user" | USER | COPY, EDIT, DELETE, STEER |
+| `PicoMsg` | "pico" | PICO | COPY, EDIT, RETRY, STOP (→DELETE after finalize), PAUSE, RESUME |
+| `ThinkingMsg` | "thinking" | MUTED | COPY, EDIT, RETRY, DELETE, STOP, PAUSE, RESUME |
 | `SysMsg` | "system" | MUTED | COPY, DELETE |
 | `SysMsgError` | "error" | ERROR | COPY, EDIT, DELETE |
 | `SysMsgWarning` | "warning" | WARNING | COPY, DELETE |
 | `ToolCallMsg` | "tool" | WARNING | OUTPUT, COPY, DELETE |
 | `ToolDraftMsg` | "tool" | MUTED | none |
-| `AskPermissionMsg` | "permission" | WARNING | ALLOW, DENY, COPY |
+| `AskPermissionMsg` | "permission" | WARNING | ALLOW, DENY, OUTPUT, COPY |
 
 `ThinkingMsg` and `SysMsgError/Warning` extend `PicoMsg` / `SysMsg` — they inherit defaults and override only what differs.
 
@@ -95,6 +96,9 @@ Each action has a keyboard shortcut key and a label displayed in the box border:
 | `ALLOW` | `a` | allow |
 | `DENY` | `x` | deny |
 | `OUTPUT` | `o` | output |
+| `STEER` | `t` | steer |
+| `PAUSE` | `p` | pause |
+| `RESUME` | `u` | resume |
 
 ### How to Add a New Message Type
 
@@ -129,6 +133,10 @@ Each action has a keyboard shortcut key and a label displayed in the box border:
 ## Commands (`commands.py`)
 
 Slash commands typed by the user (e.g. `/server`, `/status`, `/tools`, `/help`).
+
+### Registered Commands
+
+`help`, `clear`, `compact`, `exit`, `stop`, `resume`, `prefill`, `status`, `server`, `tools`, `debug`, `permissions`, `openrouter`, `cd`, `pwd`
 
 ### Structure
 
@@ -184,3 +192,29 @@ Prefix the name with `_` (e.g. `"_internal"`). `HelpCommand` skips names startin
 - `tui/colors.py` — `RGB` class, theme dictionary, hex parsing
 - `tui/layout_utils.py` — `wrap_text()`, `display_width()` (wcwidth-aware for Unicode), `strip_ansi()`
 - `tui/container.py` — `Vsplit`/`Hsplit` layout with int, float (%), and string size units
+
+## Markdown Rendering
+
+Live markdown rendering for chat messages, added to support streaming output with rich formatting.
+
+### Modules
+
+- `tui/components/markdown.py` — parser + `MarkdownComponent` (re-parses on every `update()`, suitable for streaming)
+- `tui/ascii_table.py` — `AsciiTable` renders markdown tables with squared-style borders
+- `tui/syntax_highlight.py` — `highlight_line(line, lang)` tokenises code blocks for coloring
+
+### Pipeline
+
+1. `BlockParser` splits raw text into blocks (paragraphs, headers, code fences, lists, quotes, HR, tables)
+2. `InlineParser` parses inline `**bold**`, `*italic*`, `` `code` ``, `[text](url)`
+3. `Markdown.parse()` returns `List[List[StyledSegment]]` (display lines)
+4. `MarkdownComponent` wraps lines to the component width (word-wrap for prose, hard-break for code blocks/tables)
+5. `render()` writes styled segments to the buffer
+
+### Styling
+
+Styles are driven by `pico_cfg.config.markdown_styles` (see [config.md](./config.md)). Each element (`header1`–`header6`, `bold`, `italic`, `code`, `code_block`, `quote`, `list`, `hr`, `table`, `link`, `paragraph`) maps to `fg`/`bg`/`bold`/`reverse`.
+
+### Tables
+
+Markdown tables (`| ... | ... |` with a `---` separator row) are detected by `BlockParser`, grouped into `TableLine` runs, and rendered via `AsciiTable` with the `squared` style. Table lines are rendered with `code_block=True` so the wrapper hard-breaks instead of word-wrapping, preserving column alignment.

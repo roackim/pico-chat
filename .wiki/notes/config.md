@@ -49,6 +49,7 @@ The `ui_` prefix is applied automatically: a TOML key `theme` under `[ui]` maps 
 - `config.render_thinking` — whether to show `<think>` blocks- `config.preserve_reasoning_traces` — preserve `  thinking...  response` in history for multi-turn reasoning- `config.max_file_size`, `config.max_search_results`, `config.command_timeout`
 - `config.context_format` — `"tree"` or `"flat"` for context injection
 - `config.target_fps` — compositor render rate
+- `config.subagent_max_depth`, `config.subagent_timeout`, `config.subagent_max_context`, `config.subagent_server` — subagent limits (see [subagents.md](./subagents.md))
 
 **UI:**
 - `config.ui_theme` — `"default"` or `"terminal"`
@@ -58,6 +59,9 @@ The `ui_` prefix is applied automatically: a TOML key `theme` under `[ui]` maps 
 - `config.ui_msg_h_padding`, `config.ui_msg_v_margin`
 - `config.ui_cursor_frequency`, `config.ui_cursor_pulse_delay`
 - `config.ui_show_metrics`, `config.ui_metrics_show_speed`, etc.
+
+**Markdown styles:**
+- `config.markdown_styles` — dict of per-element style dicts (`fg`/`bg`/`bold`/`reverse`) loaded from the `[markdown_styles]` TOML section. Elements: `header1`–`header6`, `bold`, `italic`, `code`, `code_block`, `quote`, `list`, `hr`, `table`, `link`, `paragraph`. See [ui.md](./ui.md#markdown-rendering).
 
 ### What can be saved at runtime
 

@@ -13,6 +13,8 @@ The tool system exposes file and shell operations to the LLM agent. Every tool c
 | `ShellTool` | Run shell command |
 | `SearchTools` | Web search; DuckDuckGo and Wikipedia |
 
+`ToolError` — exception raised by tool functions on failure.
+
 Tools are pure functions — no internal state. The `Harness` owns all state and passes it in.
 
 ## Tool Wrappers (`tool_wrappers.py`)
@@ -22,6 +24,10 @@ Each tool class has a corresponding `*ToolWrapper` that adapts it to the OpenAI 
 - Parses the LLM's tool call arguments
 - Calls the underlying tool function
 - Returns a formatted result string
+
+Individual wrappers: `ReadTool`, `WriteTool`, `PatchTool`, `RunTool`, `SearchWebTool`, `SearchWikiTool`, `SubagentTool`, `WaitForSubagentsTool`.
+
+`create_toolset(depth)` — factory that builds the active tool dict. Only registers: `read`, `write`, `patch`, `run`, `search_web`, `search_wiki`, `subagent`, `wait_for_subagents`. (Iteration/memory tools are no longer registered.)
 
 This adapter layer keeps `tools.py` decoupled from any specific LLM API format.
 
@@ -47,17 +53,17 @@ result appended to conversation history
 
 Configuration object specifying the default policy per tool type. Policies: `ALLOW`, `ASK`, `DENY`.
 
+Predefined profiles: `strict`, `permissive` (default global singleton), `unrestricted`, `locked`, `TESTING`, `scaffolder` (used by subagents).
+
 Dangerous pattern detection can upgrade `ALLOW` → `ASK`. It never downgrades `DENY`.
 
 See [notes/security.md](./security.md) for the security layer details.
 
-## Memory Tools (`memory_tools.py`)
-
-`MemoryTools` provides `memorize` and `forget` operations. Memories persist across turns in the conversation by being injected into the system prompt context. Not file-backed by default — stored in the `Harness` instance.
-
 ## Iteration Tools (`iteration_tools.py`)
 
-`IterationTools` provides `loop`, `loop_next`, and `loop_itr_done` — used for multi-step processing over a list of items (e.g., processing multiple files). The LLM drives the loop by calling `loop_next` to advance and `loop_itr_done` to signal completion.
+`IterationTools` provides `loop`, `loop_next`, `loop_itr_done`, and `loop_abort` — used for multi-step processing over a list of items (e.g., processing multiple files). The LLM drives the loop by calling `loop_next` to advance and `loop_itr_done` to signal completion.
+
+**Note:** These tools are **no longer registered** in `create_toolset()` and are effectively dead code. Kept for potential future use.
 
 ## Subagent Tools (`tool_wrappers.py`)
 

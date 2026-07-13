@@ -21,6 +21,7 @@ See [notes/ui.md](../notes/ui.md) for the full architecture overview.
 - `new_message(...)` — creates but does not append (use with `replace_message`)
 - `replace_message(old, new)` — swap a placeholder message with a final one
 - `clear()` — removes all messages
+- `start_inline_edit(message)` / `stop_inline_edit(save)` — in-place message editing via `Box.inline_editor`
 - Handles keyboard focus, per-message focus navigation, and width-change reformatting
 
 ### `chat_message.py`
@@ -35,7 +36,7 @@ See [notes/ui.md](../notes/ui.md) for the full architecture overview.
 `ChatActionHandlers` mixin for `chatTUI`.
 - Copy to clipboard via `xclip` or `wl-copy` (auto-detected)
 - Delete message from history
-- Edit message in-place
+- `handle_edit_action` — expanded in-place editing: edits paused AI messages (thinking prefill), finalized `ThinkingMsg` (edit reasoning as prefill), finalized `PicoMsg` (finds preceding `ThinkingMsg`), and `UserMsg` (edit + wipe subsequent messages)
 - Retry (re-send last user message)
 
 ### `commands.py`
@@ -46,6 +47,7 @@ Slash command system.
 - `get_command_list()` / `get_subcommand_list(cmd)` — used by input autocomplete
 - Commands with sub-operations pass a `subcommands` dict to the constructor (e.g. `ServerCommand`)
 - Commands starting with `_` are hidden from `/help`
+- Registered commands: `help`, `clear`, `compact`, `exit`, `stop`, `resume`, `prefill`, `status`, `server`, `tools`, `debug`, `permissions`, `openrouter`, `cd`, `pwd`
 - See [notes/ui.md](../notes/ui.md) for how to add a new command.
 
 ### `logging_handlers.py`

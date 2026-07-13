@@ -17,7 +17,7 @@ This document tells AI agents and humans how to operate and maintain this wiki.
     subagents.md            ← Subagent lifecycle, permissions, depth/timeout/context limits
     testing.md              ← Test suite overview and how to run tests
     tools-and-permissions.md← Tool system, permission policies, wrappers
-    ui.md                   ← TUI architecture and component model
+    ui.md                   ← TUI architecture, component model, markdown rendering
   tree/
     README.md               ← Root package overview
     harness.md              ← pico_chat/harness/ — LLM agent core

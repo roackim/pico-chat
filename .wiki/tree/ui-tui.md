@@ -49,8 +49,19 @@ Used by `SelectionMenu` to rank completions.
 
 ### `msg_types.py`
 `MsgType` base class and all concrete message type classes. Each type defines `title`, `frame_color`, `content_color`, and `actions`.
-`MsgAction` enum — per-message action buttons (COPY, DELETE, EDIT, RETRY, STOP, ALLOW, DENY, OUTPUT) with keyboard shortcut keys.
+`MsgAction` enum — per-message action buttons (DELETE, COPY, EDIT, RETRY, STOP, ALLOW, DENY, OUTPUT, STEER, PAUSE, RESUME) with keyboard shortcut keys.
 See [notes/ui.md](../notes/ui.md) for the full type table and how to add a new type.
+
+### `ascii_table.py`
+`TableStyle` — border/padding configuration with named styles (`squared`, `rounded`, `simple`, `double`).
+`AsciiTable` — renders a 2-D table (headers + rows) as an ASCII string with column alignment and truncation. No external dependencies. Used by the markdown table renderer.
+
+### `syntax_highlight.py`
+Syntax highlighter for code blocks in markdown rendering.
+- `highlight_line(line, lang)` — returns `List[Tuple[str, str]]` of (text, highlight-type) segments
+- `_resolve_lang(lang)` — normalises language identifiers
+- `_get_highlight_color(hl_type)` — maps a highlight type to an RGB color
+- `_resolve_hex_color(value)` — hex string → RGB tuple
 
 ---
 
