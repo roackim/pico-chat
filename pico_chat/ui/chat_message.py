@@ -351,40 +351,7 @@ class Message:
             try:
                 args_dict = json.loads(self.tool_args)
                 
-                # Special handling for loop tool
-                if self.tool_name == "loop" and isinstance(args_dict, dict):
-                    pattern = args_dict.get("pattern", "")
-                    task = args_dict.get("task", "")
-                    # Show what the LLM sees - extract key info from output
-                    if self.tool_output:
-                        # Extract first file line: "First file [01/XX]: filename"
-                        match = re.search(r'(First file \[\d+/\d+\]:\s*.+?)(?:\n|$)', self.tool_output)
-                        if match:
-                            lines.append(f"{theme.MUTED}{match.group(1).strip()}{theme.reset()}")
-                        else:
-                            # Fallback: show pattern and file count
-                            match = re.search(r'(\d+)\s+files', self.tool_output)
-                            file_count = match.group(1) if match else "?"
-                            lines.append(f"{theme.MUTED}{pattern} ({file_count} files){theme.reset()}")
-                    else:
-                        lines.append(f"{theme.MUTED}cmd:{theme.reset()} {json.dumps(args_dict)}")
-                
-                # Special handling for loop_next tool
-                elif self.tool_name == "loop_next":
-                    # Show exactly what LLM sees
-                    if self.tool_output:
-                        # Check if it's completion message
-                        if "complete" in self.tool_output.lower():
-                            # Extract first line of completion message
-                            first_line = self.tool_output.split('\n')[0]
-                            lines.append(f"{theme.SUCCESS}{first_line}{theme.reset()}")
-                        else:
-                            # Format: "filename [XX/YY]" - show exactly as LLM sees it
-                            lines.append(f"{theme.MUTED}{self.tool_output}{theme.reset()}")
-                    else:
-                        lines.append(f"{theme.MUTED}cmd:{theme.reset()} {{}}")
-                
-                elif self.tool_name == "patch" and isinstance(args_dict, dict):
+                if self.tool_name == "patch" and isinstance(args_dict, dict):
                     patch_lines = 0
                     path = args_dict.get("path")
                     if "patch_content" in args_dict:

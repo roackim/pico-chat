@@ -3,7 +3,7 @@
 A CLI chat app for self-hosted LLM agents with native tool calling support.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.8.0"
 
 from pico_chat import pico_cfg
 from pico_chat.harness.harness import Harness, get_harness

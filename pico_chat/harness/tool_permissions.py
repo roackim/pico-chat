@@ -93,10 +93,6 @@ class ToolPermissionsProfile:
     # Shell execution
     run: RunPermissions
     
-    # Memory operations (memorize/forget)
-    # These are safe in-memory operations, typically allowed
-    memory: Permission = "allow"
-    
     # Search operations (search_web/search_wiki)
     # Safe read-only external API calls, typically allowed
     search: Permission = "allow"
@@ -116,10 +112,6 @@ class ToolPermissionsProfile:
     def get_run_permission(self) -> RunPermissions:
         """Get run permissions."""
         return self.run
-    
-    # def get_memory_permission(self) -> Permission: # TODO: remove
-        # """Get memory operation permission."""
-        # return self.memory
     
     def get_search_permission(self) -> Permission:
         """Get search operation permission."""
@@ -142,7 +134,6 @@ strict = ToolPermissionsProfile(
         use_container=True,
         container_network=True,
     ),
-    memory="ask",
     search="ask",
 )
 
@@ -159,7 +150,6 @@ permissive = ToolPermissionsProfile(
         use_container=True,
         container_network=True,
     ),
-    memory="allow",  # Memory operations are safe
     search="allow",  # Search is safe read-only external API
 )
 
@@ -177,7 +167,6 @@ unrestricted = ToolPermissionsProfile(
         use_container=True,
         container_network=True,
     ),
-    memory="allow",
     search="allow",
 )
 
@@ -195,7 +184,6 @@ locked = ToolPermissionsProfile(
         use_container=True,
         container_network=True,
     ),
-    memory="deny",  # Even memory operations are denied
     search="deny",
 )
 
@@ -212,7 +200,6 @@ TESTING = ToolPermissionsProfile(
         use_container=True,
         container_network=True,
     ),
-    memory="allow",  # Ask for memory operations too
     search="ask",
 )
 
@@ -229,7 +216,6 @@ scaffolder = ToolPermissionsProfile(
         ask=set(),
         others="deny",
     ),
-    memory="deny",
     search="allow",  # Subagents can search for library docs and research
 )
 

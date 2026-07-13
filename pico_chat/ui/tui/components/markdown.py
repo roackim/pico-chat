@@ -263,18 +263,6 @@ class BlockParser:
 
         return blocks
 
-    # --- Table detection (post-parse pass) ---
-
-    def _collect_tables(self, blocks: List[Block]) -> List[Block]:
-        """Merge consecutive TableLine blocks into grouped table runs.
-
-        Scans the block list for runs of TableLine blocks separated only by
-        other TableLine blocks (header → separator → data rows).  Returns a
-        new block list where consecutive table lines are kept as-is (the
-        Markdown renderer groups them).
-        """
-        # Simple pass-through — the Markdown renderer handles grouping.
-        return blocks
 
     # --- helpers ---
 

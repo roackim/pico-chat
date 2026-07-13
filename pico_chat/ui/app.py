@@ -19,7 +19,7 @@ from pico_chat.ui.tui.components.debug_panel import DebugLogPanel
 from pico_chat.ui.chat_history_panel import ChatHistoryPanel
 from pico_chat.ui.chat_message import Message
 from pico_chat.ui.commands import handle_command, get_command_list, get_subcommand_list
-from pico_chat.ui.tui.container import Vsplit, Hsplit
+from pico_chat.ui.tui.container import Hsplit
 from pico_chat.ui.tui.layout_utils import strip_ansi
 
         # Setup logging to debug panel

@@ -36,9 +36,6 @@ class Harness:
         self.history = []
         self.depth = depth
 
-        # Tool output history for @ references
-        self.tool_output_history = []  # [(tool_name, result), ...] - last 10
-
         # User input queue for tool confirmations and prompts
         self._user_response_queue = asyncio.Queue()
 
@@ -322,12 +319,6 @@ class Harness:
             if len(command) > 100:
                 command = command[:97] + "..."
             return f"Allow running command: {command}?"
-        elif tool_name == "memorize":
-            key = args.get('key', 'unknown')
-            return f"Allow memorizing: {key}?"
-        elif tool_name == "forget":
-            key = args.get('key', 'unknown')
-            return f"Allow forgetting: {key}?"
         return f"Allow {tool_name}?"
     
     def _request_user_confirmation(self, command: str) -> bool:
@@ -1071,11 +1062,6 @@ class Harness:
                 
                 # STEP 4: Success
                 self.debug_stream.log("TOOL_RESULT", {"call_id": tool_call_id, "result": result})
-                
-                # Track tool output for @ references (keep last 10)
-                self.tool_output_history.append((tool_name, result))
-                if len(self.tool_output_history) > 10:
-                    self.tool_output_history.pop(0)
                 
                 yield chunks.ToolStatusChange(
                     tool_call_id=tool_call_id,

@@ -159,7 +159,6 @@ class LLMServer(ABC):
                 
                 # Log request details for debugging (truncate long messages)
                 if logger.isEnabledFor(logging.DEBUG):
-                    import json as json_module
                     msg_summary = []
                     for msg in messages:
                         role = msg.get("role", "?")

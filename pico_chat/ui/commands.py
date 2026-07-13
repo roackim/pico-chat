@@ -204,13 +204,6 @@ class StatusCommand(Command):
             msg += color + f"Model            : {reset}{status['model']}\n"
             msg += color + f"Context Window   : {reset}{status['context_window']}\n"
 
-            memory_items = status.get("memory_items", 0)
-            memory_tokens = status.get("memory_tokens", 0)
-            if memory_items == 0:
-                msg += color + f"Memory           : {reset}empty\n"
-            else:
-                msg += color + f"Memory           : {reset}{memory_items} items ({memory_tokens} tokens)\n"
-            
             # Add context pressure info if available
             if status.get('context_used') is not None and status.get('context_max') is not None:
                 used = status['context_used']
@@ -918,7 +911,7 @@ class ToolsCommand(Command):
             available_tools = sorted(ui.agent.tools_map.keys())
 
         if not available_tools:
-            available_tools = ["read", "write", "patch", "run", "memorize", "forget"]
+            available_tools = ["read", "write", "patch", "run"]
 
         def permission_label(tool_name: str) -> str:
             if tool_name == "read":
@@ -932,8 +925,6 @@ class ToolsCommand(Command):
                     f"allow={len(permissions.run.allow)} ask={len(permissions.run.ask)} "
                     f"deny={len(permissions.run.deny)} others={permissions.run.others} chain={permissions.run.chain_policy}"
                 )
-            if tool_name in ("memorize", "forget"):
-                return permissions.memory
             return "unknown"
 
         lines = [f"profile: {permissions.name}"]
@@ -1053,93 +1044,6 @@ class DebugGetContextCommand(Command):
             logger.error(f"Error getting context: {e}", exc_info=True)
             ui.chat_history_panel.add_message(f"Failed to get context: {e}", msg_type=SysMsgError())
 
-class DebugGetMemoryCommand(Command):
-    def __init__(self):
-        super().__init__("get_memory", "Copy current memory state to clipboard")
-
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        logger = logging.getLogger("tui")
-        
-        try:
-            # Get the current memory state
-            if not hasattr(ui.agent, 'memory'):
-                ui.chat_history_panel.add_message(
-                    "Memory system not available",
-                    msg_type=SysMsgError()
-                )
-                return
-            
-            memory = ui.agent.memory
-            
-            if not memory:
-                ui.chat_history_panel.add_message(
-                    "Memory is empty",
-                    msg_type=SysMsg()
-                )
-                return
-            
-            # Format as pretty JSON (list of memory items)
-            memory_items = list(memory.values())
-            memory_json = json.dumps(memory_items, indent=2, ensure_ascii=False)
-            
-            # Try to copy to clipboard using various methods
-            copied = False
-            
-            # Method 1: Try xclip (X11)
-            try:
-                subprocess.run(['xclip', '-selection', 'clipboard'], 
-                             input=memory_json.encode(), 
-                             check=True, 
-                             stderr=subprocess.DEVNULL)
-                copied = True
-                logger.info("Memory copied to clipboard (xclip)")
-            except (FileNotFoundError, subprocess.CalledProcessError):
-                pass
-            
-            # Method 2: Try xsel (X11 alternative)
-            if not copied:
-                try:
-                    subprocess.run(['xsel', '--clipboard', '--input'], 
-                                 input=memory_json.encode(), 
-                                 check=True,
-                                 stderr=subprocess.DEVNULL)
-                    copied = True
-                    logger.info("Memory copied to clipboard (xsel)")
-                except (FileNotFoundError, subprocess.CalledProcessError):
-                    pass
-            
-            # Method 3: Try wl-copy (Wayland)
-            if not copied:
-                try:
-                    subprocess.run(['wl-copy'], 
-                                 input=memory_json.encode(), 
-                                 check=True,
-                                 stderr=subprocess.DEVNULL)
-                    copied = True
-                    logger.info("Memory copied to clipboard (wl-copy)")
-                except (FileNotFoundError, subprocess.CalledProcessError):
-                    pass
-            
-            if copied:
-                item_count = len(memory_items)
-                total_tokens = sum(item["metadata"]["token_size"] for item in memory_items)
-                char_count = len(memory_json)
-                ui.chat_history_panel.add_message(
-                    f"Copied {item_count} memory items ({total_tokens} tokens, {char_count:,} characters) to clipboard",
-                    msg_type=SysMsg()
-                )
-            else:
-                logger.warning("No clipboard utility found")
-                ui.chat_history_panel.add_message(
-                    "Could not copy: no clipboard utility found\nInstall xclip, xsel, or wl-copy",
-                    msg_type=SysMsgError()
-                )
-                
-        except Exception as e:
-            logger.error(f"Error getting memory: {e}", exc_info=True)
-            ui.chat_history_panel.add_message(f"Failed to get memory: {e}", msg_type=SysMsgError())
-
-
 class DebugLogCommand(Command):
     def __init__(self):
         super().__init__("log", "Show recent log messages (default: 50, max: 200)")
@@ -1195,7 +1099,6 @@ class DebugCommand(Command):
         subcommands = {
             "panel": DebugPanelCommand(),
             "get_context": DebugGetContextCommand(),
-            "get_memory": DebugGetMemoryCommand(),
             "log": DebugLogCommand(),
         }
         super().__init__("debug", "Debug utilities", subcommands=subcommands)
@@ -1285,9 +1188,6 @@ class PermissionsCommand(Command):
         for cmd, patterns in sorted(CMD_DANGEROUS_PATTERNS.items()):
             output += f"  {cmd}: {', '.join(patterns)}\n"
         output += "\n"
-        
-        # Memory permissions
-        output += f"Memory Operations: {perm.memory}\n"
         
         ui.chat_history_panel.add_message(
             output.rstrip(),

@@ -8,7 +8,6 @@ Provides 4 core tools:
 - run: Execute shell command (sandboxed)
 """
 import subprocess
-import shlex
 from pathlib import Path
 from typing import Callable, Optional
 

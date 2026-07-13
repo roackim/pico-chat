@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Dict
 
 from pico_chat.harness.tools import MinimalToolset, ToolError
-from pico_chat.harness.iteration_tools import IterationTools
 
 
 class ToolWrapper:
@@ -394,9 +393,6 @@ class SearchWikiTool(ToolWrapper):
 def create_toolset(
     workspace_path: str | Path,
     confirmation_callback: Optional[Callable[[str], bool]] = None,
-    memory_store: Optional[Dict[str, Dict]] = None,
-    iteration_state: Optional[Dict[str, Any]] = None,
-    get_tool_output: Optional[Callable[[str], Optional[str]]] = None,
     permissions=None,
     depth: int = 0,
     pending_subagents: Optional[list] = None,
@@ -407,9 +403,6 @@ def create_toolset(
     Args:
         workspace_path: Root directory for all operations
         confirmation_callback: Function to prompt user for command confirmation
-        memory_store: Reference to harness memory dict (for memory tools)
-        iteration_state: Reference to harness iteration dict (for loop tools)
-        get_tool_output: Callback to resolve @ references to previous tool outputs
         permissions: ToolPermissionsProfile to use (defaults to default_permissions)
         depth: Current subagent depth (0 = top-level harness)
         pending_subagents: Shared list for background subagent tracking

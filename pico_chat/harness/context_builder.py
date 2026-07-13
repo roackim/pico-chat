@@ -4,35 +4,6 @@ from pathlib import Path
 from typing import Dict, List
 from datetime import date, datetime
 
-# from tree_sitter import Language, Parser
-# import tree_sitter_python as tspython
-
-# # Initialize for tree-sitter 0.21.x+
-# PY_LANGUAGE = Language(tspython.language())
-
-# def extract_signatures(file_path):
-#     """Extracts class and function definitions as one-liners."""
-#     parser = Parser(PY_LANGUAGE)
-#     try:
-#         with open(file_path, 'rb') as f:
-#             content = f.read()
-#             tree = parser.parse(content)
-        
-#         query = PY_LANGUAGE.query("""
-#             (class_definition name: (identifier) @name)
-#             (function_definition name: (identifier) @name)
-#         """)
-        
-#         captures = query.captures(tree.root_node)
-#         signatures = []
-#         for node, _ in captures:
-#             # Capture only the definition line (e.g., 'def run_harness(ctx):')
-#             line = node.text.decode('utf-8').split('\n')[0].strip()
-#             signatures.append(line)
-#         return signatures
-#     except Exception:
-#         return []
-
 def is_git_repo(root) -> bool:
     """Returns True if root (or any parent) contains a .git directory."""
     path = Path(root).resolve()

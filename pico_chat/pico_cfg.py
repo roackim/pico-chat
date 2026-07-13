@@ -1,7 +1,6 @@
-import os
 import toml
 from pathlib import Path
-from typing import Literal, Dict, Any, Optional
+from typing import Dict, Any, Optional
 
 # Default markdown element styles.
 # Each key is an element name; values are dicts with optional:
@@ -34,8 +33,6 @@ DEFAULT_SYNTAX_HIGHLIGHT_STYLES: Dict[str, Dict[str, str]] = {
     "plain":    {"fg": "#DCDCDC"},
 }
 
-Permission = Literal["allow", "ask", "deny"]
-
 
 def get_config_path() -> Path:
     """Get the path to the user's config file."""
@@ -53,8 +50,6 @@ class Config:
         self.active_server: str = "llamacpp_default"
 
         # Other settings
-        self.render_thinking: bool = False
-        self.log_file: str = "pico_chat.log" # TODO PLUG not currently used
         self.max_file_size: int = 1_000_000
         self.max_search_results: int = 50
         self.command_timeout: int = 30
@@ -153,7 +148,7 @@ class Config:
             # Load other settings
             if "settings" in data:
                 settings = data["settings"]
-                for key in ["render_thinking", "max_file_size", "max_search_results",
+                for key in ["max_file_size", "max_search_results",
                            "command_timeout", "target_fps", "context_format",
                            "debug_log_enabled",
                            "preserve_reasoning_traces",
@@ -210,35 +205,6 @@ class Config:
         if self.active_server in self.servers:
             return self.servers[self.active_server]
         return None
-
-
-    def get_permission(self, tool: str, is_inside_repo: bool = True) -> Permission:
-        """
-        Get permission for a tool.
-        
-        Args:
-            tool: Tool name ('read', 'write', 'patch', 'run')
-            is_inside_repo: Whether the operation is inside repo (for file ops)
-        
-        Returns:
-            Permission level ('allow', 'ask', 'deny')
-        
-        Note:
-            This imports tool_permissions dynamically to avoid circular imports.
-            The actual permissions are configured in pico_chat.harness.tool_permissions
-        """
-        from pico_chat.harness.tool_permissions import permissions
-        
-        if tool == 'read':
-            return permissions.get_read_permission(is_inside_repo)
-        elif tool == 'write':
-            return permissions.get_write_permission(is_inside_repo)
-        elif tool == 'patch':
-            return permissions.get_patch_permission(is_inside_repo)
-        elif tool == 'run':
-            return permissions.get_run_permission()
-        else:
-            return "deny"
 
 
 # Global config instance
