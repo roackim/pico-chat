@@ -15,10 +15,12 @@
     [x] When the model makes a tool call right after a message, the message is incomplete
         - current_msg.finalize() called before transitioning to ToolDraft or ToolStatusChange
         - Ensures the text message is flushed and rendered completely before the tool message appears
-    [!] render properly \n\n and \n from thinking messages (interpret as new line)
-    [!] markdown title / subsections etc have spaces stripped out
-    [!] render tables properly with AsciiTable vendored module
-    [!] when a Pico Msg is finished, do not display empty trailing lines
+    [x] render properly \n\n and \n from thinking messages (interpret as new line)
+    [x] markdown title / subsections etc have spaces stripped out
+    [x] render tables properly with AsciiTable vendored module
+    [x] when a Pico Msg is finished, do not display empty trailing lines
+
+[x] Proper commands / parameters hints schemas
 
 [ ] When editing in a message in place, allow for the fuzzy @ to work too
 
@@ -27,12 +29,64 @@
 
 [ ] for permission tool:
     - change prefix from > to ? while asking, make colors more visible too
-
-[ ] Better mouse support
-    [ ] Support mouse selection inside a message    
-    [ ] make actions clickable like "[c] copy" 
     
 [ ] improve the output action
     - make it reversible, so that if you click it again, it will undo the action
     - tools: avoid duplicating the cmd in the output 
 
+
+[x] Better mouse support
+    [x] Support mouse selection inside a message    
+        - drag to select, reverse-video highlight, auto-copy on release
+        - 'y' key yanks (copies) the current selection
+    [x] make actions clickable like "[c] copy" 
+        - action bar hit-tested on-demand in ChatHistoryPanel (works pre-focus)
+
+[ ] New UI
+    [ ] Popups
+        [ ] Move debug panel to a popup
+    [ ] Forms
+        [ ] Toggle for settings
+        [ ] Open fields
+        [ ] Checkboxes list   [ ] | [x]
+        [ ] Radio list        ( ) | (x)
+    [ ] Add a status line on top of input field (instead of relying on chat messages)
+        [ ] Copied to clipboard ! (with timeout ? / overwrite)
+        [ ] Add an indicator for down message like "+3 messages"
+    
+
+[ ] Containers
+    [ ] Move from bubblewrap to podman
+        cf plans/proper_container_integration.md
+        
+[ ] Subagent: kill / abort  action
+    [?] Focus ? 
+        popup 
+
+[ ] Conversation Management
+    [ ] Export conversation to file
+    [ ] Import conversation from file
+        /conversation import|export <filename> 
+    [ ] Multiple conversations (tabs)
+    
+[ ] Remove token count estimations, rely on server instead / when possible ?
+
+[ ] Dynamic reasoning budget ?
+
+[ ] Git integration
+    /git branch new - create a new branch for the current conversation
+    /git branch list - list all pico branches as tree
+    /git commit changes - commit all the changes
+        - keep list of all modified files
+        - keep list of all created files
+        - prompt user with a FORM popup to
+            - enter commit message
+            - select files to commit (checkboxes) (checked by default)
+            
+    /git squash - squash all the changes into a single commit into base branch
+    /git rebase - rebase the current branch onto base branch
+    
+
+[ ] How to handle servers that serves multiple models ? 
+    -> like ollama
+    
