@@ -49,17 +49,45 @@ The most complex component. Responsibilities are split across sub-modules:
 
 | Module | Responsibility |
 |--------|---------------|
-| `input.py` | Coordinator; cursor animation, menu orchestration |
+| `input.py` | Coordinator; cursor animation, menu orchestration, schema-driven parameter hints |
 | `text_buffer.py` | Text storage, undo/redo |
 | `input_handlers.py` | Keyboard, mouse, paste events |
 | `command_completion.py` | `/command` autocomplete |
 | `subcommand_completion.py` | Subcommand suggestions |
 | `context_completion.py` | Context-aware suggestions |
 | `path_completion.py` | File path autocomplete |
-| `server_completion.py` | Server name suggestions |
+| `argument_completion.py` | **Generic argument completer** — reads `Command.params` from registry, fuzzy filters completions per argument index |
 | `scroll_manager.py` | Scroll offset for large input |
 | `cursor_renderer.py` | Cursor visibility and animation |
 | `coordinate_mapper.py` | Screen position → text offset |
+
+### Schema-Driven Parameter Hints
+
+When typing a `/command`, the input component shows grey hints for upcoming parameters. This is driven by the `Param` dataclass on each `Command`:
+
+1. `resolve_command(parts)` walks the command/subcommand tree to find the deepest matching `Command` and the argument offset
+2. `_get_parameter_hint()` reads `cmd.params[arg_index:]` and joins them with spaces
+3. Hints are rendered at the end of the current text (not at the cursor position)
+4. The current argument being typed is skipped from the hints
+
+## Mouse Interaction Model
+
+The TUI supports full mouse interaction via ANSI SGR mode (`?1006h`).
+
+### Text Selection
+- **Start**: Click on message content area → `start_selection()` records anchor position
+- **Drag**: Mouse move events → `update_selection()` extends highlight (throttled at 50ms for performance)
+- **End**: Mouse release → `end_selection()` finalizes selection and auto-copies to clipboard
+- **Yank**: Press `y` to copy current selection to clipboard at any time
+- Selection is rendered as a reverse-video overlay via `_render_selection()` using segment-level fast-skip optimization
+- Hit testing uses a cached line map (`_line_map_cache`) invalidated on scroll/message changes
+
+### Action Button Clicks
+- Action buttons (e.g. `[c] copy`) in box bottom borders are clickable
+- `_hit_test_action_bar()` computes button hit regions on-demand (replicates Box border layout calculation)
+- Clicking triggers the action with a brief **reverse-video flash** feedback (150ms)
+- Flash is managed by `_flash_msg` / `_flash_action_key` / `_flash_until` on `ChatHistoryPanel`
+- Box renders the flash by checking `parent_msg._flash_action_key` and applying `reverse=True`
 
 ## Message Types (`tui/msg_types.py`, `chat_message.py`)
 
@@ -142,7 +170,10 @@ Server management commands (`ServerAddCommand`, `ServerUseCommand`, etc.) are th
 
 ### Structure
 
-- `Command` — base class. Constructor: `Command(name, description, subcommands={})`.
+- `Param` dataclass — defines a command argument: `name`, `completions` (static list or callable returning list), `path` (filesystem scan if True), `required` (default False)
+- `Command` — base class. Constructor: `Command(name, description, subcommands={}, params=[])`.
+- `Command.resolve_command(parts)` — walks subcommand tree, returns `(deepest_cmd, arg_offset)` for hint/completion resolution
+- `Command.get_completions(arg_index)` — resolves completions from `Param` schema (static list, callable, or `path=True` filesystem scan via `_scan_dirs()`)
 - `execute(ui, args)` — async method to override. `ui` is the `chatTUI` instance; `args` is a list of string tokens after the command name.
 - `COMMANDS: Dict[str, Command]` — module-level registry mapping name → instance.
 - `handle_command(ui, text)` — strips the leading `/`, looks up `COMMANDS`, calls `execute`.
@@ -157,12 +188,22 @@ Commands with sub-operations (e.g. `/server add`, `/server remove`) pass a `subc
    ```python
    class MyCommand(Command):
        def __init__(self):
-           super().__init__("mycommand", "One-line description")
+           super().__init__("mycommand", "One-line description",
+               params=[
+                   Param("NAME", required=True),
+                   Param("TYPE", completions=["type1", "type2"], required=True),
+                   Param("PATH", path=True),
+               ])
 
        async def execute(self, ui: ChatUIProtocol, args: List[str]):
            # use ui.chat_history_panel.add_message() to show output
            ui.chat_history_panel.add_message("hello", msg_type=SysMsg())
    ```
+
+   The `Param` definitions automatically provide:
+   - **Parameter hints** shown as grey text after the command name
+   - **Fuzzy autocomplete** in the argument completion menu
+   - **Filesystem scanning** when `path=True`
 
 2. **Register it** in the `COMMANDS` dict at the bottom of the file:
    ```python

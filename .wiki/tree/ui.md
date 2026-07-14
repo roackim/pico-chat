@@ -23,6 +23,10 @@ See [notes/ui.md](../notes/ui.md) for the full architecture overview.
 - `clear()` — removes all messages
 - `start_inline_edit(message)` / `stop_inline_edit(save)` — in-place message editing via `Box.inline_editor`
 - Handles keyboard focus, per-message focus navigation, and width-change reformatting
+- **Mouse selection**: drag-to-select text within messages; selection highlight rendered as reverse-video overlay; auto-copies to clipboard on release
+- **Action click handling**: `_hit_test_action_bar()` computes button hit regions for action buttons in box bottom borders; clicking dispatches the action with a brief reverse-video flash feedback
+- **Parameter hints**: `_get_parameter_hint()` reads `Command.params` from the registry to show schema-driven argument hints when typing `/commands`
+- `y` key yanks current selection to clipboard
 
 ### `chat_message.py`
 `Message` — wraps content with a `MsgType`, colors, padding, and action set.
@@ -40,15 +44,19 @@ See [notes/ui.md](../notes/ui.md) for the full architecture overview.
 - Retry (re-send last user message)
 
 ### `commands.py`
-Slash command system.
-- `Command` base class: `name`, `description`, `subcommands`, `execute(ui, args)`
+Slash command system with generic parameter schema.
+- `Param` dataclass: `name`, `completions` (static list or callable), `path` (filesystem scan), `required`
+- `Command` base class: `name`, `description`, `subcommands`, `params: List[Param]`, `execute(ui, args)`
+- `Command.resolve_command(parts)` — walks subcommand tree, returns `(deepest_cmd, arg_offset)`
+- `Command.get_completions(arg_index)` — resolves completions from `Param` schema (static list, callable, or `path=True` filesystem scan)
 - `COMMANDS` dict — module-level registry; all top-level commands registered here
 - `handle_command(ui, text)` — strips `/`, looks up `COMMANDS`, dispatches
 - `get_command_list()` / `get_subcommand_list(cmd)` — used by input autocomplete
 - Commands with sub-operations pass a `subcommands` dict to the constructor (e.g. `ServerCommand`)
 - Commands starting with `_` are hidden from `/help`
 - Registered commands: `help`, `clear`, `compact`, `exit`, `stop`, `resume`, `prefill`, `status`, `server`, `tools`, `debug`, `permissions`, `openrouter`, `cd`, `pwd`
-- Server management commands (`ServerAddCommand`, `ServerUseCommand`, etc.) delegate to `harness/server_service.py` — they are thin UI adapters that format and display results
+- Server management commands (`ServerAddCommand`, `ServerUseCommand`, etc.) use `Param` for server name completions (reads `pico_cfg.config.servers.keys()`)
+- `CdCommand` uses `Param("DIR", path=True)` for filesystem completion
 - See [notes/ui.md](../notes/ui.md) for how to add a new command.
 
 ### `logging_handlers.py`

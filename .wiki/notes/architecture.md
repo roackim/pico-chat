@@ -87,7 +87,7 @@ pico_chat/
     ...
 
   ui/
-    commands.py          ← Slash commands (thin UI adapters)
+    commands.py          ← Slash commands with Param-based schema + autocomplete
     chat_action_handlers.py
     app.py               ← Main TUI class
     tui/

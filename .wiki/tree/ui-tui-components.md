@@ -27,8 +27,9 @@ Used as base for `ChatHistoryPanel`.
 `Box` — wraps another component with a border, optional title, and optional action buttons.
 Focus state changes border color. Actions appear as labeled buttons in the border.
 Constructor params include `compact_when_unfocused` (render without borders when unfocused) and `parent_msg` (link to owning message).
-`inline_editor` attribute — when active, replaces the child component rendering to support in-place editing (used by `ChatHistoryPanel.start_inline_edit()`).
 `_render_compact_to_subbuffer()` — compact borderless render path.
+`_action_hit_regions` — tracks screen positions of action buttons during render for click detection.
+Supports **action flash feedback**: when `parent_msg._flash_action_key` is set, the matching action button renders with `reverse=True` for brief visual feedback.
 
 ### `menu.py`
 `SelectionMenu` — floating dropdown list.
@@ -62,6 +63,8 @@ The multi-line text editor. Responsibilities split across sub-modules:
 `InputComponent` — the coordinator.
 - Orchestrates cursor animation, completion menu visibility, multi-line layout
 - Delegates text storage to `TextBuffer`, key handling to `InputHandlers`
+- Shows schema-driven parameter hints via `_get_parameter_hint()` (reads `Command.params` from registry)
+- `setup_command_registry(registry)` — receives the `COMMANDS` dict from `app.py`
 
 ### `input/text_buffer.py`
 `TextBuffer` — backing store for the edited text.
@@ -76,13 +79,14 @@ Handles raw keyboard, mouse, and paste events.
 
 ### Completion Modules
 
-| Module | Triggers |
-|--------|----------|
-| `command_completion.py` | `/` at start of input |
-| `subcommand_completion.py` | Second word after a `/` command |
-| `context_completion.py` | Context-aware (e.g., after `@`) |
-| `path_completion.py` | After `/` mid-word or explicit file path input |
-| `server_completion.py` | After `/server` subcommand |
+| Module | Triggers | Notes |
+|--------|----------|-------|
+| `command_completion.py` | `/` at start of input | Command name fuzzy search |
+| `subcommand_completion.py` | Second word after a `/` command | Subcommand suggestions |
+| `context_completion.py` | Context-aware (e.g., after `@`) | — |
+| `argument_completion.py` | After any command with `Param` schema | Generic fuzzy completer; reads `Command.params`, resolves argument index, filters completions via menu |
+| `path_completion.py` | After `/` mid-word or explicit file path input | — |
+| `server_completion.py` | After `/server` subcommand | Deprecated — superseded by `argument_completion.py` with `Param` schema |
 
 ### `input/scroll_manager.py`
 Tracks vertical scroll offset when input text overflows the visible area.
