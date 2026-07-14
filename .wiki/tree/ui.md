@@ -14,6 +14,7 @@ See [notes/ui.md](../notes/ui.md) for the full architecture overview.
 - Runs the async event loop
 - Routes incoming `Chunk` objects from the harness to the chat display
 - Dispatches user input to the harness or command handler
+- Manages popup overlay via `show_popup()` / `hide_popup()`; input intercepted in `handle_global_input()` when popup is visible
 
 ### `chat_history_panel.py`
 `ChatHistoryPanel` — extends `TextComponent` for scrollable message display.
@@ -57,6 +58,11 @@ Slash command system with generic parameter schema.
 - Registered commands: `help`, `clear`, `compact`, `exit`, `stop`, `resume`, `prefill`, `status`, `server`, `tools`, `debug`, `permissions`, `openrouter`, `cd`, `pwd`
 - Server management commands (`ServerAddCommand`, `ServerUseCommand`, etc.) use `Param` for server name completions (reads `pico_cfg.config.servers.keys()`)
 - `CdCommand` uses `Param("DIR", path=True)` for filesystem completion
+- `HelpCommand` renders output in a popup overlay via `ui.show_popup()` instead of chat history
+- `StatusCommand` renders in popup (async: shows "Checking..." placeholder, then updates with actual status)
+- `ToolsCommand` renders in popup
+- `PermissionsCommand` renders in popup
+- `DebugCommand` (no args) renders subcommand help in popup
 - See [notes/ui.md](../notes/ui.md) for how to add a new command.
 
 ### `logging_handlers.py`

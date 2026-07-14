@@ -44,7 +44,14 @@
 
 [ ] New UI
     [ ] Popups
+        [x] escape key closes popup (action)
+        [x] /help moved to popup
+        [x] /status moved to popup (async with placeholder)
+        [x] /tools moved to popup
+        [x] /permissions moved to popup
+        [x] /debug help moved to popup
         [ ] Move debug panel to a popup
+        
     [ ] Forms
         [ ] Toggle for settings
         [ ] Open fields

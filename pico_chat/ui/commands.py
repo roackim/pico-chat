@@ -40,6 +40,9 @@ class ChatUIProtocol(Protocol):
     chat_history_panel: Any
     input_panel: Any
     compositor: Any
+    
+    def show_popup(self, title: str, content: str) -> None: ...
+    def hide_popup(self) -> None: ...
 
 class Command:
     def __init__(self, name: str, description: str,
@@ -137,16 +140,14 @@ class HelpCommand(Command):
         super().__init__("help", "Show available commands")
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        help_text = ""
+        help_lines = []
         
         for cmd in sorted(COMMANDS.values(), key=lambda x: x.name):
             if cmd.name.startswith("_"):
                 continue
-            help_text += f"/{cmd.name.ljust(8)} - {cmd.description}\n"
+            help_lines.append(f"/{cmd.name.ljust(8)} {cmd.description}")
         
-        ui.chat_history_panel.add_message(
-            help_text.rstrip(), msg_type=SysMsg(), title="help"
-        )
+        ui.show_popup("help", "\n".join(help_lines))
 
 class ClearCommand(Command):
     def __init__(self):
@@ -271,23 +272,14 @@ class StatusCommand(Command):
         super().__init__("status", "Show system and connection status")
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        # Show placeholder while checking status
-        placeholder = ui.chat_history_panel.add_message(
-            "Checking server status...",
-            msg_type=SysMsg(),
-            title="status",
-        )
+        # Show placeholder popup while checking status
+        ui.show_popup("status", "Checking server status...")
         
         # Get actual status (may take time if server is unreachable)
         status = await ui.agent.get_status()
         
-        # Replace placeholder with actual status
-        status_msg = ui.chat_history_panel.new_message(
-            self.format_status(status),
-            msg_type=SysMsg(),
-            title="status",
-        )
-        ui.chat_history_panel.replace_message(placeholder, status_msg)
+        # Update popup with actual status
+        ui.show_popup("status", self.format_status(status))
         
         logger = logging.getLogger("tui")
         logger.info(f"Server status online: {status['online']}")
@@ -647,11 +639,7 @@ class ToolsCommand(Command):
         for tool_name in available_tools:
             lines.append(f"{tool_name.ljust(10)} - {permission_label(tool_name)}")
 
-        ui.chat_history_panel.add_message(
-            "\n".join(lines),
-            msg_type=SysMsg(),
-            title="tools",
-        )
+        ui.show_popup("tools", "\n".join(lines))
 
 class DebugPanelCommand(Command):
     def __init__(self):
@@ -821,11 +809,11 @@ class DebugCommand(Command):
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         if not args:
-            # Show error - missing subcommand
+            # Show subcommand help in popup
             help_text = "Missing subcommand. Available subcommands:\n"
             for name, cmd in sorted(self.subcommands.items()):
                 help_text += f"  {name.ljust(15)} - {cmd.description}\n"
-            ui.chat_history_panel.add_message(help_text.rstrip(), msg_type=SysMsgError())
+            ui.show_popup("debug", help_text.rstrip())
         else:
             subcmd_name = args[0].lower()
             if subcmd_name in self.subcommands:
@@ -905,11 +893,7 @@ class PermissionsCommand(Command):
             output += f"  {cmd}: {', '.join(patterns)}\n"
         output += "\n"
         
-        ui.chat_history_panel.add_message(
-            output.rstrip(),
-            msg_type=SysMsg(),
-            title="permissions"
-        )
+        ui.show_popup("permissions", output.rstrip())
 
 class OpenRouterBalanceCommand(Command):
     def __init__(self):

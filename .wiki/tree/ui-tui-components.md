@@ -43,6 +43,20 @@ Supports **action flash feedback**: when `parent_msg._flash_action_key` is set, 
 - Max line length enforced to prevent layout breakage
 - Toggled visible/hidden in the compositor overlay stack
 
+### `popup.py`
+`Popup` — centered overlay popup built on `Box` + `TextComponent`.
+- Component tree: `Popup` → `Box` (borders/title/action bar) → `TextComponent` (content)
+- `show(title, content)` — displays popup, auto-centers, registers with compositor
+- `hide()` — dismisses popup, unregisters from compositor
+- Auto-centers based on terminal dimensions (`max_width_ratio`, `max_height_ratio`)
+- **Bottom action bar** with `[Esc] close` — uses Box's native action rendering, so it looks and positions exactly like message box actions
+- **Clickable action bar**: hit regions populated by Box during render; click detection reuses Box's `_action_hit_regions` coordinate system
+- **Scroll**: arrow keys (±1 line), mouse wheel (±3 lines), clamped to bounds
+- `PopupAction` dataclass — lightweight action compatible with Box's action format protocol (`.format()` → `[key] label`)
+- Scroll position indicator (`3/20`) overlaid on bottom-right when content overflows
+- Input is fully intercepted when popup is visible (all keys consumed)
+- Used by `/help` (command list); planned for `/status`, debug panel
+
 ### `markdown.py`
 Live markdown parser and renderer. Parses markdown into display lines of `StyledSegment` objects, styled via `pico_cfg.config.markdown_styles`.
 - `StyledSegment` — text + fg/bg/bold/reverse/code_block

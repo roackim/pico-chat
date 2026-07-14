@@ -9,18 +9,38 @@ Pico's TUI is built from scratch — no curses, no third-party TUI framework. It
 ```
 chatTUI (app.py)
   └─ Compositor (tui/compositor.py)       ← render loop, FPS throttle
-       └─ Container layout (tui/container.py)
-            ├─ ChatHistoryPanel           ← scrollable message list
-            ├─ InputComponent             ← multi-line editor
-            └─ DebugLogPanel (optional)   ← dev logging
+       ├─ Container layout (tui/container.py)
+       │    ├─ ChatHistoryPanel           ← scrollable message list
+       │    ├─ InputComponent             ← multi-line editor
+       │    └─ DebugLogPanel (optional)   ← dev logging
+       └─ Overlays (floating, on top)
+            ├─ SelectionMenu              ← autocomplete dropdowns
+            └─ Popup                      ← centered text popups (/help, /status)
 ```
 
 ## Compositor (`tui/compositor.py`)
 
 - Runs an async render loop at ~30 FPS
-- Manages overlay stacking (e.g., permission prompts, menus)
+- Manages overlay stacking (e.g., permission prompts, menus, popups)
 - Tracks dirty state; only redraws when something changed
 - `Compositor.invalidate()` — marks the frame as needing redraw
+- `add_overlay(component)` / `remove_overlay(component)` — register floating components rendered on top of the main tree
+
+## Popup System (`tui/components/popup.py`)
+
+Centered overlay popups for commands that benefit from floating display rather than chat history messages.
+
+- `Popup` extends `Component`, built on `Box` + `TextComponent` component tree
+- `show(title, content)` — displays popup, auto-centers, registers with compositor
+- `hide()` — dismisses popup, unregisters from compositor
+- **Action bar**: `[Esc] close` rendered by Box's native action system — identical positioning and style to message box action bars
+- **Clickable action bar**: hit regions computed by Box during render; click detection uses Box's `_action_hit_regions`
+- **Scroll**: arrow keys (±1), mouse wheel (±3), clamped to bounds
+- `PopupAction(key, label)` dataclass — compatible with Box's `.format()` action protocol, no MsgAction coupling
+- Scroll position indicator overlaid on bottom-right when content overflows
+- Input interception: when popup is visible, `handle_global_input()` routes all input to the popup
+- Auto-sizing: `max_width_ratio` / `max_height_ratio` control popup dimensions relative to terminal
+- Currently used by: `/help` (command list), `/status` (async with placeholder), `/tools`, `/permissions`, `/debug` help; planned for: debug panel overlay
 
 ## Buffer (`tui/buffer.py`)
 

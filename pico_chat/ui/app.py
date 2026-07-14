@@ -16,6 +16,7 @@ from pico_chat.ui.tui.compositor import Compositor
 from pico_chat.ui.tui.terminal import MouseEvent
 from pico_chat.ui.tui.components import TextComponent, Box, InputComponent
 from pico_chat.ui.tui.components.debug_panel import DebugLogPanel
+from pico_chat.ui.tui.components.popup import Popup
 from pico_chat.ui.chat_history_panel import ChatHistoryPanel
 from pico_chat.ui.chat_message import Message
 from pico_chat.ui.commands import handle_command, get_command_list, get_subcommand_list
@@ -81,6 +82,9 @@ class chatTUI(ChatActionHandlers):
         )
         self.debug_box = Box(self.debug_panel, title="debug console", fg=self.debug_panel.frame_color)
         self.show_debug = False
+        
+        # Popup overlay for commands like /help, /status, etc.
+        self.popup = Popup()
         
         # Setup logging to debug panel
         self.log_handler = setup_tui_logging(self.debug_panel)
@@ -666,6 +670,15 @@ class chatTUI(ChatActionHandlers):
             for child in children:
                 child.parent = self.root
 
+    def show_popup(self, title: str, content: str):
+        """Show a popup overlay with the given title and content."""
+        self.popup.set_compositor(self.compositor)
+        self.popup.show(title, content)
+
+    def hide_popup(self):
+        """Hide the popup overlay."""
+        self.popup.hide()
+
 
     def on_user_submit(self, text: str):
         """Handle user input submission."""
@@ -777,6 +790,10 @@ class chatTUI(ChatActionHandlers):
 
     def handle_global_input(self, event: Any) -> bool:
         """Handle focus logging and input dispatch with navigation between input and history."""
+        
+        # Popup takes priority — all input goes to popup when visible
+        if self.popup.is_visible:
+            return self.popup.handle_input(event)
         
         # Handle keyboard navigation between input and history
         if isinstance(event, str):
