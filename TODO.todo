@@ -50,7 +50,7 @@
         [x] /tools moved to popup
         [x] /permissions moved to popup
         [x] /debug help moved to popup
-        [ ] Move debug panel to a popup
+        [ ] Move debug panel to a separate conversation
         
     [ ] Forms
         [ ] Toggle for settings

@@ -40,7 +40,16 @@ Centered overlay popups for commands that benefit from floating display rather t
 - Scroll position indicator overlaid on bottom-right when content overflows
 - Input interception: when popup is visible, `handle_global_input()` routes all input to the popup
 - Auto-sizing: `max_width_ratio` / `max_height_ratio` control popup dimensions relative to terminal
-- Currently used by: `/help` (command list), `/status` (async with placeholder), `/tools`, `/permissions`, `/debug` help; planned for: debug panel overlay
+- Currently used by: `/help` (command list), `/status` (async with placeholder), `/tools`, `/permissions`, `/debug` help
+
+## Debug Panel
+
+The debug console is a `DebugLogPanel` (extends `TextComponent`) wrapped in a `Box`.
+
+- `DebugLogPanel` receives log entries via `TuiLogHandler`
+- Toggled visible/hidden via Hsplit layout mutation in `toggle_debug_console()`
+- Auto-scrolls to bottom on new log entries
+- Planned: move to a separate conversation (not popup)
 
 ## Buffer (`tui/buffer.py`)
 

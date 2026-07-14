@@ -38,10 +38,11 @@ Supports **action flash feedback**: when `parent_msg._flash_action_key` is set, 
 - Used for autocomplete popups in `InputComponent`
 
 ### `debug_panel.py`
-`DebugLogPanel` — scrolling log display.
+`DebugLogPanel` — scrolling log display (extends `TextComponent`).
 - Renders a capped list of log lines
 - Max line length enforced to prevent layout breakage
-- Toggled visible/hidden in the compositor overlay stack
+- Auto-scrolls to bottom on new entries (`auto_scroll_bottom=True`)
+- Toggled visible/hidden via Hsplit layout in `app.py`
 
 ### `popup.py`
 `Popup` — centered overlay popup built on `Box` + `TextComponent`.
@@ -55,7 +56,7 @@ Supports **action flash feedback**: when `parent_msg._flash_action_key` is set, 
 - `PopupAction` dataclass — lightweight action compatible with Box's action format protocol (`.format()` → `[key] label`)
 - Scroll position indicator (`3/20`) overlaid on bottom-right when content overflows
 - Input is fully intercepted when popup is visible (all keys consumed)
-- Used by `/help` (command list); planned for `/status`, debug panel
+- Used by `/help`, `/status`, `/tools`, `/permissions`, `/debug` help
 
 ### `markdown.py`
 Live markdown parser and renderer. Parses markdown into display lines of `StyledSegment` objects, styled via `pico_cfg.config.markdown_styles`.
