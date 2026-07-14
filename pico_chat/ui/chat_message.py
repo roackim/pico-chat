@@ -100,6 +100,9 @@ class Message:
         # Command error context (for edit action on failed commands)
         self.command_text: Optional[str] = None
         
+        # Action click flash feedback (set by ChatHistoryPanel, read by Box)
+        self._flash_action_key: Optional[str] = None
+        
         self.box = Box(
             self.component,
             parent_msg=self,

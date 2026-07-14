@@ -3,6 +3,7 @@ from typing import Optional, Any, List
 from pico_chat.ui.tui.components.base import Component
 from pico_chat.ui.tui.buffer import Buffer, SubBuffer
 from pico_chat.ui.tui.terminal import MouseEvent
+from pico_chat.ui.tui.msg_types import MsgAction
 
 from pico_chat import pico_cfg
 from pico_chat.ui.tui.colors import theme
@@ -29,6 +30,11 @@ class Box(Component):
 
         # Optional in-place editor (replaces child rendering while active)
         self.inline_editor = None
+
+        # Hit regions for clickable actions in the bottom border
+        # List of (local_x_start, local_x_end, MsgAction)
+        # Populated during render; action click detection is handled by ChatHistoryPanel.
+        self._action_hit_regions: List[tuple[int, int, MsgAction]] = []
 
     @property
     def children(self):
@@ -231,6 +237,9 @@ class Box(Component):
             actions_str = " ".join(action.format() for action in actions)
             bottom_content_parts.append(f" {actions_str} ")
         
+        # Reset hit regions (only valid when focused with actions)
+        self._action_hit_regions = []
+        
         if bottom_content_parts:
             # Join metrics and actions with separator if both exist
             if len(bottom_content_parts) == 2:
@@ -251,6 +260,27 @@ class Box(Component):
                 
                 # Draw combined string
                 self.subbuffer.write_str(left_border_width + 1, self.height - 1, bottom_str, fg=fg, bg=bg)
+                
+                # Record action hit regions (local SubBuffer coordinates)
+                if actions and self.focused:
+                    actions_start_in_str = 0
+                    if len(bottom_content_parts) == 2:
+                        actions_start_in_str = len(bottom_content_parts[0]) + len("│")
+                    # Each action occupies "[key] label " (with trailing space)
+                    x_offset = left_border_width + 1 + actions_start_in_str
+                    flash_key = getattr(self.parent_msg, '_flash_action_key', None)
+                    for action in actions:
+                        formatted = action.format()
+                        region_start = x_offset
+                        region_end = x_offset + len(formatted)
+                        self._action_hit_regions.append((region_start, region_end, action))
+                        # Flash feedback: overwrite this action's cells with reverse
+                        if flash_key and action.key == flash_key:
+                            for fx in range(region_start, region_end):
+                                self.subbuffer.set(fx, self.height - 1,
+                                                   self.subbuffer.cells[self.height - 1][fx].char,
+                                                   reverse=True)
+                        x_offset += len(formatted) + 1  # +1 for the space separator
                 
                 # Draw one more border char on the right before the corner
                 self.subbuffer.set(self.width - 2, self.height - 1, style.h, fg=fg, bg=bg)
