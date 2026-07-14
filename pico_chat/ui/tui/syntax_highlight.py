@@ -98,7 +98,7 @@ _KEYWORDS: dict[str, frozenset[str]] = {
         "logout", "popd", "printf", "pushd", "read", "readonly", "return",
         "set", "shift", "shopt", "source", "suspend", "test", "times",
         "trap", "type", "typeset", "ulimit", "umask", "unalias", "unset",
-        "until", "wait", "while",
+        "until", "wait", "while", "do", "done", "then", "else", "elif", "fi", "true", "false", "function",
     }),
     "sql": frozenset({
         "select", "from", "where", "insert", "update", "delete", "create",

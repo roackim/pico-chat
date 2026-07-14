@@ -1,4 +1,4 @@
-from typing import Optional, Any, List, Callable
+from typing import Optional, Any, List, Callable, Dict
 from pico_chat.ui.tui.components.base import Component
 from pico_chat.ui.tui.components.menu import SelectionMenu
 from pico_chat.ui.tui.fuzzy import fuzzy_search
@@ -12,8 +12,7 @@ from .cursor_renderer import CursorRenderer
 from .command_completion import CommandCompletion
 from .subcommand_completion import SubcommandCompletion
 from .context_completion import ContextCompletion
-from .server_completion import ServerCompletion
-from .path_completion import PathCompletion
+from .argument_completion import ArgumentCompletion
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.terminal import MouseEvent
 from pico_chat.ui.tui.layout_utils import display_width
@@ -57,11 +56,8 @@ class InputComponent(Component):
         self.subcommand_callback: Optional[Callable[[str], List[str]]] = None
         self.context_completion: Optional[ContextCompletion] = None
         self.context_items_callback: Optional[Callable[[], List[str]]] = None
-        self.server_completion: Optional[ServerCompletion] = None
-        self.server_names_callback: Optional[Callable[[], List[str]]] = None
-        self.path_completion: Optional[PathCompletion] = None
-        self.path_commands: List[str] = []
-        self.get_workspace_callback: Optional[Callable[[], str]] = None
+        self.argument_completion: Optional[ArgumentCompletion] = None
+        self._command_registry: Optional[Dict[str, Any]] = None  # COMMANDS dict for generic hints/args
     
     @property
     def on_submit(self):
@@ -107,15 +103,10 @@ class InputComponent(Component):
     def setup_context(self, get_items_callback: Callable[[], List[str]]):
         """Initialize context (@file) completion system."""
         self.context_items_callback = get_items_callback
-    
-    def setup_servers(self, get_servers_callback: Callable[[], List[str]]):
-        """Initialize server name completion system."""
-        self.server_names_callback = get_servers_callback
 
-    def setup_path_commands(self, commands: List[str], get_workspace: Callable[[], str]):
-        """Initialize filesystem path completion for the given commands."""
-        self.path_commands = commands
-        self.get_workspace_callback = get_workspace
+    def setup_command_registry(self, registry: Dict[str, Any]):
+        """Store the COMMANDS registry for generic argument hints and completion."""
+        self._command_registry = registry
     
     def _ensure_command_menu(self):
         """Lazy-create command menu and completion system on first use."""
@@ -150,27 +141,16 @@ class InputComponent(Component):
             )
             self.context_completion = ContextCompletion(menu, self.context_items_callback)
     
-    def _ensure_server_menu(self):
-        """Lazy-create server menu and completion system on first use."""
-        if self.server_completion is None and self.server_names_callback:
+    def _ensure_argument_menu(self):
+        """Lazy-create argument completion menu for generic Param-driven completion."""
+        if self.argument_completion is None and self._command_registry:
             compositor = self.compositor_ref if hasattr(self, 'compositor_ref') else None
             menu = SelectionMenu(
                 compositor=compositor,
                 frame_color=self.content_color,
                 content_color=self.content_color
             )
-            self.server_completion = ServerCompletion(menu, self.server_names_callback)
-
-    def _ensure_path_menu(self):
-        """Lazy-create path menu and completion system on first use."""
-        if self.path_completion is None and self.path_commands and self.get_workspace_callback:
-            compositor = self.compositor_ref if hasattr(self, 'compositor_ref') else None
-            menu = SelectionMenu(
-                compositor=compositor,
-                frame_color=self.content_color,
-                content_color=self.content_color
-            )
-            self.path_completion = PathCompletion(menu, self.path_commands, self.get_workspace_callback)
+            self.argument_completion = ArgumentCompletion(menu, self._command_registry)
 
     # def setup_menus(self, commands: List[str], get_context_items: Optional[Callable[[], List[str]]] = None,
                     # get_subcommands: Optional[Callable[[str], List[str]]] = None):
@@ -200,8 +180,8 @@ class InputComponent(Component):
                     self.subcommand_completion.hide()
                 if self.context_completion:
                     self.context_completion.hide()
-                if self.server_completion:
-                    self.server_completion.hide()
+                if self.argument_completion:
+                    self.argument_completion.hide()
                 self._position_command_menu()
                 return
         
@@ -214,31 +194,20 @@ class InputComponent(Component):
                 # Subcommand menu is active - hide others and position
                 if self.context_completion:
                     self.context_completion.hide()
-                if self.server_completion:
-                    self.server_completion.hide()
+                if self.argument_completion:
+                    self.argument_completion.hide()
                 self._position_subcommand_menu()
                 return
         
-        # Try server completion (more specific than context)
-        if self.server_names_callback:
-            self._ensure_server_menu()
-            self.server_completion.update(self.buffer.text, self.buffer.cursor_pos)
+        # Try generic argument completion (Param-driven)
+        if self._command_registry:
+            self._ensure_argument_menu()
+            self.argument_completion.update(self.buffer.text, self.buffer.cursor_pos)
             
-            if self.server_completion.is_active:
+            if self.argument_completion.is_active:
                 if self.context_completion:
                     self.context_completion.hide()
-                self._position_server_menu()
-                return
-        
-        # Try path completion (e.g. /cd)  
-        if self.get_workspace_callback:
-            self._ensure_path_menu()
-            self.path_completion.update(self.buffer.text, self.buffer.cursor_pos)
-
-            if self.path_completion.is_active:
-                if self.context_completion:
-                    self.context_completion.hide()
-                self._position_path_menu()
+                self._position_argument_menu()
                 return
 
         # Try context completion if no other menu active
@@ -278,44 +247,25 @@ class InputComponent(Component):
         
         self._position_menu_at(self.subcommand_completion.menu, trigger_pos)
     
-    def _position_server_menu(self):
-        """Position server menu at the server name location."""
-        if not self.server_completion or not self.server_completion.is_active:
+    def _position_argument_menu(self):
+        """Position argument completion menu at the current argument location."""
+        if not self.argument_completion or not self.argument_completion.is_active:
             return
         
         text = self.buffer.text.lstrip()
         leading_ws = len(self.buffer.text) - len(text)
         
-        # Find position after '/server use ' or '/server remove '
-        if text.startswith('/server '):
-            parts = text.split(' ', 2)
-            if len(parts) >= 2:
-                # Position after the subcommand
-                pos_after_server = text.find(' ') + 1
-                pos_after_subcommand = text.find(' ', pos_after_server) + 1 if ' ' in text[pos_after_server:] else pos_after_server
-                trigger_pos = leading_ws + pos_after_subcommand
-            else:
-                trigger_pos = leading_ws
+        # Position at the start of the current argument being typed.
+        # Walk to the last space in the clean text to find where the current word starts.
+        parts = text.split()
+        if len(parts) >= 2:
+            # Find position of the last space (before current arg)
+            last_space = text.rfind(' ')
+            trigger_pos = leading_ws + last_space + 1
         else:
             trigger_pos = leading_ws
         
-        self._position_menu_at(self.server_completion.menu, trigger_pos)
-    
-    def _position_path_menu(self):
-        """Position path menu after the command and space (e.g. '/cd ')."""
-        if not self.path_completion or not self.path_completion.is_active:
-            return
-
-        text = self.buffer.text.lstrip()
-        leading_ws = len(self.buffer.text) - len(text)
-
-        # Position after "/<cmd> "
-        if ' ' in text:
-            trigger_pos = leading_ws + text.find(' ') + 1
-        else:
-            trigger_pos = leading_ws
-
-        self._position_menu_at(self.path_completion.menu, trigger_pos)
+        self._position_menu_at(self.argument_completion.menu, trigger_pos)
 
     def _position_context_menu(self):
         """Position context menu at the '@' character."""
@@ -426,67 +376,88 @@ class InputComponent(Component):
         
         # Note: Cursor is rendered separately via render_cursor() called after SubBuffer blit
         
-        # Render parameter hints in grey after cursor
+        # Render parameter hints in grey after the end of typed text (not cursor)
         if self.focused and not self.has_active_completion():
             hint = self._get_parameter_hint()
             if hint:
-                # Get cursor screen position
-                cursor_row, cursor_col = self.coord_mapper.get_cursor_coords(self.buffer.text, self.buffer.cursor_pos)
-                # Adjust for scroll
-                screen_row = cursor_row - scroll_y
+                # Position hint at the END of the text, not at the cursor
+                text_end_row, text_end_col = self.coord_mapper.get_cursor_coords(
+                    self.buffer.text, len(self.buffer.text)
+                )
+                screen_row = text_end_row - scroll_y
                 
-                # Only show hint if cursor is visible
+                # Only show hint if the end of text is visible
                 if 0 <= screen_row < self.height:
-                    hint_x = self.x + cursor_col
+                    hint_x = self.x + text_end_col
                     hint_y = self.y + screen_row
                     
                     # Show hint in muted color (limited to available width)
-                    hint_max_width = max(0, self.width - cursor_col)
+                    hint_max_width = max(0, self.width - text_end_col)
                     buffer.write_str(hint_x, hint_y, hint, fg=theme.MUTED, bg=self.bg, max_width=hint_max_width)
         
         # Menu is rendered by compositor as overlay (not here)
     
     def _get_parameter_hint(self) -> str:
-        """Get parameter hint text to show in grey after cursor."""
+        """Get parameter hint text to show in grey after cursor.
+        
+        Uses the Command.params schema for generic, data-driven hints.
+        """
         text = self.buffer.text.lstrip()
         
         # Only show hints for commands
         if not text.startswith('/'):
             return ""
         
-        # Parse command structure (strip trailing spaces to handle "/server use " case)
-        parts = [p for p in text.split(' ') if p]  # Filter out empty parts from trailing spaces
+        # Parse the command structure
+        parts = text.split()
+        if not parts:
+            return ""
         
-        # /server add hints
-        # Format: /server add <name> <type> <model/url> [provider]
-        if len(parts) >= 2 and parts[0] == '/server' and parts[1] == 'add':
-            if len(parts) == 2:
-                return " NAME"
-            elif len(parts) == 3:
-                return " openrouter|llamacpp"
-            elif len(parts) == 4:
-                server_type = parts[3]
-                if server_type == 'openrouter':
-                    return " MODEL_ID [PROVIDER]"
-                elif server_type == 'llamacpp':
-                    return " URL"
-            elif len(parts) == 5:
-                server_type = parts[3]
-                if server_type == 'openrouter':
-                    return " [PROVIDER]"
+        cmd_name = parts[0][1:]  # strip '/'
+        if cmd_name not in self._command_registry:
+            return ""
         
-        # /server use/remove hints (though these have completion)
-        elif len(parts) >= 2 and parts[0] == '/server' and parts[1] in ('use', 'remove'):
-            if len(parts) == 2:
-                return " SERVER_NAME"
+        root_cmd = self._command_registry[cmd_name]
         
-        # /set hints
-        elif len(parts) >= 2 and parts[0] == '/set':
-            if len(parts) == 2:
-                return " fps"
-            elif parts[1] == 'fps' and len(parts) == 2:
-                return " 30|60|120"
+        # Walk subcommands to find the deepest resolved command
+        cmd, offset = root_cmd.resolve_command(parts[1:])
         
+        # If the resolved command is a non-leaf (has subcommands), hint the subcommand list
+        if cmd.has_subcommands():
+            # We're still on the subcommand position — no param hint
+            return ""
+        
+        if not cmd.params:
+            return ""
+        
+        # Calculate which arg the cursor is on
+        args_start = 1 + offset
+        if len(parts) <= args_start:
+            # No args typed yet — hint the first param
+            if text.endswith(' '):
+                arg_index = 0
+            else:
+                # Still typing the subcommand name
+                return ""
+        else:
+            # Count args after the subcommand path
+            after_parts = parts[args_start:]
+            if text.endswith(' '):
+                # Trailing space: cursor is between args, hint from the next arg
+                arg_index = len(after_parts)
+            else:
+                # No trailing space: user is mid-arg — skip the arg being typed
+                arg_index = len(after_parts)
+        
+        # Collect hint for arg_index and beyond
+        hints = []
+        for i in range(arg_index, len(cmd.params)):
+            p = cmd.params[i]
+            name = p.name if p.required else f"[{p.name}]"
+            hints.append(name)
+        
+        if hints:
+            return " " + " ".join(hints)
         return ""
     
     def render_cursor(self, buffer: Buffer):
@@ -559,9 +530,8 @@ class InputComponent(Component):
             for completion in (
                 self.command_completion,
                 self.subcommand_completion,
+                self.argument_completion,
                 self.context_completion,
-                self.server_completion,
-                self.path_completion,
             )
         )
 
@@ -579,8 +549,7 @@ class InputComponent(Component):
         for completion in [
             self.command_completion,
             self.subcommand_completion,
-            self.server_completion,
-            self.path_completion,
+            self.argument_completion,
             self.context_completion,
         ]:
             if completion and completion.is_active:

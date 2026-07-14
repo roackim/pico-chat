@@ -1,4 +1,7 @@
-from typing import Any, Dict, List, Optional, Protocol
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional, Protocol, Union
 import asyncio
 import json
 import subprocess
@@ -10,6 +13,28 @@ from pico_chat import pico_cfg
 
 import logging
 
+# ---------------------------------------------------------------------------
+# Dynamic completion helpers (read from pico_cfg at call-time, always fresh)
+# ---------------------------------------------------------------------------
+
+def _server_name_completions() -> List[str]:
+    """Return current server names from config (always fresh)."""
+    return list(pico_cfg.config.servers.keys())
+
+
+# Type for completion sources: a static list of strings, or a callable returning strings.
+CompletionSource = Union[List[str], Callable[[], List[str]]]
+
+
+@dataclass
+class Param:
+    """Defines a single command parameter for hints and autocomplete."""
+    name: str                                          # Display name in hint (e.g. "NAME")
+    completions: Optional[CompletionSource] = None     # Static list or callable
+    path: bool = False                                 # If True, completions scans filesystem dirs
+    required: bool = False                             # True → "NAME", False → "[NAME]"
+
+
 class ChatUIProtocol(Protocol):
     agent: Any
     chat_history_panel: Any
@@ -17,16 +42,95 @@ class ChatUIProtocol(Protocol):
     compositor: Any
 
 class Command:
-    def __init__(self, name: str, description: str, subcommands: Optional[Dict[str, 'Command']] = None):
+    def __init__(self, name: str, description: str,
+                 subcommands: Optional[Dict[str, 'Command']] = None,
+                 params: Optional[List[Param]] = None):
         self.name = name
         self.description = description
         self.subcommands = subcommands or {}
+        self.params = params or []
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         raise NotImplementedError
     
     def has_subcommands(self) -> bool:
         return len(self.subcommands) > 0
+
+    def resolve_command(self, parts: List[str]) -> tuple['Command', int]:
+        """Walk the subcommand tree to find the deepest command and remaining arg index.
+
+        Returns (command, arg_offset) where arg_offset is the index into `parts`
+        where the command's own arguments begin.
+
+        Example: parts = ["server", "add", "foo"]
+          → (ServerAddCommand, 2)  because parts[2:] are ServerAddCommand's args
+        """
+        cmd = self
+        offset = 0
+        while cmd.has_subcommands() and offset < len(parts):
+            sub_name = parts[offset]
+            if sub_name in cmd.subcommands:
+                cmd = cmd.subcommands[sub_name]
+                offset += 1
+            else:
+                break
+        return cmd, offset
+
+    def get_completions(self, arg_index: int) -> List[str]:
+        """Resolve completions for the argument at the given index.
+
+        For commands with subcommands, the first arg (arg_index 0) is the
+        subcommand name.  Subsequent args are resolved from the subcommand's
+        own params list.
+        """
+        # If this command has subcommands, arg 0 = subcommand name
+        if self.has_subcommands():
+            if arg_index == 0:
+                return sorted(self.subcommands.keys())
+            # Caller must resolve subcommand and shift index
+            return []
+
+        # Leaf command — resolve from params
+        if arg_index < 0 or arg_index >= len(self.params):
+            return []
+
+        p = self.params[arg_index]
+        if p.path:
+            return self._scan_dirs(p.completions)
+
+        if p.completions is None:
+            return []
+        if callable(p.completions):
+            return p.completions()
+        return list(p.completions)
+
+    @staticmethod
+    def _scan_dirs(workspace: Any = None) -> List[str]:
+        """Scan directories for path completion.
+
+        Args:
+            workspace: If provided (str or callable), scan this directory
+                       instead of the current working directory.
+        """
+        base = None
+        if workspace is not None:
+            base = workspace() if callable(workspace) else workspace
+
+        try:
+            entries = []
+            target = base or '.'
+            with os.scandir(target) as it:
+                for entry in sorted(it, key=lambda e: e.name.lower()):
+                    if entry.name.startswith('.'):
+                        continue
+                    try:
+                        if entry.is_dir(follow_symlinks=True):
+                            entries.append(entry.name + '/')
+                    except OSError:
+                        pass
+            return entries
+        except OSError:
+            return []
 
 class HelpCommand(Command):
     def __init__(self):
@@ -226,7 +330,12 @@ class StatusCommand(Command):
 
 class ServerAddCommand(Command):
     def __init__(self):
-        super().__init__("add", "Add a named LLM server configuration")
+        super().__init__("add", "Add a named LLM server configuration", params=[
+            Param("NAME", required=True),
+            Param("TYPE", completions=["openrouter", "llamacpp"], required=True),
+            Param("MODEL_OR_URL", required=True),
+            Param("PROVIDER"),
+        ])
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         """
@@ -352,7 +461,9 @@ class ServerListCommand(Command):
 
 class ServerUseCommand(Command):
     def __init__(self):
-        super().__init__("use", "Switch to a different server configuration")
+        super().__init__("use", "Switch to a different server configuration", params=[
+            Param("SERVER_NAME", completions=_server_name_completions),
+        ])
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         if not args:
@@ -383,7 +494,9 @@ class ServerUseCommand(Command):
 
 class ServerRemoveCommand(Command):
     def __init__(self):
-        super().__init__("remove", "Remove a server configuration")
+        super().__init__("remove", "Remove a server configuration", params=[
+            Param("SERVER_NAME", completions=_server_name_completions),
+        ])
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         if not args:
@@ -414,7 +527,9 @@ class ServerRemoveCommand(Command):
 
 class ServerInfoCommand(Command):
     def __init__(self):
-        super().__init__("info", "Show full details for a server configuration")
+        super().__init__("info", "Show full details for a server configuration", params=[
+            Param("SERVER_NAME", completions=_server_name_completions),
+        ])
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         if not args:
@@ -879,7 +994,9 @@ class PwdCommand(Command):
 
 class CdCommand(Command):
     def __init__(self):
-        super().__init__("cd", "Change workspace directory and rebuild context")
+        super().__init__("cd", "Change workspace directory and rebuild context", params=[
+            Param("DIR", path=True),
+        ])
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         if not args:

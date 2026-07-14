@@ -61,19 +61,13 @@ class chatTUI(ChatActionHandlers):
         # Setup subcommand completion
         self.input_component.setup_subcommands(get_subcommand_list)
         
-        # Setup server name completion for /server use and /server remove
-        def get_server_names():
-            from pico_chat import pico_cfg
-            return list(pico_cfg.config.servers.keys())
-        self.input_component.setup_servers(get_server_names)
-        
         # Setup context (@file) completion
         get_context_items = lambda: agent.list_files_and_folders() if hasattr(agent, 'list_files_and_folders') else []
         self.input_component.setup_context(get_context_items)
 
-        # Setup path completion for /cd
-        get_workspace = lambda: agent.workspace if hasattr(agent, 'workspace') else os.getcwd()
-        self.input_component.setup_path_commands(["cd"], get_workspace)
+        # Setup generic argument completion (driven by Command.params schema)
+        from pico_chat.ui.commands import COMMANDS
+        self.input_component.setup_command_registry(COMMANDS)
         
         self.input_box = Box(self.input_component, title="message", fg=self.input_component.frame_color)
 

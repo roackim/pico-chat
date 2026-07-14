@@ -162,7 +162,9 @@ class ChatHistoryPanel(TextComponent):
         if sel is None:
             return None
         
-        component = sel.msg.get_component()
+        box = sel.msg.get_component()
+        # Unwrap Box → inner component (MarkdownComponent or TextComponent)
+        component = getattr(box, 'child', box)
         wrapped_lines = getattr(component, '_wrapped_lines', None)
         if wrapped_lines is None:
             # TextComponent: fall back to _lines
