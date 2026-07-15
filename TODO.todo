@@ -27,8 +27,8 @@
 [ ] allow to delete a queued message by simply removing from the queue instead of regenerating the convo
 [ ] deleting a non convo message should not stop generation
 
-[ ] for permission tool:
-    - change prefix from > to ? while asking, make colors more visible too
+[x] for permission tool:
+    - change prefix from > to ? while asking, make colors more visible too like purple or magenta
     
 [ ] improve the output action
     - make it reversible, so that if you click it again, it will undo the action
@@ -57,6 +57,7 @@
         [ ] Open fields
         [ ] Checkboxes list   [ ] | [x]
         [ ] Radio list        ( ) | (x)
+        
     [ ] Add a status line on top of input field (instead of relying on chat messages)
         [ ] Copied to clipboard ! (with timeout ? / overwrite)
         [ ] Add an indicator for down message like "+3 messages"

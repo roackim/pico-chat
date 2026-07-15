@@ -303,8 +303,12 @@ class Message:
             elif 'executing' in self.tool_status:
                 status_symbol = f" {theme.MUTED}⋯{theme.reset()}"
         
-        # Build header line - simpler format: "> toolname"
-        header = f"{theme.WARNING}> {self.tool_name}{theme.reset()}"
+        # Build header line - use "?" prefix for permission requests, ">" for tool calls
+        from pico_chat.ui.tui import msg_types
+        if isinstance(self.type, msg_types.AskPermissionMsg):
+            header = f"{theme.PERMISSION}? {self.tool_name}{theme.reset()}"
+        else:
+            header = f"{theme.WARNING}> {self.tool_name}{theme.reset()}"
         
         # Add compact arg summary to header for better single-line view
         args_summary = ""

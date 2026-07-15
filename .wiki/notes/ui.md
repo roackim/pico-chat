@@ -135,7 +135,7 @@ Every message displayed in the chat history has a `MsgType` that controls its ti
 | `SysMsgWarning` | "warning" | WARNING | COPY, DELETE |
 | `ToolCallMsg` | "tool" | WARNING | OUTPUT, COPY, DELETE |
 | `ToolDraftMsg` | "tool" | MUTED | none |
-| `AskPermissionMsg` | "permission" | WARNING | ALLOW, DENY, OUTPUT, COPY |
+| `AskPermissionMsg` | "permission" | PERMISSION | ALLOW, DENY, OUTPUT, COPY |
 
 `ThinkingMsg` and `SysMsgError/Warning` extend `PicoMsg` / `SysMsg` — they inherit defaults and override only what differs.
 

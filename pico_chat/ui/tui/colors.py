@@ -77,6 +77,7 @@ class _theme:
     ERROR: RGB
     WARNING: RGB
     SUCCESS: RGB
+    PERMISSION: RGB  # Purple/magenta for permission prompts
     
     USER: RGB
     PICO: RGB
@@ -108,6 +109,7 @@ default = _theme(
     ERROR       = RGB("#F48771"),   # Soft red
     WARNING     = RGB("#CCA700"),   # Amber/gold
     SUCCESS     = RGB("#89D185"),   # Soft green
+    PERMISSION  = RGB("#C586C0"),   # Purple/magenta for permission prompts
     
     USER        = RGB("#4EC9B0"),   # Cyan/teal
     PICO        = RGB("#569CD6"),   # Blue
@@ -125,6 +127,7 @@ terminal = _theme(
     ERROR       = ANSIColor(fg=91),         # bright red
     WARNING     = ANSIColor(fg=33),         # yellow  (maps to user's yellow)
     SUCCESS     = ANSIColor(fg=32),         # green   (maps to user's green)
+    PERMISSION  = ANSIColor(fg=95),         # bright magenta (maps to user's magenta)
     USER        = ANSIColor(fg=32),         # green
     PICO        = ANSIColor(fg=36),         # cyan    (maps to user's cyan)
     FOCUSED     = ANSIColor(fg=33),         # bright yellow

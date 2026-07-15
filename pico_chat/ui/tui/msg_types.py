@@ -90,6 +90,6 @@ class ToolDraftMsg(MsgType):
 class AskPermissionMsg(MsgType):
     name = "permission"
     title = "permission"
-    frame_color = "WARNING"
+    frame_color = "PERMISSION"
     content_color = None
     actions = [MsgAction.ALLOW, MsgAction.DENY, MsgAction.OUTPUT, MsgAction.COPY]
