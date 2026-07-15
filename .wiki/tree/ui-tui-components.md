@@ -48,6 +48,25 @@ Supports **action flash feedback**: when `parent_msg._flash_action_key` is set, 
 `Popup` — centered overlay popup built on `Box` + `TextComponent`.
 - Component tree: `Popup` → `Box` (borders/title/action bar) → `TextComponent` (content)
 - `show(title, content)` — displays popup, auto-centers, registers with compositor
+
+### `form.py`
+Form field components and layout container.
+- `FormField` — ABC for all fields: `get_value()`, `set_value()`, `render()`, `handle_input()`
+- `ToggleField` — `[x]`/`[ ]` boolean toggle
+- `TextField` — single-line text input with cursor
+- `TextAreaField` — multiline text input with cursor navigation
+- `CheckboxListField` — multi-select `[ ]`/`[x]` list
+- `RadioListField` — single-select `()`/`(x)` list
+- `FormContainer` — vertical layout manager with Tab/Shift+Tab focus navigation, scroll offset, field spacing
+
+### `form_popup.py`
+`FormPopup` — modal overlay wrapping a `FormContainer` inside a `Box`.
+- `show(title, fields, on_submit, on_cancel)` — displays form, registers with compositor
+- Action bar: `[Enter] ok` / `[Esc] cancel`
+- Required field validation with error message overlay
+- Enter on TextField moves to next field; Enter on other fields submits
+- Mouse: clickable actions, click-to-focus fields
+- Used by: `/server add` (no-args form mode)
 - `hide()` — dismisses popup, unregisters from compositor
 - Auto-centers based on terminal dimensions (`max_width_ratio`, `max_height_ratio`)
 - **Bottom action bar** with `[Esc] close` — uses Box's native action rendering, so it looks and positions exactly like message box actions

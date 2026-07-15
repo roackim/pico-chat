@@ -43,6 +43,7 @@ class ChatUIProtocol(Protocol):
     
     def show_popup(self, title: str, content: str) -> None: ...
     def hide_popup(self) -> None: ...
+    def show_form_popup(self, title: str, fields: list, on_submit, on_cancel=None) -> None: ...
 
 class Command:
     def __init__(self, name: str, description: str,
@@ -333,9 +334,16 @@ class ServerAddCommand(Command):
         """
         Add a named server configuration.
         Usage: /server add <name> <type> <model/url> [provider]
+        When called without args, shows an interactive form.
         """
+        # If no args, show the interactive form
+        if len(args) == 0:
+            self._show_form(ui)
+            return
+
+        # If args provided, use the existing CLI-style flow
         if len(args) < 3:
-            command_text = "/server add " + " ".join(args) if args else "/server add"
+            command_text = "/server add " + " ".join(args)
             ui.chat_history_panel.add_message(
                 "Usage: /server add <name> <type> <model/url> [provider]\n\n"
                 "Examples:\n"
@@ -349,11 +357,50 @@ class ServerAddCommand(Command):
             )
             return
 
-        server_name = args[0]
-        server_type = args[1].lower()
-        model_or_url = args[2]
-        provider = args[3] if len(args) > 3 else None
-        command_text = "/server add " + " ".join(args)
+        await self._execute_add(ui, args[0], args[1].lower(), args[2],
+                                args[3] if len(args) > 3 else None)
+
+    def _show_form(self, ui: ChatUIProtocol):
+        """Show the interactive server-add form."""
+        from pico_chat.ui.tui.components.form import (
+            TextField, RadioListField,
+        )
+
+        fields = [
+            TextField("Name", required=True, placeholder="my-server"),
+            RadioListField("Type", options=["openrouter", "llamacpp"], value=0, required=True),
+            TextField("Model or URL", required=True,
+                      placeholder="anthropic/claude-3.5-sonnet"),
+            TextField("Provider", placeholder="(optional, OpenRouter only)"),
+        ]
+
+        def on_submit(values):
+            server_type = "openrouter" if values.get("Type") == 0 else "llamacpp"
+            name = values.get("Name", "").strip()
+            model_url = values.get("Model or URL", "").strip()
+            provider = values.get("Provider", "").strip() or None
+
+            if not name or not model_url:
+                ui.chat_history_panel.add_message(
+                    "Name and Model/URL are required.",
+                    msg_type=SysMsgError(), title="server"
+                )
+                return
+
+            import asyncio
+            asyncio.ensure_future(
+                self._execute_add(ui, name, server_type, model_url, provider)
+            )
+
+        ui.show_form_popup("Add Server", fields, on_submit)
+
+    async def _execute_add(self, ui: ChatUIProtocol, server_name: str,
+                           server_type: str, model_or_url: str,
+                           provider: Optional[str]):
+        """Perform the actual server addition."""
+        command_text = f"/server add {server_name} {server_type} {model_or_url}"
+        if provider:
+            command_text += f" {provider}"
 
         from pico_chat.harness.server_service import ServerService
         svc = ServerService()

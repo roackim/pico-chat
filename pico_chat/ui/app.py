@@ -17,6 +17,7 @@ from pico_chat.ui.tui.terminal import MouseEvent
 from pico_chat.ui.tui.components import TextComponent, Box, InputComponent
 from pico_chat.ui.tui.components.debug_panel import DebugLogPanel
 from pico_chat.ui.tui.components.popup import Popup
+from pico_chat.ui.tui.components.form_popup import FormPopup
 from pico_chat.ui.chat_history_panel import ChatHistoryPanel
 from pico_chat.ui.chat_message import Message
 from pico_chat.ui.commands import handle_command, get_command_list, get_subcommand_list
@@ -85,6 +86,9 @@ class chatTUI(ChatActionHandlers):
         
         # Popup overlay for commands like /help, /status, etc.
         self.popup = Popup()
+        
+        # Form popup overlay for interactive forms (server add, git commit, etc.)
+        self.form_popup = FormPopup()
         
         # Setup logging to debug panel
         self.log_handler = setup_tui_logging(self.debug_panel)
@@ -679,6 +683,11 @@ class chatTUI(ChatActionHandlers):
         """Hide the popup overlay."""
         self.popup.hide()
 
+    def show_form_popup(self, title: str, fields: list, on_submit, on_cancel=None):
+        """Show a form popup overlay with interactive fields."""
+        self.form_popup.set_compositor(self.compositor)
+        self.form_popup.show(title, fields, on_submit, on_cancel)
+
 
     def on_user_submit(self, text: str):
         """Handle user input submission."""
@@ -794,6 +803,10 @@ class chatTUI(ChatActionHandlers):
         # Popup takes priority — all input goes to popup when visible
         if self.popup.is_visible:
             return self.popup.handle_input(event)
+        
+        # Form popup takes priority — all input goes to form when visible
+        if self.form_popup.is_visible:
+            return self.form_popup.handle_input(event)
         
         # Handle keyboard navigation between input and history
         if isinstance(event, str):

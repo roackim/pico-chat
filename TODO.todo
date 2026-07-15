@@ -53,10 +53,12 @@
         [ ] Move debug panel to a separate conversation
         
     [ ] Forms
-        [ ] Toggle for settings
-        [ ] Open fields
-        [ ] Checkboxes list   [ ] | [x]
-        [ ] Radio list        ( ) | (x)
+        [x] Toggle for settings
+        [x] Open fields
+            - single line
+            - multiline (description style)
+        [x] Checkboxes list   [ ] | [x]
+        [x] Radio list        ( ) | (x)
         
     [ ] Add a status line on top of input field (instead of relying on chat messages)
         [ ] Copied to clipboard ! (with timeout ? / overwrite)

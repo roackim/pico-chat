@@ -42,6 +42,63 @@ Centered overlay popups for commands that benefit from floating display rather t
 - Auto-sizing: `max_width_ratio` / `max_height_ratio` control popup dimensions relative to terminal
 - Currently used by: `/help` (command list), `/status` (async with placeholder), `/tools`, `/permissions`, `/debug` help
 
+## Forms System (`tui/components/form.py`, `form_popup.py`)
+
+Modal form dialogs for interactive input (server configuration, settings, etc.).
+
+### Field Types (`form.py`)
+
+| Field | Rendered | Value Type | Navigation |
+|-------|----------|------------|------------|
+| `ToggleField` | `[x] Label` / `[ ] Label` | `bool` | Space/Enter toggles |
+| `TextField` | `Label: value_cursor` | `str` | Typing, arrow keys, Home/End |
+| `TextAreaField` | Label + multiline content | `str` | Enter inserts newline, arrows navigate |
+| `CheckboxListField` | `Label:` + `[ ]`/`[x]` per option | `List[int]` | Up/Down moves cursor, Space/Enter toggles |
+| `RadioListField` | `Label:` + `()`/`(x)` per option | `Optional[int]` | Up/Down moves cursor, Space/Enter selects |
+
+All fields extend `FormField` ABC with: `get_value()`, `set_value()`, `render()`, `handle_input()`, `get_preferred_height()`.
+
+### FormContainer (`form.py`)
+
+Vertical layout manager for a list of fields:
+- **Tab / Shift+Tab** moves focus between fields
+- **Up / Down arrows** also navigate between fields
+- Input routes to the focused field
+- Scroll offset for forms taller than available height
+- 1-row spacing between fields
+
+### FormPopup (`form_popup.py`)
+
+Modal overlay wrapping a `FormContainer` inside a `Box`:
+- `show(title, fields, on_submit, on_cancel)` — displays form, registers with compositor
+- `hide()` — dismisses, unregisters from compositor
+- **Action bar**: `[Enter] ok` / `[Esc] cancel` in bottom border
+- **Validation**: `required=True` on fields blocks submit with error message
+- **Enter behavior**: on `TextField` moves to next field; on other fields submits
+- **Mouse**: clickable OK/Cancel buttons, click-to-focus fields
+- Callback receives `Dict[str, Any]` mapping field labels to values
+
+### Usage Pattern
+
+```python
+from pico_chat.ui.tui.components.form import TextField, RadioListField
+from pico_chat.ui.tui.components.form_popup import FormPopup
+
+form = FormPopup(compositor=compositor)
+form.show(
+    title="Add Server",
+    fields=[
+        TextField("Name", required=True),
+        RadioListField("Type", options=["openrouter", "llamacpp"]),
+        TextField("Model or URL", required=True),
+    ],
+    on_submit=lambda values: print(values),
+    on_cancel=lambda: print("cancelled"),
+)
+```
+
+Currently used by: `/server add` (no-args form mode)
+
 ## Debug Panel
 
 The debug console is a `DebugLogPanel` (extends `TextComponent`) wrapped in a `Box`.
