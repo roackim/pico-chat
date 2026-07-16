@@ -1057,6 +1057,277 @@ class CdCommand(Command):
             ui.chat_history_panel.add_message(str(e), msg_type=SysMsgError())
 
 
+class ConversationExportCommand(Command):
+    def __init__(self):
+        super().__init__("export", "Export conversation history to a JSON file", params=[
+            Param("FILENAME", required=True),
+        ])
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if not args:
+            ui.chat_history_panel.add_message(
+                "Usage: /conversation export <filename>",
+                msg_type=SysMsgError()
+            )
+            return
+
+        filename = args[0]
+        
+        # Ensure .json extension
+        if not filename.endswith('.json'):
+            filename += '.json'
+
+        try:
+            history = ui.agent.history
+            if not history:
+                ui.chat_history_panel.add_message(
+                    "No conversation history to export.",
+                    msg_type=SysMsgError()
+                )
+                return
+
+            with open(filename, 'w', encoding='utf-8') as f:
+                json.dump(history, f, indent=2, ensure_ascii=False)
+            
+            msg_count = len(history)
+            ui.chat_history_panel.add_message(
+                f"Conversation exported to {filename}\n({msg_count} messages)",
+                msg_type=SysMsg(),
+                title="conversation"
+            )
+        except Exception as e:
+            ui.chat_history_panel.add_message(
+                f"Export failed: {e}",
+                msg_type=SysMsgError(),
+                title="conversation"
+            )
+
+
+class ConversationImportCommand(Command):
+    def __init__(self):
+        super().__init__("import", "Import conversation history from a JSON file", params=[
+            Param("FILENAME", required=True),
+        ])
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if not args:
+            ui.chat_history_panel.add_message(
+                "Usage: /conversation import <filename>",
+                msg_type=SysMsgError()
+            )
+            return
+
+        filename = args[0]
+        
+        # Ensure .json extension
+        if not filename.endswith('.json'):
+            filename += '.json'
+
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                history = json.load(f)
+            
+            # Validate structure
+            if not isinstance(history, list):
+                ui.chat_history_panel.add_message(
+                    "Invalid conversation file: expected a JSON array",
+                    msg_type=SysMsgError(),
+                    title="conversation"
+                )
+                return
+            
+            # Validate each message has required fields
+            for i, msg in enumerate(history):
+                if not isinstance(msg, dict):
+                    ui.chat_history_panel.add_message(
+                        f"Invalid message at index {i}: expected an object",
+                        msg_type=SysMsgError(),
+                        title="conversation"
+                    )
+                    return
+                if 'role' not in msg:
+                    ui.chat_history_panel.add_message(
+                        f"Invalid message at index {i}: missing 'role' field",
+                        msg_type=SysMsgError(),
+                        title="conversation"
+                    )
+                    return
+
+            # Set the harness history
+            ui.agent.history = history
+            
+            # Rebuild UI from history
+            ui.chat_history_panel.clear()
+            self._rebuild_ui_from_history(ui, history)
+            
+            msg_count = len(history)
+            ui.chat_history_panel.add_message(
+                f"Conversation imported from {filename}\n({msg_count} messages)",
+                msg_type=SysMsg(),
+                title="conversation"
+            )
+            
+        except FileNotFoundError:
+            ui.chat_history_panel.add_message(
+                f"File not found: {filename}",
+                msg_type=SysMsgError(),
+                title="conversation"
+            )
+        except json.JSONDecodeError as e:
+            ui.chat_history_panel.add_message(
+                f"Invalid JSON file: {e}",
+                msg_type=SysMsgError(),
+                title="conversation"
+            )
+        except Exception as e:
+            ui.chat_history_panel.add_message(
+                f"Import failed: {e}",
+                msg_type=SysMsgError(),
+                title="conversation"
+            )
+
+    def _rebuild_ui_from_history(self, ui: ChatUIProtocol, history: List[Dict[str, Any]]):
+        """Reconstruct UI messages from harness history.
+        
+        Groups consecutive messages by role and type for display.
+        """
+        from pico_chat.ui.tui.msg_types import (
+            UserMsg, PicoMsg, ThinkingMsg, ToolCallMsg, SysMsg
+        )
+        
+        i = 0
+        while i < len(history):
+            msg = history[i]
+            role = msg.get('role', '')
+            
+            if role == 'user':
+                # User message
+                content = msg.get('content', '')
+                harness_id = msg.get('id', '')
+                ui.chat_history_panel.add_message(
+                    content,
+                    msg_type=UserMsg(),
+                    harness_message_ids=[harness_id] if harness_id else None
+                )
+                
+            elif role == 'assistant':
+                content = msg.get('content', '')
+                harness_id = msg.get('id', '')
+                
+                # Check for thinking blocks in content
+                if content and ('leshoot' in content or 'ground' in content):
+                    # Split thinking from content
+                    import re
+                    thinking_match = re.search(r'leshoot(.*?)ground', content, re.DOTALL)
+                    if thinking_match:
+                        thinking_content = thinking_match.group(1)
+                        # Remove thinking from content
+                        main_content = re.sub(r'leshoot.*?ground', '', content, flags=re.DOTALL).strip()
+                        
+                        if thinking_content:
+                            ui.chat_history_panel.add_message(
+                                thinking_content,
+                                msg_type=ThinkingMsg(),
+                                harness_message_ids=[harness_id] if harness_id else None
+                            )
+                        
+                        if main_content:
+                            ui.chat_history_panel.add_message(
+                                main_content,
+                                msg_type=PicoMsg(),
+                                harness_message_ids=[harness_id] if harness_id else None
+                            )
+                    else:
+                        # No closing tag, treat as thinking
+                        ui.chat_history_panel.add_message(
+                            content,
+                            msg_type=ThinkingMsg(),
+                            harness_message_ids=[harness_id] if harness_id else None
+                        )
+                elif content:
+                    # Regular assistant content
+                    ui.chat_history_panel.add_message(
+                        content,
+                        msg_type=PicoMsg(),
+                        harness_message_ids=[harness_id] if harness_id else None
+                    )
+                
+                # Handle tool calls if present
+                tool_calls = msg.get('tool_calls', [])
+                if tool_calls:
+                    for tc in tool_calls:
+                        if isinstance(tc, dict) and 'function' in tc:
+                            func = tc['function']
+                            tool_name = func.get('name', 'unknown')
+                            tool_args = func.get('arguments', '{}')
+                            tool_call_id = tc.get('id', '')
+                            
+                            # Create tool message
+                            tool_msg = ui.chat_history_panel.add_message(
+                                "",
+                                msg_type=ToolCallMsg(),
+                                harness_message_ids=[tool_call_id] if tool_call_id else None
+                            )
+                            tool_msg.tool_name = tool_name
+                            tool_msg.tool_args = tool_args
+                            tool_msg.tool_status = "completed"
+                            tool_msg.show_output = False
+                            tool_msg.rebuild_tool_display()
+                            tool_msg.finalize()
+                            
+            elif role == 'tool':
+                # Tool result message
+                content = msg.get('content', '')
+                tool_call_id = msg.get('tool_call_id', '')
+                
+                # Find the corresponding tool call message and update its output
+                found = False
+                for existing_msg in reversed(ui.chat_history_panel.messages):
+                    if (isinstance(existing_msg.type, ToolCallMsg) and 
+                        tool_call_id and tool_call_id in existing_msg.harness_message_ids):
+                        existing_msg.tool_output = content
+                        existing_msg.tool_status = "completed"
+                        existing_msg.show_output = False
+                        existing_msg.rebuild_tool_display()
+                        found = True
+                        break
+                
+                if not found and content:
+                    # Just show as system message if we can't find the tool call
+                    ui.chat_history_panel.add_message(
+                        f"Tool result: {content[:200]}{'...' if len(content) > 200 else ''}",
+                        msg_type=SysMsg()
+                    )
+            
+            i += 1
+
+
+class ConversationCommand(Command):
+    def __init__(self):
+        subcommands = {
+            "export": ConversationExportCommand(),
+            "import": ConversationImportCommand(),
+        }
+        super().__init__("conversation", "Conversation management (export/import)", subcommands=subcommands)
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if not args:
+            help_text = "Usage: /conversation <subcommand>\n\nSubcommands:\n"
+            for name, cmd in sorted(self.subcommands.items()):
+                help_text += f"  {name.ljust(10)} - {cmd.description}\n"
+            ui.chat_history_panel.add_message(help_text.rstrip(), msg_type=SysMsgError())
+        else:
+            subcmd_name = args[0].lower()
+            if subcmd_name in self.subcommands:
+                await self.subcommands[subcmd_name].execute(ui, args[1:])
+            else:
+                ui.chat_history_panel.add_message(
+                    f"Unknown subcommand: {subcmd_name}\n"
+                    f"Available: {', '.join(sorted(self.subcommands.keys()))}",
+                    msg_type=SysMsgError()
+                )
+
+
 # Command Registry
 COMMANDS: Dict[str, Command] = {
     "help":        HelpCommand(),
@@ -1074,6 +1345,7 @@ COMMANDS: Dict[str, Command] = {
     "openrouter":  OpenRouterCommand(),
     "cd":          CdCommand(),
     "pwd":         PwdCommand(),
+    "conversation": ConversationCommand(),
 }
 
 async def handle_command(ui: ChatUIProtocol, text: str):

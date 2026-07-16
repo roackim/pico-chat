@@ -73,9 +73,9 @@
     [?] Focus ? 
         popup 
 
-[ ] Conversation Management
-    [ ] Export conversation to file
-    [ ] Import conversation from file
+[x] Conversation Management
+    [x] Export conversation to file
+    [x] Import conversation from file
         /conversation import|export <filename> 
     [ ] Multiple conversations (tabs)
     

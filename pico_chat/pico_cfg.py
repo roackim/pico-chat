@@ -67,8 +67,8 @@ class Config:
         self.ui_msg_h_padding: int = 1 # Horizontal padding for text in UI components 
         self.ui_msg_v_margin: int = 0 # Vertical padding between messages in ChatHistoryPanel
         
-        self.ui_box_style: str = "rounded" # Box border style: ("square", "double", "rounded", ascii)
-        self.ui_box_style_focused: str = "rounded" # NOTE: currently unplugged; Box border style when focused: ("square", "double", "rounded")
+        self.ui_box_style: str = "square" # Box border style: ("square", "double", "rounded", ascii)
+        self.ui_box_style_focused: str = "square" # NOTE: currently unplugged; Box border style when focused: ("square", "double", "rounded")
         
         # Generation metrics display
         self.ui_show_metrics: bool = True  # Show generation metrics
