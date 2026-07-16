@@ -99,4 +99,11 @@
 
 [ ] How to handle servers that serves multiple models ? 
     -> like ollama
+
+[x] $ command prefix for shell commands (like ! in jupyter)
+    - $ echo hello
+    - $ ls -l
+    - $ git status
+    - $ python3 script.py
     
+    >>> Creates a new msg with the command output.

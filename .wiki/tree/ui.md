@@ -65,6 +65,12 @@ Slash command system with generic parameter schema.
 - `DebugCommand` (no args) renders subcommand help in popup
 - See [notes/ui.md](../notes/ui.md) for how to add a new command.
 
+### Shell Commands (`$` prefix)
+- `$ <command>` — Execute shell command directly (not visible to LLM)
+- Example: `$ ls -la`, `$ git status`, `$ python3 script.py`
+- Output displayed as system message with exit code and timing
+- 30-second timeout for safety
+
 ### `logging_handlers.py`
 `TuiLogHandler` — Python `logging.Handler` that routes log records to the debug panel.
 Filters out high-volume noise from known verbose loggers.

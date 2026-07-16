@@ -699,6 +699,11 @@ class chatTUI(ChatActionHandlers):
             self.on_command_submit(clean_text)
             return
 
+        # $ prefix: execute shell command directly (not visible to LLM)
+        if clean_text.startswith('$'):
+            self._handle_shell_command(clean_text[1:].strip())
+            return
+
         # Editing a paused message's thinking prefill: set prefill then resume
         if getattr(self, 'editing_prefill_for_resume', False):
             self.editing_prefill_for_resume = False
@@ -773,6 +778,94 @@ class chatTUI(ChatActionHandlers):
             
             # Enable auto-scroll to show the new message
             self.chat_history_panel.auto_scroll = True
+
+    def _handle_shell_command(self, command: str):
+        """Execute a shell command and display output (not visible to LLM).
+        
+        Args:
+            command: The shell command to execute (without the $ prefix)
+        """
+        import subprocess
+        import time
+        from pico_chat.ui.tui.msg_types import SysMsg, SysMsgError
+        
+        if not command:
+            self.chat_history_panel.add_message(
+                "Usage: $ <command>\nExample: $ ls -la",
+                msg_type=SysMsgError()
+            )
+            return
+        
+        # Get workspace directory
+        workspace = self.agent.workspace if hasattr(self.agent, 'workspace') else os.getcwd()
+        
+        # Show command being executed
+        cmd_msg = self.chat_history_panel.add_message(
+            f"{theme.MUTED}$ {command}{theme.reset()}",
+            msg_type=SysMsg(),
+            title="shell"
+        )
+        
+        # Execute command
+        start_time = time.time()
+        try:
+            result = subprocess.run(
+                command,
+                shell=True,
+                cwd=workspace,
+                capture_output=True,
+                text=True,
+                timeout=30  # 30 second timeout
+            )
+            
+            elapsed = time.time() - start_time
+            
+            # Build output
+            output_parts = []
+            
+            if result.stdout:
+                output_parts.append(result.stdout.rstrip())
+            
+            if result.stderr:
+                if output_parts:
+                    output_parts.append("")
+                output_parts.append(f"{theme.ERROR}[stderr]{theme.reset()}")
+                output_parts.append(result.stderr.rstrip())
+            
+            # Add exit code and timing
+            exit_color = theme.SUCCESS if result.returncode == 0 else theme.ERROR
+            output_parts.append(f"\n{exit_color}[exit:{result.returncode}]{theme.reset()} {theme.MUTED}{elapsed:.1f}ms{theme.reset()}")
+            
+            # Display output
+            output_text = "\n".join(output_parts)
+            if output_text.strip():
+                self.chat_history_panel.add_message(
+                    output_text,
+                    msg_type=SysMsg(),
+                    title="output"
+                )
+            else:
+                self.chat_history_panel.add_message(
+                    f"{theme.MUTED}(no output){theme.reset()}",
+                    msg_type=SysMsg(),
+                    title="output"
+                )
+                
+        except subprocess.TimeoutExpired:
+            self.chat_history_panel.add_message(
+                f"{theme.ERROR}Command timed out after 30 seconds{theme.reset()}",
+                msg_type=SysMsgError(),
+                title="shell"
+            )
+        except Exception as e:
+            self.chat_history_panel.add_message(
+                f"{theme.ERROR}Command failed: {e}{theme.reset()}",
+                msg_type=SysMsgError(),
+                title="shell"
+            )
+        
+        # Enable auto-scroll to show the output
+        self.chat_history_panel.auto_scroll = True
 
     def _update_focus_states(self):
         """Update focus states of components based on _last_focus_id."""
