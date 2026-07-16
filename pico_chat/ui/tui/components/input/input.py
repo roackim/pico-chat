@@ -101,7 +101,7 @@ class InputComponent(Component):
         self.subcommand_callback = get_subcommands_callback
     
     def setup_context(self, get_items_callback: Callable[[], List[str]]):
-        """Initialize context (@file) completion system."""
+        """Initialize context (./file) completion system."""
         self.context_items_callback = get_items_callback
 
     def setup_command_registry(self, registry: Dict[str, Any]):
@@ -268,7 +268,7 @@ class InputComponent(Component):
         self._position_menu_at(self.argument_completion.menu, trigger_pos)
 
     def _position_context_menu(self):
-        """Position context menu at the '@' character."""
+        """Position context menu at the './' trigger."""
         if not self.context_completion or not self.context_completion.is_active:
             return
         

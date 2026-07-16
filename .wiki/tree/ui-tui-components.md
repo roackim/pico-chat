@@ -117,7 +117,7 @@ Handles raw keyboard, mouse, and paste events.
 |--------|----------|-------|
 | `command_completion.py` | `/` at start of input | Command name fuzzy search |
 | `subcommand_completion.py` | Second word after a `/` command | Subcommand suggestions |
-| `context_completion.py` | Context-aware (e.g., after `@`) | — |
+| `context_completion.py` | Context-aware (e.g., after `./`) | Configurable trigger prefix (default: `./`) |
 | `argument_completion.py` | After any command with `Param` schema | Generic fuzzy completer; reads `Command.params`, resolves argument index, filters completions via menu |
 | `path_completion.py` | After `/` mid-word or explicit file path input | — |
 | `server_completion.py` | After `/server` subcommand | Deprecated — superseded by `argument_completion.py` with `Param` schema |
