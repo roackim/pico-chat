@@ -110,3 +110,7 @@
     - $ python3 script.py
     
     >>> Creates a new msg with the command output.
+    
+[ ] Improve popups
+    - some focus bugs
+    - some popups have no h padding ???

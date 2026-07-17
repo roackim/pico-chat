@@ -1155,6 +1155,7 @@ class chatTUI(ChatActionHandlers):
         self.tab_bar.set_callbacks(
             on_select=self._on_tab_select,
             on_close=self._on_tab_close,
+            on_new=self._new_tab,
         )
         # Create default tab
         self._create_default_tab()

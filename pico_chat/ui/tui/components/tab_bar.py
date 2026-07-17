@@ -31,13 +31,16 @@ class TabBar(Component):
         self.active_index: int = 0
         self._on_select: Optional[Callable[[int], None]] = None   # callback(tab_index)
         self._on_close: Optional[Callable[[int], None]] = None    # callback(tab_index)
+        self._on_new: Optional[Callable[[], None]] = None         # callback()
         # Click regions: list of (x_start, x_end, tab_index, is_close_button)
         self._click_regions: List[tuple[int, int, int, bool]] = []
+        self._new_btn_region: Optional[tuple[int, int]] = None    # (x_start, x_end)
     
-    def set_callbacks(self, on_select: Callable[[int], None], on_close: Callable[[int], None]):
-        """Set tab selection and close callbacks."""
+    def set_callbacks(self, on_select: Callable[[int], None], on_close: Callable[[int], None], on_new: Callable[[], None]):
+        """Set tab selection, close, and new-tab callbacks."""
         self._on_select = on_select
         self._on_close = on_close
+        self._on_new = on_new
     
     def add_tab(self, name: str, closeable: bool = True) -> int:
         """Add a new tab, return its id."""
@@ -78,6 +81,7 @@ class TabBar(Component):
             return
         
         self._click_regions = []
+        self._new_btn_region = None
         x = self.x
         remaining = self.width
         
@@ -96,10 +100,10 @@ class TabBar(Component):
             # Colors
             if is_active:
                 fg = theme.DEFAULT
-                # bg = theme.DEFAULT
+                fgb = theme.DEFAULT
             else:
                 fg = theme.MUTED
-                # bg =  theme.MUTED
+                fgb = theme.MUTED
             
             # Render tab label
             buffer.write_str(x, self.y, label, fg=fg, bg=None, reverse=True, max_width=len(label))
@@ -110,10 +114,18 @@ class TabBar(Component):
             remaining -= len(label)
             
             # Render close button (same colors as header)
-            buffer.write_str(x, self.y, close_btn, fg=fg, bg=None, reverse=True, max_width=len(close_btn))
+            buffer.write_str(x, self.y, close_btn, fg=fgb, bg=None, reverse=True, max_width=len(close_btn))
             self._click_regions.append((x, x + len(close_btn), i, True))
             x += len(close_btn)
             remaining -= len(close_btn)
+        
+        # Render "+" button in focused color
+        new_btn = " + "
+        if len(new_btn) <= remaining:
+            buffer.write_str(x, self.y, new_btn, fg=theme.FOCUSED, bg=None, reverse=True, max_width=len(new_btn))
+            self._new_btn_region = (x, x + len(new_btn))
+            x += len(new_btn)
+            remaining -= len(new_btn)
         
         # Fill remaining space with ▁ (lower block)
         if remaining > 0:
@@ -123,6 +135,14 @@ class TabBar(Component):
     def handle_input(self, event) -> bool:
         """Handle mouse clicks on tabs."""
         if isinstance(event, MouseEvent) and event.pressed and event.button == 0:
+            # Check "+" button first
+            if self._new_btn_region:
+                x_start, x_end = self._new_btn_region
+                if x_start <= event.x < x_end:
+                    if self._on_new:
+                        self._on_new()
+                    return True
+            # Check tab regions
             for x_start, x_end, tab_index, is_close in self._click_regions:
                 if x_start <= event.x < x_end:
                     if is_close:
