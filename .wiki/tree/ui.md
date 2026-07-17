@@ -55,7 +55,7 @@ Slash command system with generic parameter schema.
 - `get_command_list()` / `get_subcommand_list(cmd)` — used by input autocomplete
 - Commands with sub-operations pass a `subcommands` dict to the constructor (e.g. `ServerCommand`)
 - Commands starting with `_` are hidden from `/help`
-- Registered commands: `help`, `clear`, `compact`, `exit`, `stop`, `resume`, `prefill`, `status`, `server`, `tools`, `debug`, `permissions`, `openrouter`, `cd`, `pwd`, `conversation`
+- Registered commands: `help`, `clear`, `compact`, `exit`, `stop`, `resume`, `prefill`, `status`, `server`, `tools`, `debug`, `permissions`, `openrouter`, `cd`, `pwd`, `conversation`, `tab`
 - Server management commands (`ServerAddCommand`, `ServerUseCommand`, etc.) use `Param` for server name completions (reads `pico_cfg.config.servers.keys()`)
 - `CdCommand` uses `Param("DIR", path=True)` for filesystem completion
 - `HelpCommand` renders output in a popup overlay via `ui.show_popup()` instead of chat history

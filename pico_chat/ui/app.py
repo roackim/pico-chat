@@ -18,6 +18,7 @@ from pico_chat.ui.tui.components import TextComponent, Box, InputComponent
 from pico_chat.ui.tui.components.debug_panel import DebugLogPanel
 from pico_chat.ui.tui.components.popup import Popup
 from pico_chat.ui.tui.components.form_popup import FormPopup
+from pico_chat.ui.tui.components.tab_bar import TabBar
 from pico_chat.ui.chat_history_panel import ChatHistoryPanel
 from pico_chat.ui.chat_message import Message
 from pico_chat.ui.commands import handle_command, get_command_list, get_subcommand_list
@@ -38,6 +39,23 @@ from pico_chat.ui.chat_action_handlers import ChatActionHandlers
 from pico_chat.harness import chunks
 
 TARGET_FPS = pico_cfg.config.target_fps
+
+
+class ConversationState:
+    """Stores the complete state of a single conversation tab."""
+    
+    def __init__(self, name: str = "chat"):
+        self.name = name
+        self.harness_history: list = []
+        self.messages: list = []  # UI Message objects
+        self.active_tool_messages: dict = {}
+        self.pending_permission_prompt: Optional[str] = None
+        self.editing_message_index: Optional[int] = None
+        self._active_user_input: Optional[str] = None
+        self._active_user_msg: Optional[Any] = None
+        self._paused_user_input: Optional[str] = None
+        self._paused_user_msg: Optional[Any] = None
+
 
 class chatTUI(ChatActionHandlers):
     """Terminal UI for the agent."""
@@ -120,6 +138,12 @@ class chatTUI(ChatActionHandlers):
         
         # Track active tool messages by call_id
         self.active_tool_messages = {}  # tool_call_id -> Message
+        
+        # Tab management
+        self.tab_bar = TabBar(id="tabs")
+        self._tabs: list[ConversationState] = []
+        self._active_tab_index: int = 0
+        self._next_tab_id: int = 1
         
         # Command queue for structured execution
         self.command_queue = asyncio.Queue()
@@ -867,6 +891,125 @@ class chatTUI(ChatActionHandlers):
         # Enable auto-scroll to show the output
         self.chat_history_panel.auto_scroll = True
 
+    # --- Tab Management ---
+
+    def _create_default_tab(self):
+        """Create the default first tab."""
+        tab_state = ConversationState(name="chat")
+        self._tabs.append(tab_state)
+        self.tab_bar.add_tab("chat", closeable=False)
+        self._active_tab_index = 0
+    
+    def _save_current_tab(self):
+        """Save current conversation state into the active tab."""
+        if not self._tabs:
+            return
+        tab = self._tabs[self._active_tab_index]
+        tab.harness_history = list(self.agent.history)
+        tab.messages = list(self.chat_history_panel.messages)
+        tab.active_tool_messages = dict(self.active_tool_messages)
+        tab.pending_permission_prompt = self.pending_permission_prompt
+        tab.editing_message_index = self.editing_message_index
+        tab._active_user_input = self._active_user_input
+        tab._active_user_msg = self._active_user_msg
+        tab._paused_user_input = self._paused_user_input
+        tab._paused_user_msg = self._paused_user_msg
+    
+    def _restore_tab(self, index: int):
+        """Restore conversation state from a tab into the live UI."""
+        if not self._tabs or index >= len(self._tabs):
+            return
+        tab = self._tabs[index]
+        
+        # Restore harness state
+        self.agent.history = list(tab.harness_history)
+        
+        # Restore UI state
+        self.chat_history_panel.clear()
+        for msg in tab.messages:
+            self.chat_history_panel.messages.append(msg)
+            self.chat_history_panel.msg_container.children.append(msg.get_component())
+            self.chat_history_panel.msg_container.sizes.append("auto")
+            msg.get_component().parent = self.chat_history_panel
+        
+        self.active_tool_messages = dict(tab.active_tool_messages)
+        self.pending_permission_prompt = tab.pending_permission_prompt
+        self.editing_message_index = tab.editing_message_index
+        self._active_user_input = tab._active_user_input
+        self._active_user_msg = tab._active_user_msg
+        self._paused_user_input = tab._paused_user_input
+        self._paused_user_msg = tab._paused_user_msg
+        
+        self._active_tab_index = index
+        self.tab_bar.set_active(index)
+        self.chat_history_panel.auto_scroll = True
+        self.chat_history_panel._request_repaint()
+    
+    def _on_tab_select(self, index: int):
+        """Handle tab click — switch to that tab."""
+        if index == self._active_tab_index:
+            return
+        self._save_current_tab()
+        self._restore_tab(index)
+    
+    def _on_tab_close(self, index: int):
+        """Handle tab close button click."""
+        if index < len(self._tabs):
+            self._close_tab(index)
+    
+    def _close_tab(self, index: int):
+        """Close a tab and switch to adjacent one."""
+        if not self._tabs or index >= len(self._tabs):
+            return
+        # Don't close the last tab
+        if len(self._tabs) <= 1:
+            self.chat_history_panel.add_message(
+                "Cannot close the last tab.",
+                msg_type=SysMsgError(),
+                title="tab"
+            )
+            return
+        
+        self._tabs.pop(index)
+        self.tab_bar.remove_tab(index)
+        
+        # If we closed the active tab, switch to nearest
+        if index == self._active_tab_index:
+            new_index = min(index, len(self._tabs) - 1)
+            self._restore_tab(new_index)
+        elif index < self._active_tab_index:
+            self._active_tab_index -= 1
+    
+    def _new_tab(self, name: Optional[str] = None):
+        """Create a new conversation tab and switch to it."""
+        # Save current tab first
+        self._save_current_tab()
+        
+        # Generate name
+        tab_id = self._next_tab_id
+        self._next_tab_id += 1
+        tab_name = name or f"chat {tab_id}"
+        
+        # Create new tab state
+        tab_state = ConversationState(name=tab_name)
+        self._tabs.append(tab_state)
+        self.tab_bar.add_tab(tab_name)
+        
+        # Switch to new tab (clear UI and harness)
+        new_index = len(self._tabs) - 1
+        self.agent.history = []
+        self.chat_history_panel.clear()
+        self.active_tool_messages = {}
+        self.pending_permission_prompt = None
+        self.editing_message_index = None
+        self._active_user_input = None
+        self._active_user_msg = None
+        self._paused_user_input = None
+        self._paused_user_msg = None
+        self._active_tab_index = new_index
+        self.tab_bar.set_active(new_index)
+        self.chat_history_panel.auto_scroll = True
+
     def _update_focus_states(self):
         """Update focus states of components based on _last_focus_id."""
         # Default to input focus if nothing is focused
@@ -1008,8 +1151,15 @@ class chatTUI(ChatActionHandlers):
             
         column = Hsplit(children, sizes) # 0 means use preferred height
 
-        # Main Layout
-        root = column
+        # Tab bar + main column
+        self.tab_bar.set_callbacks(
+            on_select=self._on_tab_select,
+            on_close=self._on_tab_close,
+        )
+        # Create default tab
+        self._create_default_tab()
+        
+        root = Hsplit([self.tab_bar, column], [0, "100%"])
         self.root = root  # Store root for global handler
         self.compositor = Compositor(root, fps=TARGET_FPS, shutdown_event=self.shutdown_event)
         self.compositor.padding = pico_cfg.config.ui_app_global_padding  # Apply global padding from config

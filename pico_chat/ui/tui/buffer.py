@@ -14,6 +14,7 @@ class Cell:
     bg: Optional[tuple[int, int, int]] = None
     bold: bool = False
     reverse: bool = False
+    underline: bool = False
     is_wide_char_continuation: bool = False  # Marks cells that are part of a wide character
 
 class Buffer:
@@ -45,7 +46,7 @@ class Buffer:
     def set_cursor(self, x: int, y: int):
         self.cursor_pos = (x, y)
 
-    def set(self, x: int, y: int, char: str, fg=None, bg=None, bold=False, reverse=False):
+    def set(self, x: int, y: int, char: str, fg=None, bg=None, bold=False, reverse=False, underline=False):
         if 0 <= x < self.width and 0 <= y < self.height:
             if not self._is_in_clip(x, y):
                 return
@@ -55,7 +56,7 @@ class Buffer:
             if bg is not None and hasattr(bg, 'r'):
                 bg = (bg.r, bg.g, bg.b)
             # Important: Always create a fresh Cell instance to avoid sharing
-            self.cells[y][x] = Cell(char, fg, bg, bold, reverse)
+            self.cells[y][x] = Cell(char, fg, bg, bold, reverse, underline)
 
     def fill(self, x: int, y: int, width: int, height: int, char: str = " ", fg=None, bg=None):
         """Fill a rectangular area with a character."""
@@ -63,7 +64,7 @@ class Buffer:
             for ix in range(x, x + width):
                 self.set(ix, iy, char, fg=fg, bg=bg)
 
-    def write_str(self, x: int, y: int, s: str, fg=None, bg=None, bold=False, reverse=False, max_width: Optional[int] = None):
+    def write_str(self, x: int, y: int, s: str, fg=None, bg=None, bold=False, reverse=False, underline=False, max_width: Optional[int] = None):
         """
         Writes a string to the buffer starting at (x, y).
         This method is ANSI-aware: escape sequences are stored alongside the next
@@ -106,7 +107,7 @@ class Buffer:
                 # If this is a wide character (emoji), mark the next cell as continuation
                 if char_width == 2:
                     if 0 <= curr_x < self.width and 0 <= y < self.height:
-                        self.set(curr_x, y, pending_ansi + char, fg, bg, bold, reverse)
+                        self.set(curr_x, y, pending_ansi + char, fg, bg, bold, reverse, underline)
                     
                     if 0 <= curr_x + 1 < self.width and 0 <= y < self.height:
                         if self._is_in_clip(curr_x + 1, y):
@@ -119,12 +120,13 @@ class Buffer:
                                 bg=bg_tuple,
                                 bold=bold,
                                 reverse=reverse,
+                                underline=underline,
                                 is_wide_char_continuation=True
                             )
                     curr_x += 2  # Skip over both the character cell and continuation cell
                 else:
                     if 0 <= curr_x < self.width and 0 <= y < self.height:
-                        self.set(curr_x, y, pending_ansi + char, fg, bg, bold, reverse)
+                        self.set(curr_x, y, pending_ansi + char, fg, bg, bold, reverse, underline)
                     curr_x += 1  # Single-width character
                 
                 pending_ansi = ""
@@ -139,7 +141,7 @@ class Buffer:
                 prev_cell.char += pending_ansi
             elif 0 <= curr_x < self.width and 0 <= y < self.height:
                 # If no characters were written, put ANSI in an empty cell
-                self.set(curr_x, y, pending_ansi + " ", fg, bg, bold, reverse)
+                self.set(curr_x, y, pending_ansi + " ", fg, bg, bold, reverse, underline)
 
     def clear(self):
         for y in range(self.height):
@@ -174,7 +176,7 @@ class Buffer:
             res.append(f"\033[48;2;{self.default_bg[0]};{self.default_bg[1]};{self.default_bg[2]}m")
         
         # Use a sentinel value to force first cell to emit colors
-        curr_state = {"fg": object(), "bg": object(), "bold": False, "reverse": False}
+        curr_state = {"fg": object(), "bg": object(), "bold": False, "reverse": False, "underline": False}
         
         for y in range(self.height):
             # Move to start of line
@@ -200,7 +202,8 @@ class Buffer:
                     cell.fg != curr_state["fg"] or 
                     cell.bg != curr_state["bg"] or 
                     cell.bold != curr_state["bold"] or 
-                    cell.reverse != curr_state["reverse"]
+                    cell.reverse != curr_state["reverse"] or
+                    cell.underline != curr_state["underline"]
                 )
                 
                 if attr_changed:
@@ -208,7 +211,7 @@ class Buffer:
                     # but we try to be surgical
                     if (curr_state["bold"] and not cell.bold) or (curr_state["reverse"] and not cell.reverse):
                         res.append("\033[0m")
-                        curr_state = {"fg": None, "bg": None, "bold": False, "reverse": False}
+                        curr_state = {"fg": None, "bg": None, "bold": False, "reverse": False, "underline": False}
                     
                     if cell.fg != curr_state["fg"]:
                         if cell.fg:
@@ -237,6 +240,13 @@ class Buffer:
                     if cell.reverse and not curr_state["reverse"]:
                         res.append("\033[7m")
                         curr_state["reverse"] = True
+
+                    if cell.underline and not curr_state["underline"]:
+                        res.append("\033[4m")
+                        curr_state["underline"] = True
+                    elif not cell.underline and curr_state["underline"]:
+                        res.append("\033[24m")
+                        curr_state["underline"] = False
 
                 res.append(cell.char)
                 

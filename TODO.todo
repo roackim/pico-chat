@@ -71,14 +71,16 @@
         
 [ ] Subagent: kill / abort  action
     [?] Focus ? 
-        popup ?
-        tabs ?
+        popup 
 
 [x] Conversation Management
     [x] Export conversation to file
     [x] Import conversation from file
         /conversation import|export <filename> 
-    [ ] Multiple conversations (tabs)
+    [x] Multiple conversations (tabs)
+        /tab new | close | switch | list
+        Clickable tabs, closable with × button
+        Tab bar at the top of the UI
     
 [ ] Remove token count estimations, rely on server instead / when possible ?
 

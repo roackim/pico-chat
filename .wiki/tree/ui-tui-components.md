@@ -87,6 +87,17 @@ Live markdown parser and renderer. Parses markdown into display lines of `Styled
 - `MarkdownComponent` — `Component` subclass; re-parses on every `update()` (suitable for streaming); segment-aware word wrapping with hard-break for code blocks
 See [notes/ui.md](../notes/ui.md) for the rendering overview.
 
+### `tab_bar.py`
+`TabBar` — single-line tab bar for multi-conversation support.
+- Renders tabs as: `[1] chat  [2] debug  [3] scratch ×`
+- Active tab highlighted with bold + underline
+- `×` close button on closeable tabs
+- Mouse click to select/close tabs
+- `set_callbacks(on_select, on_close)` — register tab event handlers
+- `add_tab(name, closeable)` / `remove_tab(index)` — manage tabs
+- `set_active(index)` — highlight a tab
+- Used by: `/tab new | close | switch | list`
+
 ---
 
 ## Input Subcomponent (`input/`)

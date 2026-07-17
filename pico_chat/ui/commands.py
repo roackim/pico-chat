@@ -1328,6 +1328,126 @@ class ConversationCommand(Command):
                 )
 
 
+class TabNewCommand(Command):
+    def __init__(self):
+        super().__init__("new", "Create a new conversation tab", params=[
+            Param("NAME"),
+        ])
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        name = " ".join(args) if args else None
+        if hasattr(ui, '_new_tab'):
+            ui._new_tab(name)
+            tab_count = len(ui._tabs)
+            ui.chat_history_panel.add_message(
+                f"New tab created ({tab_count} tabs open)",
+                msg_type=SysMsg(),
+                title="tab"
+            )
+        else:
+            ui.chat_history_panel.add_message(
+                "Tab management not available.",
+                msg_type=SysMsgError()
+            )
+
+
+class TabCloseCommand(Command):
+    def __init__(self):
+        super().__init__("close", "Close the current conversation tab")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if hasattr(ui, '_close_tab'):
+            ui._close_tab(ui._active_tab_index)
+        else:
+            ui.chat_history_panel.add_message(
+                "Tab management not available.",
+                msg_type=SysMsgError()
+            )
+
+
+class TabSwitchCommand(Command):
+    def __init__(self):
+        super().__init__("switch", "Switch to a tab by number", params=[
+            Param("INDEX", required=True),
+        ])
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if not args:
+            ui.chat_history_panel.add_message(
+                "Usage: /tab switch <number>",
+                msg_type=SysMsgError()
+            )
+            return
+        try:
+            index = int(args[0]) - 1  # 1-indexed for user
+            if hasattr(ui, '_on_tab_select'):
+                if 0 <= index < len(ui._tabs):
+                    ui._on_tab_select(index)
+                else:
+                    ui.chat_history_panel.add_message(
+                        f"Tab {args[0]} does not exist. Use /tab list to see tabs.",
+                        msg_type=SysMsgError()
+                    )
+            else:
+                ui.chat_history_panel.add_message(
+                    "Tab management not available.",
+                    msg_type=SysMsgError()
+                )
+        except ValueError:
+            ui.chat_history_panel.add_message(
+                f"Invalid tab number: {args[0]}",
+                msg_type=SysMsgError()
+            )
+
+
+class TabListCommand(Command):
+    def __init__(self):
+        super().__init__("list", "List all open tabs")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if not hasattr(ui, '_tabs') or not ui._tabs:
+            ui.chat_history_panel.add_message("No tabs open.", msg_type=SysMsg())
+            return
+        
+        lines = ["Open tabs:\n"]
+        for i, tab in enumerate(ui._tabs):
+            marker = "→ " if i == ui._active_tab_index else "  "
+            msg_count = len(tab.messages)
+            hist_count = len(tab.harness_history)
+            lines.append(f"{marker}{i + 1}. {tab.name} ({msg_count} messages, {hist_count} history entries)")
+        
+        lines.append(f"\nUse /tab switch <n> to switch, /tab close to close current")
+        ui.chat_history_panel.add_message("\n".join(lines), msg_type=SysMsg(), title="tab")
+
+
+class TabCommand(Command):
+    def __init__(self):
+        subcommands = {
+            "new": TabNewCommand(),
+            "close": TabCloseCommand(),
+            "switch": TabSwitchCommand(),
+            "list": TabListCommand(),
+        }
+        super().__init__("tab", "Conversation tab management", subcommands=subcommands)
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if not args:
+            help_text = "Usage: /tab <subcommand>\n\nSubcommands:\n"
+            for name, cmd in sorted(self.subcommands.items()):
+                help_text += f"  {name.ljust(10)} - {cmd.description}\n"
+            ui.chat_history_panel.add_message(help_text.rstrip(), msg_type=SysMsgError())
+        else:
+            subcmd_name = args[0].lower()
+            if subcmd_name in self.subcommands:
+                await self.subcommands[subcmd_name].execute(ui, args[1:])
+            else:
+                ui.chat_history_panel.add_message(
+                    f"Unknown subcommand: {subcmd_name}\n"
+                    f"Available: {', '.join(sorted(self.subcommands.keys()))}",
+                    msg_type=SysMsgError()
+                )
+
+
 # Command Registry
 COMMANDS: Dict[str, Command] = {
     "help":        HelpCommand(),
@@ -1346,6 +1466,7 @@ COMMANDS: Dict[str, Command] = {
     "cd":          CdCommand(),
     "pwd":         PwdCommand(),
     "conversation": ConversationCommand(),
+    "tab":         TabCommand(),
 }
 
 async def handle_command(ui: ChatUIProtocol, text: str):
