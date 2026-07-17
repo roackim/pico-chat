@@ -71,7 +71,8 @@
         
 [ ] Subagent: kill / abort  action
     [?] Focus ? 
-        popup 
+        popup ?
+        tabs ?
 
 [x] Conversation Management
     [x] Export conversation to file

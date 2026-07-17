@@ -1,6 +1,6 @@
 import toml
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Literal, Optional
 
 # Default markdown element styles.
 # Each key is an element name; values are dicts with optional:
@@ -49,16 +49,8 @@ class Config:
         self.servers: Dict[str, Dict[str, Any]] = {}
         self.active_server: str = "llamacpp_default"
 
-        # Other settings
-        self.max_file_size: int = 1_000_000
-        self.max_search_results: int = 50
-        self.command_timeout: int = 30
         
         # UI settings
-        self.ui_cursor_frequency: float = 1.0  # Hz (flashes per second)
-        self.ui_cursor_pulse_delay: float = 0.75  # Seconds before pulsating starts
-        
-        self.ui_max_input_height: int = 10  # Maximum height of input field in lines
         self.ui_debug_console_height: int = 10 # Height of the debug console in lines
         
         self.ui_use_bg_color: bool = False  # Whether to use theme background color (False uses terminal default)
