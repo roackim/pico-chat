@@ -1105,8 +1105,9 @@ class ChatHistoryPanel(TextComponent):
                     else:
                         current_start_y = self.anchored_start_y
                     
-                    # Scroll up by 3 lines
-                    new_start_y = max(0, current_start_y - 3)
+                    # Scroll up by the coalesced delta (default 3 lines per notch)
+                    step = 3 * event.scroll_delta
+                    new_start_y = max(0, current_start_y - step)
                     self.anchored_start_y = new_start_y
                     self.scroll_offset = max_scroll - new_start_y
                     self.auto_scroll = False # Scrolling up disables auto-scroll
@@ -1126,8 +1127,9 @@ class ChatHistoryPanel(TextComponent):
                     else:
                         current_start_y = self.anchored_start_y
                     
-                    # Scroll down by 3 lines
-                    new_start_y = min(max_scroll, current_start_y + 3)
+                    # Scroll down by the coalesced delta (default 3 lines per notch)
+                    step = 3 * event.scroll_delta
+                    new_start_y = min(max_scroll, current_start_y + step)
                     self.anchored_start_y = new_start_y
                     self.scroll_offset = max_scroll - new_start_y
                     

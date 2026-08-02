@@ -25,6 +25,13 @@ class Compositor:
         self.idle_sleep_seconds = 0.0
         self._wake_event = asyncio.Event()
         self.streaming_active = False
+
+        # Scroll coalescing: touchpads emit a high-frequency burst of tiny wheel
+        # deltas. We accumulate them and dispatch a single event per frame so we
+        # don't rebuild the (expensive) line map once per event.
+        self._scroll_accumulator = 0
+        self._scroll_x = 0
+        self._scroll_y = 0
         
         # Performance tracking - use rolling window for accurate current FPS
         self.render_times = deque(maxlen=10)  # Track last 10 render times for recent FPS
@@ -99,15 +106,46 @@ class Compositor:
                     # Reset frame timing after resize
                     next_frame_time = time.perf_counter()
 
-                # Handle input first (non-blocking)
-                event = self.terminal.get_input()
-                if event:
+                # Handle input first (non-blocking). Drain ALL pending events in
+                # a tight loop so a touchpad burst (many tiny wheel deltas) is
+                # accumulated into a single scroll before we flush it once.
+                # Without draining, each event would be flushed on its own
+                # iteration, defeating the coalescing entirely.
+                while True:
+                    event = self.terminal.get_input()
+                    if event is None:
+                        break
                     if event == '\x03': # Ctrl-C
                         self.running = False
                         if self.shutdown_event:
                             self.shutdown_event.set()
                         break
-                    self.root.handle_input(event)
+                    # Coalesce wheel scroll events: accumulate the delta and
+                    # dispatch a single event once per frame. This prevents a
+                    # touchpad burst (many tiny deltas) from triggering an
+                    # expensive full line-map rebuild for every single event.
+                    if isinstance(event, MouseEvent) and event.button in (64, 65):
+                        sign = 1 if event.button == 65 else -1
+                        self._scroll_accumulator += sign * event.scroll_delta
+                        self._scroll_x = event.x
+                        self._scroll_y = event.y
+                        self.request_render()
+                    else:
+                        self.root.handle_input(event)
+                        self.request_render()
+
+                # Flush any accumulated scroll once per frame, before rendering.
+                # Runs every iteration (even with no new event) so the final
+                # burst is always dispatched.
+                if self._scroll_accumulator:
+                    delta = self._scroll_accumulator
+                    self._scroll_accumulator = 0
+                    scroll_event = MouseEvent(
+                        self._scroll_x, self._scroll_y,
+                        65 if delta > 0 else 64,
+                        True, False, abs(delta),
+                    )
+                    self.root.handle_input(scroll_event)
                     self.request_render()
 
                 has_dirty = self.root.is_dirty() if hasattr(self.root, 'is_dirty') else True

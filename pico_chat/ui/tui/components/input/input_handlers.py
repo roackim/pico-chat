@@ -58,10 +58,12 @@ class MouseHandler(InputHandler):
     def handle(self, event: MouseEvent, context: InputContext) -> bool:
         # Check if mouse is within component bounds (handled by caller)
         if event.button == 64:  # Scroll Up
-            context.scroll.scroll_up()
+            for _ in range(event.scroll_delta):
+                context.scroll.scroll_up()
             return True
         elif event.button == 65:  # Scroll Down
-            context.scroll.scroll_down()
+            for _ in range(event.scroll_delta):
+                context.scroll.scroll_down()
             return True
         
         return False

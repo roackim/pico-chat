@@ -1084,7 +1084,9 @@ class chatTUI(ChatActionHandlers):
         
         # Handle mouse click focus changes
         if isinstance(event, MouseEvent):
-            if event.pressed:
+            # Ignore wheel scroll events for focus purposes — they shouldn't
+            # change focus, only scroll the panel under the cursor.
+            if event.pressed and event.button not in (64, 65):
                 # Find which component was clicked to log focus
                 target_id = None
                 

@@ -6,6 +6,7 @@ import shutil
 import signal
 import fcntl
 import time
+import select
 from dataclasses import dataclass
 from typing import Optional, Callable
 
@@ -39,6 +40,7 @@ class MouseEvent:
     button: int  # 0=left, 1=middle, 2=right, 64=scroll_up, 65=scroll_down
     pressed: bool
     drag: bool = False
+    scroll_delta: int = 1  # wheel notch count for scroll events (SGR 64-69)
 
 @dataclass
 class PasteEvent:
@@ -103,41 +105,84 @@ class Terminal:
         size = shutil.get_terminal_size()
         return size.columns, size.lines
 
+    def _read_char(self) -> Optional[str]:
+        """Read one full UTF-8 character directly from the fd (non-blocking).
+
+        Uses os.read() instead of sys.stdin.read() so that select() on the fd
+        and the actual read are consistent. sys.stdin is a buffered
+        TextIOWrapper: select() on the fd would miss data already sitting in
+        sys.stdin's buffer, causing escape sequences to be split and leaked as
+        literal text into the input field.
+        """
+        try:
+            data = os.read(self.fd, 1)
+        except (EOFError, OSError):
+            return None
+        if not data:
+            return None
+        b = data[0]
+        if b < 0x80:
+            return chr(b)
+        # Multi-byte UTF-8: read the continuation bytes.
+        if b < 0xE0:
+            need = 1
+        elif b < 0xF0:
+            need = 2
+        else:
+            need = 3
+        for _ in range(need):
+            try:
+                more = os.read(self.fd, 1)
+            except (EOFError, OSError):
+                break
+            if not more:
+                break
+            data += more
+        try:
+            return data.decode('utf-8')
+        except UnicodeDecodeError:
+            return data.decode('utf-8', errors='replace')
+
     def get_input(self) -> Optional[str | MouseEvent | PasteEvent]:
         # Non-blocking read
         flags = fcntl.fcntl(self.fd, fcntl.F_GETFL)
         fcntl.fcntl(self.fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
         try:
-            char = sys.stdin.read(1)
-            if not char:
+            char = self._read_char()
+            if char is None:
                 return None
             
             if char == '\x1b':
-                # Potential escape sequence
+                # Potential escape sequence. Read the rest of the sequence using
+                # select() with a short timeout instead of blocking time.sleep().
+                # This keeps the async event loop responsive during high-rate
+                # input bursts (e.g. touchpad scrolling).
                 seq = char
-                start_time = time.time()
-                while time.time() - start_time < 0.1:  # Timeout for paste detection
-                    try:
-                        c = sys.stdin.read(1)
-                        if c:
-                            seq += c
-                            # Stop reading if we see common terminators
-                            if seq.endswith(('m', 'M', 'A', 'B', 'C', 'D', 'H', 'F')):
-                                break
-                            # Specific check for Alt+Enter (\x1b\r or \x1b\n)
-                            if seq in ('\x1b\r', '\x1b\n'):
-                                break
-                            if seq.endswith('~'):
-                                # Check for bracketed paste start immediately
-                                if seq == '\x1b[200~':
-                                    return self._read_bracketed_paste()
-                                break
-                        else:
-                            # Sleep longer to reduce polling frequency
-                            time.sleep(0.005)
-                    except EOFError:
+                start_time = time.monotonic()
+                while True:
+                    # If we already have a complete mouse sequence, parse it
+                    # immediately without waiting for more bytes.
+                    if seq.startswith('\x1b[<') and seq.endswith(('M', 'm')):
+                        return self._parse_mouse(seq)
+                    # If we have a complete bracketed-paste start, read the paste.
+                    if seq == '\x1b[200~':
+                        return self._read_bracketed_paste()
+                    # If we have a complete known sequence, stop reading.
+                    if seq.endswith(('m', 'M', 'A', 'B', 'C', 'D', 'H', 'F', '~')):
                         break
-                    except:
+                    # If we've waited too long, treat what we have as a bare ESC.
+                    if time.monotonic() - start_time > 0.05:
+                        break
+                    # Wait for more bytes with a short, non-blocking timeout.
+                    r, _, _ = select.select([self.fd], [], [], 0.005)
+                    if not r:
+                        continue
+                    c = self._read_char()
+                    if c is None:
+                        continue
+                    seq += c
+                    # Alt+Enter (\x1b\r or \x1b\n) is a complete sequence.
+                    if seq in ('\x1b\r', '\x1b\n'):
                         break
                 
                 if seq.startswith('\x1b[<'):
@@ -159,9 +204,16 @@ class Terminal:
             content = ""
             end_marker = '\x1b[201~'
             
-            # Read character by character - simple and works for any size
+            # Read character by character - simple and works for any size.
+            # Use os.read() (blocking here) for consistency with get_input().
             while True:
-                char = sys.stdin.read(1)
+                try:
+                    data = os.read(self.fd, 1)
+                except (EOFError, OSError):
+                    break
+                if not data:
+                    break
+                char = data.decode('utf-8', errors='replace')
                 content += char
                 
                 # Check for end marker (only check last 6 chars for efficiency)
@@ -188,6 +240,14 @@ class Terminal:
             drag = (button & 32) != 0
             if drag:
                 button -= 32
-            return MouseEvent(x, y, button, pressed, drag)
+            # SGR wheel events encode the notch count in the button code:
+            #   64/65 = 1 notch, 66/67 = 2 notches, 68/69 = 3 notches.
+            # Touchpads emit many small deltas; decoding the magnitude lets us
+            # coalesce them accurately instead of treating each as a single notch.
+            scroll_delta = 1
+            if button in (66, 67, 68, 69):
+                scroll_delta = (button - 64) // 2 + 1
+                button = 64 + (button % 2)  # normalize to 64 (up) / 65 (down)
+            return MouseEvent(x, y, button, pressed, drag, scroll_delta)
         except:
             return None
