@@ -41,6 +41,7 @@ class MouseEvent:
     pressed: bool
     drag: bool = False
     scroll_delta: int = 1  # wheel notch count for scroll events (SGR 64-69)
+    alt: bool = False  # Alt modifier held (SGR bit 8)
 
 @dataclass
 class PasteEvent:
@@ -240,6 +241,9 @@ class Terminal:
             drag = (button & 32) != 0
             if drag:
                 button -= 32
+            # SGR modifier bits: 4=Shift, 8=Alt, 16=Ctrl. Extract Alt.
+            alt = (button & 8) != 0
+            button &= ~8  # strip Alt bit
             # SGR wheel events encode the notch count in the button code:
             #   64/65 = 1 notch, 66/67 = 2 notches, 68/69 = 3 notches.
             # Touchpads emit many small deltas; decoding the magnitude lets us
@@ -248,6 +252,6 @@ class Terminal:
             if button in (66, 67, 68, 69):
                 scroll_delta = (button - 64) // 2 + 1
                 button = 64 + (button % 2)  # normalize to 64 (up) / 65 (down)
-            return MouseEvent(x, y, button, pressed, drag, scroll_delta)
+            return MouseEvent(x, y, button, pressed, drag, scroll_delta, alt)
         except:
             return None

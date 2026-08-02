@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional, Any, List
+from pico_chat import pico_cfg
 from pico_chat.ui.tui.components.base import Component
 from pico_chat.ui.tui.components.box import Box
 from pico_chat.ui.tui.components.text import TextComponent
@@ -181,13 +182,13 @@ class Popup(Component):
                 # Mouse scroll
                 if event.button == 64:  # Scroll up
                     if self._scroll_offset > 0:
-                        self._scroll_offset = max(0, self._scroll_offset - 3 * event.scroll_delta)
+                        self._scroll_offset = max(0, self._scroll_offset - pico_cfg.config.ui_scroll_lines_per_notch * event.scroll_delta)
                         self._update_text()
                         return True
                 elif event.button == 65:  # Scroll down
                     max_scroll = max(0, len(self._lines) - self._visible_content_height())
                     if self._scroll_offset < max_scroll:
-                        self._scroll_offset = min(max_scroll, self._scroll_offset + 3 * event.scroll_delta)
+                        self._scroll_offset = min(max_scroll, self._scroll_offset + pico_cfg.config.ui_scroll_lines_per_notch * event.scroll_delta)
                         self._update_text()
                         return True
         

@@ -3,6 +3,7 @@ import time
 import asyncio
 from typing import Optional, Dict, Any
 from collections import deque
+from pico_chat import pico_cfg
 from pico_chat.ui.tui.terminal import ANSI, Terminal, MouseEvent
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.components import Component
@@ -32,6 +33,8 @@ class Compositor:
         self._scroll_accumulator = 0
         self._scroll_x = 0
         self._scroll_y = 0
+        self._scroll_alt = False
+        self._scroll_event_count = 0  # raw wheel events seen this frame (burst detection)
         
         # Performance tracking - use rolling window for accurate current FPS
         self.render_times = deque(maxlen=10)  # Track last 10 render times for recent FPS
@@ -111,6 +114,8 @@ class Compositor:
                 # accumulated into a single scroll before we flush it once.
                 # Without draining, each event would be flushed on its own
                 # iteration, defeating the coalescing entirely.
+                self._scroll_event_count = 0
+                self._scroll_alt = False
                 while True:
                     event = self.terminal.get_input()
                     if event is None:
@@ -129,6 +134,8 @@ class Compositor:
                         self._scroll_accumulator += sign * event.scroll_delta
                         self._scroll_x = event.x
                         self._scroll_y = event.y
+                        self._scroll_alt = self._scroll_alt or event.alt
+                        self._scroll_event_count += 1
                         self.request_render()
                     else:
                         self.root.handle_input(event)
@@ -139,11 +146,25 @@ class Compositor:
                 # burst is always dispatched.
                 if self._scroll_accumulator:
                     delta = self._scroll_accumulator
+                    direction = 1 if delta > 0 else -1
                     self._scroll_accumulator = 0
+                    # Apply speed multipliers:
+                    #  - Alt held → faster (ui_scroll_alt_multiplier)
+                    #  - Touchpad burst (many events in one frame) → slower
+                    #    (ui_scroll_touchpad_speed), so touchpad feels gentler
+                    #    than a discrete mouse wheel.
+                    speed = 1.0
+                    if self._scroll_alt:
+                        speed *= pico_cfg.config.ui_scroll_alt_multiplier
+                    if self._scroll_event_count >= pico_cfg.config.ui_scroll_touchpad_event_threshold:
+                        speed *= pico_cfg.config.ui_scroll_touchpad_speed
+                    delta = int(round(abs(delta) * speed))
+                    if delta == 0:
+                        delta = 1
                     scroll_event = MouseEvent(
                         self._scroll_x, self._scroll_y,
-                        65 if delta > 0 else 64,
-                        True, False, abs(delta),
+                        65 if direction > 0 else 64,
+                        True, False, delta,
                     )
                     self.root.handle_input(scroll_event)
                     self.request_render()

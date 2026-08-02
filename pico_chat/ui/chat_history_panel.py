@@ -1105,8 +1105,8 @@ class ChatHistoryPanel(TextComponent):
                     else:
                         current_start_y = self.anchored_start_y
                     
-                    # Scroll up by the coalesced delta (default 3 lines per notch)
-                    step = 3 * event.scroll_delta
+                    # Scroll up by the coalesced delta (configurable lines per notch)
+                    step = pico_cfg.config.ui_scroll_lines_per_notch * event.scroll_delta
                     new_start_y = max(0, current_start_y - step)
                     self.anchored_start_y = new_start_y
                     self.scroll_offset = max_scroll - new_start_y
@@ -1127,8 +1127,8 @@ class ChatHistoryPanel(TextComponent):
                     else:
                         current_start_y = self.anchored_start_y
                     
-                    # Scroll down by the coalesced delta (default 3 lines per notch)
-                    step = 3 * event.scroll_delta
+                    # Scroll down by the coalesced delta (configurable lines per notch)
+                    step = pico_cfg.config.ui_scroll_lines_per_notch * event.scroll_delta
                     new_start_y = min(max_scroll, current_start_y + step)
                     self.anchored_start_y = new_start_y
                     self.scroll_offset = max_scroll - new_start_y

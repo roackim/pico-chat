@@ -62,6 +62,12 @@ class Config:
         self.ui_box_style: str = "square" # Box border style: ("square", "double", "rounded", ascii)
         self.ui_box_style_focused: str = "square" # NOTE: currently unplugged; Box border style when focused: ("square", "double", "rounded")
         
+        # Scrolling settings
+        self.ui_scroll_lines_per_notch: int = 3  # Base lines scrolled per wheel notch
+        self.ui_scroll_touchpad_speed: float = 0.1  # Multiplier applied to touchpad bursts (slower)
+        self.ui_scroll_touchpad_event_threshold: int = 2  # Events per frame above which a burst is treated as touchpad
+        self.ui_scroll_alt_multiplier: float = 3.0  # Multiplier applied when Alt is held during scroll
+        
         # Generation metrics display
         self.ui_show_metrics: bool = True  # Show generation metrics
         self.ui_metrics_show_tokens: bool = False

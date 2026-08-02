@@ -57,12 +57,14 @@ class MouseHandler(InputHandler):
     
     def handle(self, event: MouseEvent, context: InputContext) -> bool:
         # Check if mouse is within component bounds (handled by caller)
+        from pico_chat import pico_cfg
+        lines = pico_cfg.config.ui_scroll_lines_per_notch * event.scroll_delta
         if event.button == 64:  # Scroll Up
-            for _ in range(event.scroll_delta):
+            for _ in range(lines):
                 context.scroll.scroll_up()
             return True
         elif event.button == 65:  # Scroll Down
-            for _ in range(event.scroll_delta):
+            for _ in range(lines):
                 context.scroll.scroll_down()
             return True
         
