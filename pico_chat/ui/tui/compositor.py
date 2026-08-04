@@ -4,9 +4,12 @@ import asyncio
 from typing import Optional, Dict, Any
 from collections import deque
 from pico_chat import pico_cfg
-from pico_chat.ui.tui.terminal import ANSI, Terminal, MouseEvent
+from pico_chat.ui.tui.terminal import ANSI, Terminal
+from pico_chat.ui.tui.events import KeyEvent, MouseEvent
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.components import Component
+from pico_chat.ui.tui.router import EventRouter
+from pico_chat.ui.tui.events import ResizeEvent, TickEvent
 
 class Compositor:
     def __init__(self, root: Component, fps: int = 30, shutdown_event: Optional[Any] = None):
@@ -17,6 +20,7 @@ class Compositor:
         self.buffer = Buffer(0, 0)
         self.components_by_id: Dict[str, Component] = {}
         self._collect_ids(self.root)
+        self.event_router = EventRouter(self.root)
         self.running = False
         self.shutdown_event = shutdown_event
         self.padding = 0  # Global app padding
@@ -51,6 +55,15 @@ class Compositor:
     def get_component(self, id: str) -> Optional[Component]:
         return self.components_by_id.get(id)
 
+    def set_root(self, root: Component) -> None:
+        """Replace the rendered root while preserving app-level routing policy."""
+        self.root = root
+        self.components_by_id = {}
+        self._collect_ids(root)
+        self.event_router.root = root
+        self._full_redraw = True
+        self.request_render()
+
     def update_component(self, id: str, data: Any):
         comp = self.get_component(id)
         if comp:
@@ -64,11 +77,17 @@ class Compositor:
         """
         if component not in self.overlays:
             self.overlays.append(component)
+            self.event_router.add_overlay(component)
+            self._full_redraw = True
+            self.request_render()
     
     def remove_overlay(self, component: Component):
         """Unregister a component from overlays."""
         if component in self.overlays:
             self.overlays.remove(component)
+            self.event_router.remove_overlay(component)
+            self._full_redraw = True
+            self.request_render()
 
     def request_render(self):
         """Request a repaint on the next loop iteration."""
@@ -79,6 +98,15 @@ class Compositor:
         """Mark whether high-frequency LLM streaming is in progress."""
         self.streaming_active = active
         self.request_render()
+
+    def _handle_shutdown_key(self, event) -> bool:
+        key = event.key if isinstance(event, KeyEvent) else event
+        if key != '\x03':
+            return False
+        self.running = False
+        if self.shutdown_event:
+            self.shutdown_event.set()
+        return True
 
     async def run(self):
         self.running = True
@@ -104,6 +132,7 @@ class Compositor:
                     await asyncio.sleep(0.05)
                     self.terminal.resized = False
                     self._update_size()
+                    self.event_router.dispatch(ResizeEvent(self.width, self.height))
                     self._full_redraw = True
                     self.request_render()
                     # Reset frame timing after resize
@@ -120,10 +149,7 @@ class Compositor:
                     event = self.terminal.get_input()
                     if event is None:
                         break
-                    if event == '\x03': # Ctrl-C
-                        self.running = False
-                        if self.shutdown_event:
-                            self.shutdown_event.set()
+                    if self._handle_shutdown_key(event):
                         break
                     # Coalesce wheel scroll events: accumulate the delta and
                     # dispatch a single event once per frame. This prevents a
@@ -138,7 +164,7 @@ class Compositor:
                         self._scroll_event_count += 1
                         self.request_render()
                     else:
-                        self.root.handle_input(event)
+                        self.event_router.dispatch(event)
                         self.request_render()
 
                 # Flush any accumulated scroll once per frame, before rendering.
@@ -166,7 +192,10 @@ class Compositor:
                         65 if direction > 0 else 64,
                         True, False, delta,
                     )
-                    self.root.handle_input(scroll_event)
+                    self.event_router.dispatch(scroll_event)
+                    self.request_render()
+
+                if self.event_router.dispatch(TickEvent(time.perf_counter())):
                     self.request_render()
 
                 has_dirty = self.root.is_dirty() if hasattr(self.root, 'is_dirty') else True
@@ -222,6 +251,8 @@ class Compositor:
         inner_width = max(0, self.width - 2 * pad)
         inner_height = max(0, self.height - 2 * pad)
         self.root.set_layout(pad, pad, inner_width, inner_height)
+        if hasattr(self.root, 'layout'):
+            self.root.layout()
 
         if self._full_redraw:
             self.buffer.clear()

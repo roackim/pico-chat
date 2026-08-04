@@ -53,6 +53,8 @@ class SelectionMenu(Component):
         elif not self.is_visible and self._registered_with_compositor:
             self.compositor.remove_overlay(self)
             self._registered_with_compositor = False
+        if hasattr(self.compositor, "request_render"):
+            self.compositor.request_render()
     
     def update(self, all_items: List[str], search_term: str = "", display_prefix: str = ""):
         """Update menu with new items and optional search filter.
@@ -113,7 +115,11 @@ class SelectionMenu(Component):
         menu_width = min(menu_width, self.width)  # Respect parent width
         
         # Use max_height to limit visible items
-        visible_count = min(len(self.items), self.max_height - 2)  # -2 for borders
+        visible_count = min(
+            len(self.items),
+            self.max_height - 2,
+            max(0, self.height - 2),
+        )  # -2 for borders
         menu_height = visible_count + 2  # +2 for top and bottom borders
         
         # Draw the box with background

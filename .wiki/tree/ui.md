@@ -11,21 +11,52 @@ See [notes/ui.md](../notes/ui.md) for the full architecture overview.
 ### `app.py`
 `chatTUI` — main application class.
 - Sets up layout, compositor, and component tree
+- Manages conversation tabs and the closeable debug-console workspace tab
+- Uses generic `TabView` entries for tab identity and view ownership while keeping `ConversationState` as application-level domain state
+- Uses `TabView` as the sole production tab-selection and close state path
+- Uses an empty workspace when no tabs exist; the first ordinary message creates a closeable conversation tab
+- Queued-message styling and concurrent generation output are scoped to the conversation that owns the active generation
+- The selected `ConversationRuntime` history panel is mounted directly into the
+	live workspace, keeping visible messages independent across tabs
+- Ordinary, edited, retried, and resumed messages share one runtime enqueue path, preserving consistent queued state and FIFO ordering
+- Application startup launches only `ConversationRuntime` workers; no legacy global worker remains
+- Application startup also launches one app-level command worker; slash commands
+	are consumed independently of per-conversation generation workers
+- Popup and form input are routed by registered EventRouter overlays rather than duplicated in `handle_global_input`
+- History/input mouse focus is selected through the reusable `FocusScope.focus_at()` API
+- Application focus adapters delegate layout geometry to their wrapped components for mouse hit testing
+- Completion-menu input is dispatched directly to the input component; no root-handler compatibility fallback remains
+- Application focus navigation consumes canonical `KeyEvent` metadata while accepting legacy raw strings
+- `ConversationRuntime` owns each tab's agent, message panel, queue, worker, generation task, tool state, permissions, and pause state
+- Installs chat and debug workspace layouts through `ChatScreen` as Navigator-managed screen instances
+- Delegates runtime chat/debug workspace replacement to `Navigator`; pre-run setup only constructs the screen root
+- Passes active conversation state to `ChatScreen` as an external screen model
 - Runs the async event loop
 - Routes incoming `Chunk` objects from the harness to the chat display
 - Dispatches user input to the harness or command handler
-- Manages popup overlay via `show_popup()` / `hide_popup()`; input intercepted in `handle_global_input()` when popup is visible
+- Manages popup overlay via `show_popup()` / `hide_popup()`; input is routed by registered EventRouter overlays
+- Leaves tab mouse hit testing to `EventRouter` and the `TabBar`/`TabView` component path
+
+The application-specific panels and command callbacks remain outside the
+library contract; reusable widgets and screens are documented in
+`../notes/ui.md`.
 
 ### `chat_history_panel.py`
-`ChatHistoryPanel` — extends `TextComponent` for scrollable message display.
+`ChatHistoryPanel` — extends `TextComponent` and is used directly as the
+scrollable message component in `ChatScreen`.
+- `restore_messages(messages)` — restores message objects while rebuilding
+	panel-owned message and scroll state
 - `add_message(text, msg_type, title=None, ...)` — creates a `Message`, appends it, scrolls to bottom
 - `new_message(...)` — creates but does not append (use with `replace_message`)
 - `replace_message(old, new)` — swap a placeholder message with a final one
 - `clear()` — removes all messages
 - `start_inline_edit(message)` / `stop_inline_edit(save)` — in-place message editing via `Box.inline_editor`
 - Handles keyboard focus, per-message focus navigation, and width-change reformatting
+- Owns the message collection and lays out visible message components directly;
+	there is no parallel child-container compatibility state
 - **Mouse selection**: drag-to-select text within messages; selection highlight rendered as reverse-video overlay; auto-copies to clipboard on release
 - **Action click handling**: `_hit_test_action_bar()` computes button hit regions for action buttons in box bottom borders; clicking dispatches the action with a brief reverse-video flash feedback
+- Keyboard and mouse message actions share the `on_action(message, action)` callback boundary
 - **Parameter hints**: `_get_parameter_hint()` reads `Command.params` from the registry to show schema-driven argument hints when typing `/commands`
 - `y` key yanks current selection to clipboard
 

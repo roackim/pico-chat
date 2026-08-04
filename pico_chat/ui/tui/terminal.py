@@ -7,8 +7,8 @@ import signal
 import fcntl
 import time
 import select
-from dataclasses import dataclass
 from typing import Optional, Callable
+from pico_chat.ui.tui.events import KeyEvent, MouseEvent, PasteEvent, normalize_key
 
 class ANSI:
     HIDE_CURSOR = "\033[?25l"
@@ -32,20 +32,6 @@ class ANSI:
     @staticmethod
     def color_rgb_bg(r: int, g: int, b: int) -> str:
         return f"\033[48;2;{r};{g};{b}m"
-
-@dataclass
-class MouseEvent:
-    x: int
-    y: int
-    button: int  # 0=left, 1=middle, 2=right, 64=scroll_up, 65=scroll_down
-    pressed: bool
-    drag: bool = False
-    scroll_delta: int = 1  # wheel notch count for scroll events (SGR 64-69)
-    alt: bool = False  # Alt modifier held (SGR bit 8)
-
-@dataclass
-class PasteEvent:
-    text: str
 
 class Terminal:
     def __init__(self):
@@ -144,7 +130,7 @@ class Terminal:
         except UnicodeDecodeError:
             return data.decode('utf-8', errors='replace')
 
-    def get_input(self) -> Optional[str | MouseEvent | PasteEvent]:
+    def get_input(self) -> Optional[KeyEvent | MouseEvent | PasteEvent]:
         # Non-blocking read
         flags = fcntl.fcntl(self.fd, fcntl.F_GETFL)
         fcntl.fcntl(self.fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
@@ -188,8 +174,10 @@ class Terminal:
                 
                 if seq.startswith('\x1b[<'):
                     return self._parse_mouse(seq)
-                return seq
-            return char
+                if seq in ('\x1b\r', '\x1b\n', '\x1b[13;3u', '\x1b[27;3;13~'):
+                    return normalize_key('\x1b\r')
+                return normalize_key(seq)
+            return normalize_key(char)
         except:
             return None
         finally:

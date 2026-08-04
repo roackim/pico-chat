@@ -447,6 +447,27 @@ class TestFormPopup:
         fp.show("Test", fields, lambda v: None)
         fp.handle_input("a")
         assert fields[0].get_value() == "a"
+        assert fp.dirty
+
+    def test_reset_restores_model_values(self):
+        fp = FormPopup()
+        field = TextField("Name", value="before")
+        fp.show("Test", [field], lambda v: None)
+        fp.handle_input("x")
+        assert field.get_value() == "beforex"
+        assert fp.dirty
+
+        fp.reset()
+        assert field.get_value() == "before"
+        assert not fp.dirty
+
+    def test_cancel_resets_model_values_before_dismissal(self):
+        fp = FormPopup()
+        field = TextField("Name", value="before")
+        fp.show("Test", [field], lambda v: None)
+        fp.handle_input("x")
+        fp._do_cancel()
+        assert field.get_value() == "before"
 
     def test_tab_navigates_fields(self):
         fp = FormPopup()

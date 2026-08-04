@@ -14,7 +14,7 @@ from .subcommand_completion import SubcommandCompletion
 from .context_completion import ContextCompletion
 from .argument_completion import ArgumentCompletion
 from pico_chat.ui.tui.buffer import Buffer
-from pico_chat.ui.tui.terminal import MouseEvent
+from pico_chat.ui.tui.events import KeyEvent, MouseEvent
 from pico_chat.ui.tui.layout_utils import display_width
 
 from pico_chat.ui.tui.colors import theme
@@ -290,12 +290,24 @@ class InputComponent(Component):
         # Position menu above trigger
         visible_count = min(len(menu.items), menu.max_height - 2)
         menu_height = visible_count + 2
-        
-        menu_x = self.x + trigger_col - 2  # 2-char offset
-        menu_y = self.y + trigger_row - scroll_y - menu_height
-        
-        available_width = self.width - (trigger_col - 2)
-        menu_width = max(available_width, 20)
+
+        trigger_x = self.x + trigger_col - 2
+        trigger_y = self.y + trigger_row - scroll_y
+        compositor = getattr(self, "compositor_ref", None)
+        screen_width = getattr(compositor, "width", self.x + self.width)
+        screen_height = getattr(compositor, "height", self.y + self.height)
+
+        menu_width = min(max(self.width, 20), screen_width)
+        menu_x = max(0, min(trigger_x, screen_width - menu_width))
+
+        space_above = max(0, trigger_y)
+        space_below = max(0, screen_height - trigger_y - 1)
+        if menu_height <= space_above or space_above >= space_below:
+            menu_y = trigger_y - menu_height
+            menu_height = min(menu_height, space_above)
+        else:
+            menu_y = trigger_y + 1
+            menu_height = min(menu_height, space_below)
         
         menu.set_layout(menu_x, menu_y, menu_width, menu_height)
     
@@ -535,8 +547,20 @@ class InputComponent(Component):
             )
         )
 
+    def hide_completions(self) -> None:
+        """Hide all completion menus before changing the surrounding view."""
+        for completion in (
+            self.command_completion,
+            self.subcommand_completion,
+            self.argument_completion,
+            self.context_completion,
+        ):
+            if completion and completion.is_active:
+                completion.hide()
+
     def handle_input(self, event: Any) -> bool:
         """Handle input events by delegating to appropriate handlers."""
+        key = event.key if isinstance(event, KeyEvent) else event
         # Ignore keyboard input if not focused (but allow mouse events for potential focus change)
         if not self.focused and not isinstance(event, MouseEvent):
             return False
@@ -557,7 +581,7 @@ class InputComponent(Component):
                 break
         
         # Handle ESC - cancel menu and remember the word
-        if event == '\x1b':  # ESC key
+        if key == '\x1b':  # ESC key
             if active_completion:
                 active_completion.cancel(self.buffer.text, self.buffer.cursor_pos)
                 return True
@@ -565,21 +589,21 @@ class InputComponent(Component):
         
         # Handle arrow keys for menu navigation (priority)
         if active_completion:
-            if event == '\x1b[A':  # Up arrow
+            if key == '\x1b[A':  # Up arrow
                 active_completion.navigate_up()
                 return True
-            elif event == '\x1b[B':  # Down arrow
+            elif key == '\x1b[B':  # Down arrow
                 active_completion.navigate_down()
                 return True
         
         # Handle Tab - accept selection with trailing space
-        if event == '\t':
+        if key == '\t':
             if active_completion and self._accept_completion(active_completion, add_space=True):
                 return True
             return False  # Let other handlers try
         
         # Handle Enter - accept selection + submit (no trailing space)
-        if event in ('\r', '\n'):
+        if key in ('\r', '\n'):
             # Try completion first if menu is visible
             if active_completion:
                 self._accept_completion(active_completion, add_space=False)

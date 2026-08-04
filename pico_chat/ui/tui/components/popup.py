@@ -5,8 +5,9 @@ from pico_chat.ui.tui.components.base import Component
 from pico_chat.ui.tui.components.box import Box
 from pico_chat.ui.tui.components.text import TextComponent
 from pico_chat.ui.tui.buffer import Buffer
-from pico_chat.ui.tui.terminal import MouseEvent
+from pico_chat.ui.tui.events import KeyEvent, MouseEvent
 from pico_chat.ui.tui.colors import RGB, theme
+from pico_chat.ui.tui.screen import Screen
 
 
 @dataclass(frozen=True)
@@ -148,16 +149,17 @@ class Popup(Component):
             return False
         
         # Keyboard
-        if isinstance(event, str):
-            if event == '\x1b':  # Escape
+        if isinstance(event, (str, KeyEvent)):
+            key = event.key if isinstance(event, KeyEvent) else event
+            if key == '\x1b':  # Escape
                 self.hide()
                 return True
-            if event == '\x1b[A':  # Up
+            if key == '\x1b[A':  # Up
                 if self._scroll_offset > 0:
                     self._scroll_offset -= 1
                     self._update_text()
                     return True
-            elif event == '\x1b[B':  # Down
+            elif key == '\x1b[B':  # Down
                 max_scroll = max(0, len(self._lines) - self._visible_content_height())
                 if self._scroll_offset < max_scroll:
                     self._scroll_offset += 1
@@ -215,3 +217,19 @@ class Popup(Component):
             if sx > self.x:
                 buffer.write_str(sx, bottom_y, scroll_text,
                                fg=self.frame_color, bg=self._box.bg)
+
+
+class PopupScreen(Screen):
+    """Screen lifecycle wrapper for a read-only popup."""
+
+    def __init__(self, popup: Popup, title: str, content: str):
+        super().__init__(popup)
+        self.popup = popup
+        self.title = title
+        self.content = content
+
+    def on_enter(self):
+        self.popup.show(self.title, self.content)
+
+    def on_leave(self):
+        self.popup.hide()

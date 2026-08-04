@@ -11,16 +11,42 @@ class Component(ABC):
         self.height = 0
         self.parent: Optional['Component'] = None
         self._dirty = True
+        self._layout_dirty = True
         self._dirty_rect: Optional[tuple[int, int, int, int]] = None
+        self.min_width: Optional[int] = None
+        self.max_width: Optional[int] = None
+        self.min_height: Optional[int] = None
+        self.max_height: Optional[int] = None
+
+    def _constrain_dimension(self, value: int, minimum: Optional[int], maximum: Optional[int]) -> int:
+        if minimum is not None:
+            value = max(value, minimum)
+        if maximum is not None:
+            value = min(value, maximum)
+        return max(0, value)
 
     def set_layout(self, x: int, y: int, width: int, height: int):
         old_layout = (self.x, self.y, self.width, self.height)
         self.x = x
         self.y = y
-        self.width = width
-        self.height = height
-        if old_layout != (x, y, width, height):
-            self.mark_changed((x, y, width, height))
+        self.width = self._constrain_dimension(width, self.min_width, self.max_width)
+        self.height = self._constrain_dimension(height, self.min_height, self.max_height)
+        new_layout = (x, y, self.width, self.height)
+        if old_layout != new_layout:
+            self.mark_layout_changed()
+            self.mark_changed(new_layout)
+
+    def layout(self):
+        """Calculate child geometry after this component has been allocated."""
+        return None
+
+    def mark_layout_changed(self):
+        self._layout_dirty = True
+        if self.parent and hasattr(self.parent, "mark_layout_changed"):
+            self.parent.mark_layout_changed()
+
+    def is_layout_dirty(self) -> bool:
+        return self._layout_dirty
 
     def mark_changed(self, rect: Optional[tuple[int, int, int, int]] = None):
         self._dirty = True
@@ -43,6 +69,7 @@ class Component(ABC):
 
     def clear_dirty(self):
         self._dirty = False
+        self._layout_dirty = False
         self._dirty_rect = None
         if hasattr(self, 'children'):
             for child in self.children:

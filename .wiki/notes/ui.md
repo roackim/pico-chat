@@ -18,6 +18,93 @@ chatTUI (app.py)
             └─ Popup                      ← centered text popups (/help, /status)
 ```
 
+Typed event dataclasses are defined in `tui/events.py`. Shared focus ownership
+is provided by `tui/focus.py`; `FormContainer` uses `FocusManager` while
+retaining its existing form navigation API.
+`FocusScope` provides modal focus boundaries; `FormPopup` enters its scope when
+shown and releases it when hidden. `EventRouter` dispatches keyboard events to
+the active focus target after application policy handling.
+`EventRouter` provides overlay-priority dispatch and layout-based mouse
+hit-testing for compositor input.
+Keyboard input is normalized to string-compatible `KeyEvent` objects at the
+terminal boundary, and terminal resize notifications are dispatched as
+`ResizeEvent` objects.
+The application-level input/history focus state is backed by `FocusScope`; its
+domain-specific Up/Down and inline-editing rules remain in `chatTUI`.
+
+Each conversation tab owns its runtime agent, history panel, queue, worker, and
+conversation-local tool/permission state. The selected runtime's history panel
+is mounted directly into the active chat workspace, so switching tabs does not
+copy messages through a shared panel. Slash commands use one application-level
+worker and remain responsive while conversation generation is running.
+
+## Library Contracts
+
+### Widget Lifecycle and Ownership
+
+Containers assign child geometry through `set_layout()` and `layout()`. The
+compositor renders the root tree after layout, then renders registered overlays
+above it. Components mark content changes with `mark_changed()` and geometry
+changes with `mark_layout_changed()`; the compositor uses those states to
+request redraws. Widgets own presentation and local interaction, screens own
+workflow and focus/action scope, and the application owns domain state and
+services.
+
+### Event and Focus Flow
+
+`EventRouter` checks overlays from newest to oldest first. An unhandled event
+then passes through the application interceptor, semantic `ActionMap`, mouse
+hit path, focused widget, or root fallback as appropriate. Mouse paths are
+built from component rectangles and are tried child-first; a component stops
+propagation by returning `True`. The application interceptor handles policy
+and focus transitions; tab mouse selection and close actions flow through the
+generic hit path into `TabBar` and `TabView`. `FocusScope` selects the
+keyboard target and keeps modal focus bounded.
+
+### Layout and Coordinates
+
+Coordinates are zero-based terminal cells. Component rectangles use absolute
+`x`, `y`, `width`, and `height`; the right and bottom edges are exclusive.
+Containers allocate child rectangles before rendering. `Padding` insets a
+child, `Align` positions it within its allocation, `Stack` paints children in
+order, and `ScrollView` clips content to its viewport. Rendering writes to the
+allocated `Buffer` or `SubBuffer` and should not perform layout for siblings.
+
+### Screens and Navigation
+
+Create a screen by composing components into a root, then pass optional
+`FocusScope`, `ActionMap`, and model values to `Screen`. Install an initial
+screen with `Navigator`; use `push`, `pop`, `replace`, or `back` for movement.
+Use `ModalHost.present_screen()` for modal screens so enter/leave lifecycle
+hooks and overlay ownership are handled together.
+
+### API Stability
+
+The stable library surface is the typed events, `Action`/`ActionMap`, focus
+scopes, `Component`, layout primitives, reusable components, `Screen`,
+`Navigator`, `ModalHost`, `TabView`, and standalone form models. Modules named
+as application adapters, private attributes (leading `_`), compositor internals,
+and legacy `chatTUI` callbacks remain internal and may change during migration.
+
+### Library-Only Example
+
+`pico_chat.ui.tui.example_screen.ExampleScreen` is a minimal screen composed
+only from library primitives. It demonstrates root composition, focus scope,
+semantic activation, layout, and rendering without chat or harness state.
+
+## Integration Boundary
+
+Migration is vertical and behavior-preserving: add focused coverage before
+replacing a legacy path, keep compatibility at the application boundary, and
+remove legacy paths only after production references reach zero. User-visible
+behavior that must remain unchanged includes modal priority and Escape
+cancellation, focus restoration after modal dismissal, tab selection and close
+behavior, keyboard and mouse routing, resize handling, scrolling, and the
+existing chat input/history navigation policy.
+The running application now presents form popups through `ModalHost`; direct
+compositor ownership remains available for isolated callers and compatibility
+tests.
+
 ## Compositor (`tui/compositor.py`)
 
 - Runs an async render loop at ~30 FPS
@@ -38,13 +125,16 @@ Centered overlay popups for commands that benefit from floating display rather t
 - **Scroll**: arrow keys (±1), mouse wheel (±3), clamped to bounds
 - `PopupAction(key, label)` dataclass — compatible with Box's `.format()` action protocol, no MsgAction coupling
 - Scroll position indicator overlaid on bottom-right when content overflows
-- Input interception: when popup is visible, `handle_global_input()` routes all input to the popup
+- Input interception: when popup is visible, the `EventRouter` overlay-priority
+    path routes input to the popup before normal focus handling
 - Auto-sizing: `max_width_ratio` / `max_height_ratio` control popup dimensions relative to terminal
 - Currently used by: `/help` (command list), `/status` (async with placeholder), `/tools`, `/permissions`, `/debug` help
 
 ## Forms System (`tui/components/form.py`, `form_popup.py`)
 
 Modal form dialogs for interactive input (server configuration, settings, etc.).
+`FormPopup` can be owned directly by `ModalHost` through its `FormPopupScreen`
+adapter, while retaining the legacy compositor overlay path.
 
 ### Field Types (`form.py`)
 
@@ -57,6 +147,11 @@ Modal form dialogs for interactive input (server configuration, settings, etc.).
 | `RadioListField` | `Label:` + `()`/`(x)` per option | `Optional[int]` | Up/Down moves cursor, Space/Enter selects |
 
 All fields extend `FormField` ABC with: `get_value()`, `set_value()`, `render()`, `handle_input()`, `get_preferred_height()`.
+Field value and validation state can be held by standalone models from
+`components/field_models.py`; widgets synchronize editor changes to their model.
+`FormFieldSpec` and `build_fields()` in `components/form_schema.py` provide
+declarative construction for the same widgets. Models validate synchronously
+by default and expose `validate_async()` for future asynchronous checks.
 
 ### FormContainer (`form.py`)
 
@@ -73,7 +168,8 @@ Modal overlay wrapping a `FormContainer` inside a `Box`:
 - `show(title, fields, on_submit, on_cancel)` — displays form, registers with compositor
 - `hide()` — dismisses, unregisters from compositor
 - **Action bar**: `[Enter] ok` / `[Esc] cancel` in bottom border
-- **Validation**: `required=True` on fields blocks submit with error message
+- **Validation**: required and custom model validation block submit with an error message
+- **Lifecycle**: `dirty` reports changed model values; `reset()` restores initial values, and cancel resets before dismissing
 - **Enter behavior**: on `TextField` moves to next field; on other fields submits
 - **Mouse**: clickable OK/Cancel buttons, click-to-focus fields
 - Callback receives `Dict[str, Any]` mapping field labels to values
@@ -99,12 +195,24 @@ form.show(
 
 Currently used by: `/server add` (no-args form mode)
 
+## Tab Views
+
+`TabView` owns generic tab metadata and view instances, while application code
+owns domain models. Tab entries have stable IDs, titles, closability, and an
+active selection. Inactive views remain allocated and receive `Screen`
+`on_suspend()`/`on_resume()` lifecycle hooks; first activation uses
+`on_enter()`, and removal uses `on_leave()`. Tab selection and movement are
+available through the shared `ActionMap`.
+
 ## Debug Panel
 
-The debug console is a `DebugLogPanel` (extends `TextComponent`) wrapped in a `Box`.
+The debug console is a `DebugLogPanel` (extends `TextComponent`) shown directly in the
+history slot of a closeable workspace tab, alongside the normal command input. Closing
+the tab returns to the active conversation; the debug log remains available when the tab
+is reopened.
 
 - `DebugLogPanel` receives log entries via `TuiLogHandler`
-- Toggled visible/hidden via Hsplit layout mutation in `toggle_debug_console()`
+- Toggled visible/hidden by replacing the `ChatScreen` workspace composition in `toggle_debug_console()`
 - Auto-scrolls to bottom on new log entries
 - Planned: move to a separate conversation (not popup)
 
@@ -126,6 +234,7 @@ Key components:
 - `TextComponent` — static/scrollable text display
 - `SelectionMenu` — floating dropdown with fuzzy filtering
 - `InputComponent` — multi-line editor (see below)
+- `LineInput` and `BoxInput` — reusable cursor-aware single-line and multiline editors used by form fields
 - `DebugLogPanel` — scrolling log display
 - `MarkdownComponent` — live markdown renderer (see [Markdown Rendering](#markdown-rendering) below)
 
@@ -320,7 +429,7 @@ Prefix the name with `_` (e.g. `"_internal"`). `HelpCommand` skips names startin
 
 - `tui/colors.py` — `RGB` class, theme dictionary, hex parsing
 - `tui/layout_utils.py` — `wrap_text()`, `display_width()` (wcwidth-aware for Unicode), `strip_ansi()`
-- `tui/container.py` — `Vsplit`/`Hsplit` layout with int, float (%), and string size units
+- `tui/container.py` — explicit layout pass; `Vsplit`/`Hsplit` support fixed, percentage, content, and fill policies, with `Padding`, `Align`, `Stack`/`Overlay`, and `ScrollView`
 
 ## Markdown Rendering
 

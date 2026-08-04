@@ -13,27 +13,31 @@ from openai import chat
 import openai
 
 from pico_chat.ui.tui.compositor import Compositor
-from pico_chat.ui.tui.terminal import MouseEvent
+from pico_chat.ui.tui.events import KeyEvent, MouseEvent
 from pico_chat.ui.tui.components import TextComponent, Box, InputComponent
 from pico_chat.ui.tui.components.debug_panel import DebugLogPanel
-from pico_chat.ui.tui.components.popup import Popup
+from pico_chat.ui.tui.components.popup import Popup, PopupScreen
 from pico_chat.ui.tui.components.form_popup import FormPopup
 from pico_chat.ui.tui.components.tab_bar import TabBar
+from pico_chat.ui.tui.components.tab_view import TabView
 from pico_chat.ui.chat_history_panel import ChatHistoryPanel
 from pico_chat.ui.chat_message import Message
 from pico_chat.ui.commands import handle_command, get_command_list, get_subcommand_list
-from pico_chat.ui.tui.container import Hsplit
 from pico_chat.ui.tui.layout_utils import strip_ansi
+from pico_chat.ui.tui.focus import FocusScope
+from pico_chat.ui.tui.navigation import Navigator, ModalHost
+from pico_chat.ui.tui.chat_screen import ChatScreen
 
         # Setup logging to debug panel
 import logging
 from pico_chat.ui.commands import StatusCommand
 from pico_chat.ui.tui.colors import theme
-from pico_chat.ui.tui.msg_types import MsgType, PicoMsg, ThinkingMsg, UserMsg, SysMsg, SysMsgError, SysMsgWarning, ToolCallMsg, ToolDraftMsg, AskPermissionMsg
+from pico_chat.ui.tui.msg_types import MsgType, MsgAction, PicoMsg, ThinkingMsg, UserMsg, SysMsg, SysMsgError, SysMsgWarning, ToolCallMsg, ToolDraftMsg, AskPermissionMsg
 
 from pico_chat import pico_cfg
 from pico_chat.ui.logging_handlers import setup_tui_logging
 from pico_chat.ui.chat_action_handlers import ChatActionHandlers
+from pico_chat.ui.conversation_runtime import ConversationRuntime
 
 # Import chunks module for type checking
 from pico_chat.harness import chunks
@@ -41,162 +45,228 @@ from pico_chat.harness import chunks
 TARGET_FPS = pico_cfg.config.target_fps
 
 
-class ConversationState:
-    """Stores the complete state of a single conversation tab."""
-    
-    def __init__(self, name: str = "chat"):
-        self.name = name
-        self.harness_history: list = []
-        self.messages: list = []  # UI Message objects
-        self.active_tool_messages: dict = {}
-        self.pending_permission_prompt: Optional[str] = None
-        self.editing_message_index: Optional[int] = None
-        self._active_user_input: Optional[str] = None
-        self._active_user_msg: Optional[Any] = None
-        self._paused_user_input: Optional[str] = None
-        self._paused_user_msg: Optional[Any] = None
+class _AppFocusTarget:
+    """Adapter exposing an application focus target to the TUI focus API."""
+
+    focusable = True
+    enabled = True
+
+    def __init__(self, component, on_focus, handle_input):
+        self._component = component
+        self._on_focus = on_focus
+        self._handle_input = handle_input
+        self.focused = False
+
+    @property
+    def x(self):
+        return self._component.x
+
+    @property
+    def y(self):
+        return self._component.y
+
+    @property
+    def width(self):
+        return self._component.width
+
+    @property
+    def height(self):
+        return self._component.height
+
+    def set_focused(self, focused: bool):
+        self.focused = focused
+        self._on_focus(focused)
+
+    def set_component(self, component):
+        self._component = component
+
+    def handle_input(self, event):
+        return self._handle_input(event)
+
+
+class ConversationState(ConversationRuntime):
+    """Compatibility constructor for callers that create tab state directly."""
+
+    def __init__(self, name: str = "chat", kind: str = "chat"):
+        super().__init__(name=name, kind=kind)
 
 
 class chatTUI(ChatActionHandlers):
     """Terminal UI for the agent."""
 
     def __init__(self, agent):
-        self.agent = agent
-        self.message_queue: asyncio.Queue[tuple[str, Message]] = asyncio.Queue()  # Queue of (text, user_message)
-        self.compositor: Optional[Compositor] = None
-        self._last_focus_id: Optional[str] = "input"  # Start with input focused
-        
-        # Get colors from config
+        self._initial_agent = agent
+        self._agent_factory = self._runtime_agent_factory()
+        self.compositor = None
+        self.navigator = None
+        self.modal_host = None
+        self.popup_screen = None
+        self._last_focus_id = "input"
         self.chat_history_panel = ChatHistoryPanel()
-        
-        # New: Direct InputComponent usage
         self.input_component = InputComponent(" ", id="entry", frame_color=theme.USER)
-        self.input_component.config = pico_cfg.config  # Pass config for max height, cursor settings, etc.
+        self.input_component.config = pico_cfg.config
         self.input_component.on_submit = self.on_user_submit
-        
-        # Setup command completion
-        commands = get_command_list()
-        self.input_component.setup_commands(commands)
-        
-        # Setup subcommand completion
+        self.input_component.setup_commands(get_command_list())
         self.input_component.setup_subcommands(get_subcommand_list)
-        
-        # Setup context (@file) completion
-        get_context_items = lambda: agent.list_files_and_folders() if hasattr(agent, 'list_files_and_folders') else []
+        get_context_items = lambda: agent.list_files_and_folders() if hasattr(agent, "list_files_and_folders") else []
         self.input_component.setup_context(get_context_items)
-
-        # Setup generic argument completion (driven by Command.params schema)
         from pico_chat.ui.commands import COMMANDS
         self.input_component.setup_command_registry(COMMANDS)
-        
         self.input_box = Box(self.input_component, title="message", fg=self.input_component.frame_color)
-
-        # Debug console
-        self.debug_panel = DebugLogPanel(
-            max_lines=1000,
-            frame_color=theme.ERROR,
-            content_color=theme.MUTED,
-            left_pad=1,
-            right_pad=0
-        )
-        self.debug_box = Box(self.debug_panel, title="debug console", fg=self.debug_panel.frame_color)
+        self._focus_targets = [
+            _AppFocusTarget(self.input_component, self._set_input_focus, self.input_component.handle_input),
+            _AppFocusTarget(self.chat_history_panel, self._set_history_focus, self.chat_history_panel.handle_input),
+        ]
+        self._focus_scope = FocusScope(self._focus_targets)
+        self.debug_panel = DebugLogPanel(max_lines=1000, frame_color=theme.ERROR, content_color=theme.MUTED, left_pad=1, right_pad=0)
+        self.debug_box = self.debug_panel
         self.show_debug = False
-        
-        # Popup overlay for commands like /help, /status, etc.
         self.popup = Popup()
-        
-        # Form popup overlay for interactive forms (server add, git commit, etc.)
         self.form_popup = FormPopup()
-        
-        # Setup logging to debug panel
         self.log_handler = setup_tui_logging(self.debug_panel)
-        
-        # Track the current generation task
-        self.current_generation_task: Optional[asyncio.Task] = None
-
-        # Track the user input/message currently being generated (for steer/pause/resume)
-        self._active_user_input: Optional[str] = None
-        self._active_user_msg: Optional[Message] = None
-
-        # Set by handle_steer_action so agent_worker re-queues the active input
-        # after cancellation (with the thinking prefill already set).
-        self._requeue_after_cancel: bool = False
-
-        # Pause context: populated by handle_pause_action, cleared by handle_resume_action
-        self._paused_user_input: Optional[str] = None
-        self._paused_user_msg: Optional[Message] = None
-
-        # Set when the user edits a paused message's thinking prefill instead of a
-        # normal user message; on submit we call set_thinking_prefill + resume.
-        self.editing_prefill_for_resume: bool = False
-        
-        # Track which message is being edited (for edit-then-submit workflow)
-        self.editing_message_index: Optional[int] = None
-        
-        # Track pending permission requests
-        self.pending_permission_prompt: Optional[str] = None
-        
-        # Track active tool messages by call_id
-        self.active_tool_messages = {}  # tool_call_id -> Message
-        
-        # Tab management
+        self.editing_prefill_for_resume = False
         self.tab_bar = TabBar(id="tabs")
-        self._tabs: list[ConversationState] = []
-        self._active_tab_index: int = 0
-        self._next_tab_id: int = 1
-        
-        # Command queue for structured execution
+        self.tab_view = TabView(tab_bar=self.tab_bar)
+        self._tabs = []
+        self._active_tab_index = 0
+        self._next_tab_id = 1
+        self._pending_tab_restore = None
+        self._chat_workspace = None
         self.command_queue = asyncio.Queue()
-        
-        # Shutdown event for coordinated exit
         self.shutdown_event = asyncio.Event()
-        
-        # Register cleanup handler for abnormal exits
+        self._active_user_input = None
+        self._active_user_msg = None
+        self._active_generation_tab = None
+        self._requeue_after_cancel = False
+        self._paused_user_input = None
+        self._paused_user_msg = None
+        self._pending_permission_fallback = None
+        self._message_queue_fallback = asyncio.Queue()
         atexit.register(self._emergency_cleanup)
-        
+
+    def _active_runtime(self):
+        if not self._tabs or self._active_tab_index >= len(self._tabs):
+            return None
+        return self._tabs[self._active_tab_index]
+
+    @property
+    def agent(self):
+        runtime = self._active_runtime()
+        return runtime.ensure_agent() if runtime else self._initial_agent
+
+    @property
+    def message_queue(self):
+        runtime = self._active_runtime()
+        return runtime.message_queue if runtime else self._message_queue_fallback
+
+    @property
+    def current_generation_task(self):
+        runtime = self._active_runtime()
+        return runtime.current_generation_task if runtime else None
+
+    @current_generation_task.setter
+    def current_generation_task(self, value):
+        runtime = self._active_runtime()
+        if runtime:
+            runtime.current_generation_task = value
+
+    @property
+    def active_tool_messages(self):
+        runtime = self._active_runtime()
+        return runtime.active_tool_messages if runtime else {}
+
+    @active_tool_messages.setter
+    def active_tool_messages(self, value):
+        runtime = self._active_runtime()
+        if runtime:
+            runtime.active_tool_messages = value
+
+    @property
+    def pending_permission_prompt(self):
+        runtime = self._active_runtime()
+        return runtime.pending_permission_prompt if runtime else self._pending_permission_fallback
+
+    @pending_permission_prompt.setter
+    def pending_permission_prompt(self, value):
+        runtime = self._active_runtime()
+        if runtime:
+            runtime.pending_permission_prompt = value
+        else:
+            self._pending_permission_fallback = value
+
+    def _runtime_field(name):
+        def getter(self):
+            runtime = self._active_runtime()
+            return getattr(runtime, name, None) if runtime else None
+
+        def setter(self, value):
+            runtime = self._active_runtime()
+            if runtime:
+                setattr(runtime, name, value)
+
+        return property(getter, setter)
+
+    editing_message_index = _runtime_field("editing_message_index")
+    _active_user_input = _runtime_field("active_user_input")
+    _active_user_msg = _runtime_field("active_user_msg")
+    _paused_user_input = _runtime_field("paused_user_input")
+    _paused_user_msg = _runtime_field("paused_user_msg")
+    _requeue_after_cancel = _runtime_field("requeue_after_cancel")
+
+    def _runtime_agent_factory(self):
+        source_agent = self._initial_agent
+
+        def create_agent():
+            agent_type = type(source_agent)
+            workspace = getattr(source_agent, "workspace", None)
+            if workspace is not None:
+                try:
+                    return agent_type(workspace_path=workspace)
+                except TypeError:
+                    pass
+            return agent_type()
+
+        return create_agent
+
     def _emergency_cleanup(self):
         """Emergency cleanup handler called by atexit."""
         if self.compositor and self.compositor.terminal:
             try:
-                # Don't clear screen in emergency cleanup to preserve errors
                 self.compositor.terminal.cleanup(clear_screen=False)
             except Exception:
-                pass  # Silently fail in atexit handler
-    
+                pass
+
     @staticmethod
     def _rgb_to_ansi_fg(r: int, g: int, b: int) -> str:
-        """Convert RGB to ANSI foreground color code."""
         return f"\033[38;2;{r};{g};{b}m"
 
-    async def _process_generation(self, user_input: str, user_msg: Message):
-        """Process a single generation request.
-        
-        Args:
-            user_input: The text input from the user
-            user_msg: The UI message object representing the user's message
-        """
+    async def _process_generation(self, runtime, user_input, user_msg=None):
+        """Process a single generation request for one conversation runtime."""
+        legacy_runtime = user_msg is None
+        if legacy_runtime:
+            user_msg = user_input
+            user_input = runtime
+            runtime = self._active_runtime()
+            if runtime is None:
+                runtime = ConversationRuntime(agent=self._initial_agent, name="chat")
+                runtime.chat_history_panel = self.chat_history_panel
+                runtime.pending_permission_prompt = self._pending_permission_fallback
+
         import logging
         logger = logging.getLogger("tui")
         logger.info(f"Starting generation for user input: {user_input[:50]}...")
-        
-        # Show thinking indicator
-        chat = self.chat_history_panel
+
+        chat = self.chat_history_panel if runtime is self._active_runtime() else runtime.chat_history_panel
+        agent = runtime.ensure_agent()
         current_msg = chat.add_message("Sending request...", msg_type=SysMsg())
-        
-        current_msg_type = SysMsg  # Track the type of current message
-        current_harness_ids = []  # Track harness message IDs for current UI message
-        processing_msg = None  # Track the "processing..." message to replace it
+        current_msg_type = SysMsg
+        current_harness_ids = []
+        processing_msg = None
 
         def ensure_tool_message_type(msg: Message, target_type: MsgType) -> Message:
-            """Replace message with a new one if type differs, preserving tool metadata."""
             if isinstance(msg.type, type(target_type)):
                 return msg
-
-            new_msg = chat.new_message(
-                "",
-                msg_type=target_type,
-                harness_message_ids=msg.harness_message_ids or current_harness_ids
-            )
+            new_msg = chat.new_message("", msg_type=target_type, harness_message_ids=msg.harness_message_ids or current_harness_ids)
             new_msg.tool_name = msg.tool_name
             new_msg.tool_args = msg.tool_args
             new_msg.tool_output = msg.tool_output
@@ -205,13 +275,13 @@ class chatTUI(ChatActionHandlers):
             chat.replace_message(msg, new_msg)
             return new_msg
 
-        if self.compositor and hasattr(self.compositor, "set_streaming_active"):
+        if runtime is self._active_runtime() and self.compositor and hasattr(self.compositor, "set_streaming_active"):
             self.compositor.set_streaming_active(True)
         
         # Process streaming response from Harness
         try:
-            async for chunk in self.agent.chat(user_input):
-                if self.compositor and hasattr(self.compositor, "request_render"):
+            async for chunk in agent.chat(user_input):
+                if runtime is self._active_runtime() and self.compositor and hasattr(self.compositor, "request_render"):
                     self.compositor.request_render()
                 
                 if isinstance(chunk, chunks.MessageStart):
@@ -261,7 +331,7 @@ class chatTUI(ChatActionHandlers):
                 
                 elif isinstance(chunk, chunks.ToolDraft):
                     tool_id = chunk.tool_call_id
-                    msg = self.active_tool_messages.get(tool_id)
+                    msg = runtime.active_tool_messages.get(tool_id)
                     preserve_active_text_stream = current_msg_type in (ThinkingMsg, PicoMsg)
 
                     # Flush any incomplete text message before showing tool draft
@@ -276,10 +346,10 @@ class chatTUI(ChatActionHandlers):
                             processing_msg = None  # Clear processing indicator
                         else:
                             msg = chat.add_message("", msg_type=ToolDraftMsg(), harness_message_ids=current_harness_ids)
-                        self.active_tool_messages[tool_id] = msg
+                        runtime.active_tool_messages[tool_id] = msg
 
                     msg = ensure_tool_message_type(msg, ToolDraftMsg())
-                    self.active_tool_messages[tool_id] = msg
+                    runtime.active_tool_messages[tool_id] = msg
                     msg.tool_name = chunk.tool_name or msg.tool_name
                     msg.tool_args = chunk.tool_args
                     msg.tool_status = "drafting"
@@ -298,7 +368,7 @@ class chatTUI(ChatActionHandlers):
                         current_msg.finalize()
                     
                     if chunk.status == chunks.ToolStatus.PERMISSION_REQUESTED:
-                        msg = self.active_tool_messages.get(tool_id)
+                        msg = runtime.active_tool_messages.get(tool_id)
 
                         if chunk.auto_decision:
                             # Auto-decision: show status marker
@@ -308,11 +378,11 @@ class chatTUI(ChatActionHandlers):
                                     msg_type=ToolCallMsg(),
                                     harness_message_ids=current_harness_ids
                                 )
-                                self.active_tool_messages[tool_id] = msg
+                                runtime.active_tool_messages[tool_id] = msg
                                 processing_msg = None  # Clear processing indicator if showing new tool
 
                             msg = ensure_tool_message_type(msg, ToolCallMsg())
-                            self.active_tool_messages[tool_id] = msg
+                            runtime.active_tool_messages[tool_id] = msg
                             msg.tool_name = chunk.tool_name
                             msg.tool_args = chunk.tool_args
                             msg.tool_status = "auto-approved"
@@ -325,11 +395,11 @@ class chatTUI(ChatActionHandlers):
                                     msg_type=AskPermissionMsg(),
                                     harness_message_ids=current_harness_ids
                                 )
-                                self.active_tool_messages[tool_id] = msg
+                                runtime.active_tool_messages[tool_id] = msg
                                 processing_msg = None  # Clear processing indicator
 
                             msg = ensure_tool_message_type(msg, AskPermissionMsg())
-                            self.active_tool_messages[tool_id] = msg
+                            runtime.active_tool_messages[tool_id] = msg
                             msg.tool_name = chunk.tool_name
                             msg.tool_args = chunk.tool_args
                             msg.tool_status = None
@@ -341,33 +411,32 @@ class chatTUI(ChatActionHandlers):
                                 chat.set_focused_message(msg_index)
                             except ValueError:
                                 pass
-                            self._last_focus_id = "history"
-                            self._update_focus_states()
+                            self._set_app_focus("history")
                             
                             # Force compositor render to show actions immediately
                             if self.compositor:
                                 self.compositor.render()
                             
                             # Store prompt for handler
-                            self.pending_permission_prompt = chunk.permission_prompt
+                            runtime.pending_permission_prompt = chunk.permission_prompt
 
                         current_msg = msg
                         current_msg_type = type(msg.type)
                     
                     elif chunk.status == chunks.ToolStatus.APPROVED:
-                        msg = self.active_tool_messages.get(tool_id)
+                        msg = runtime.active_tool_messages.get(tool_id)
                         if msg:
                             msg = ensure_tool_message_type(msg, ToolCallMsg())
-                            self.active_tool_messages[tool_id] = msg
+                            runtime.active_tool_messages[tool_id] = msg
                             # Update status
                             msg.tool_name = chunk.tool_name
                             msg.tool_args = chunk.tool_args
                             msg.tool_status = "approved"
                             msg.rebuild_tool_display()
-                        self.pending_permission_prompt = None
+                        runtime.pending_permission_prompt = None
                     
                     elif chunk.status == chunks.ToolStatus.DENIED:
-                        msg = self.active_tool_messages.get(tool_id)
+                        msg = runtime.active_tool_messages.get(tool_id)
                         if msg:
                             msg = ensure_tool_message_type(msg, ToolCallMsg())
                             msg.tool_name = chunk.tool_name
@@ -377,20 +446,20 @@ class chatTUI(ChatActionHandlers):
                             msg.show_output = True  # Always show denial reason
                             msg.rebuild_tool_display()
                             msg.finalize()
-                            del self.active_tool_messages[tool_id]
-                        self.pending_permission_prompt = None
+                            del runtime.active_tool_messages[tool_id]
+                        runtime.pending_permission_prompt = None
                     
                     elif chunk.status == chunks.ToolStatus.EXECUTING:
-                        msg = self.active_tool_messages.get(tool_id)
+                        msg = runtime.active_tool_messages.get(tool_id)
                         if msg:
                             msg = ensure_tool_message_type(msg, ToolCallMsg())
-                            self.active_tool_messages[tool_id] = msg
+                            runtime.active_tool_messages[tool_id] = msg
                             # Update status to show executing
                             msg.tool_status = "approved | executing"
                             msg.rebuild_tool_display()
                     
                     elif chunk.status == chunks.ToolStatus.COMPLETED:
-                        msg = self.active_tool_messages.get(tool_id)
+                        msg = runtime.active_tool_messages.get(tool_id)
                         if msg:
                             msg = ensure_tool_message_type(msg, ToolCallMsg())
                             # Store output and update to completed
@@ -398,7 +467,7 @@ class chatTUI(ChatActionHandlers):
                             msg.tool_output = chunk.result or ""
                             msg.rebuild_tool_display()
                             msg.finalize()
-                            del self.active_tool_messages[tool_id]
+                            del runtime.active_tool_messages[tool_id]
                             
                             # Show processing indicator after tool completes
                             # This will be replaced by the next content/thinking/tool
@@ -415,7 +484,7 @@ class chatTUI(ChatActionHandlers):
                                             processing_msg.set_text(
                                                 f"{theme.MUTED}Processing results... ({elapsed}s){theme.reset()}"
                                             )
-                                            if self.compositor:
+                                            if runtime is self._active_runtime() and self.compositor:
                                                 self.compositor.request_render()
                                         await asyncio.sleep(1.0)
                                 
@@ -431,7 +500,7 @@ class chatTUI(ChatActionHandlers):
                                 asyncio.create_task(update_processing_time())
                     
                     elif chunk.status == chunks.ToolStatus.ERROR:
-                        msg = self.active_tool_messages.get(tool_id)
+                        msg = runtime.active_tool_messages.get(tool_id)
                         if msg:
                             msg = ensure_tool_message_type(msg, ToolCallMsg())
                             msg.tool_status = "error"
@@ -439,7 +508,7 @@ class chatTUI(ChatActionHandlers):
                             msg.show_output = True  # Always show errors
                             msg.rebuild_tool_display()
                             msg.finalize()
-                            del self.active_tool_messages[tool_id]
+                            del runtime.active_tool_messages[tool_id]
                 
                 elif isinstance(chunk, chunks.GenerationMetrics):
                     # Update message metrics (for live display in footer)
@@ -453,13 +522,12 @@ class chatTUI(ChatActionHandlers):
                         )
 
                 # Ensure we scroll to bottom if needed
-                if self.chat_history_panel.auto_scroll:
-                    self.chat_history_panel.scroll_offset = 0
+                if chat.auto_scroll:
+                    chat.scroll_offset = 0
                     # Auto-focus input when new messages arrive (if at bottom)
                     # BUT: Don't steal focus if user has explicitly focused a message
-                    if self._last_focus_id != "input" and self.chat_history_panel.focused_message_index is None:
-                        self._last_focus_id = "input"
-                        self._update_focus_states()
+                    if runtime is self._active_runtime() and self._last_focus_id != "input" and chat.focused_message_index is None:
+                        self._set_app_focus("input")
 
                 # Yield to let the compositor render the update
                 await asyncio.sleep(0)
@@ -476,7 +544,9 @@ class chatTUI(ChatActionHandlers):
             raise e
     
         finally:
-            if self.compositor and hasattr(self.compositor, "set_streaming_active"):
+            if legacy_runtime:
+                self._pending_permission_fallback = runtime.pending_permission_prompt
+            if runtime is self._active_runtime() and self.compositor and hasattr(self.compositor, "set_streaming_active"):
                 self.compositor.set_streaming_active(False)
             if current_msg is not None:
                 current_msg.finalized = True
@@ -484,183 +554,69 @@ class chatTUI(ChatActionHandlers):
             
             
         
-    async def agent_worker(self):
-        """Background worker that processes harness requests."""
-        
+    async def agent_worker(self, runtime: ConversationRuntime):
+        """Process queued requests for one conversation runtime."""
+        import logging
+        logger = logging.getLogger("tui")
+
         while not self.shutdown_event.is_set():
             try:
-                msg_task = asyncio.create_task(self.message_queue.get())
-                cmd_task = asyncio.create_task(self.command_queue.get())
-                shutdown_task = asyncio.create_task(self.shutdown_event.wait())
+                user_input, user_msg = await runtime.message_queue.get()
+                if getattr(user_msg, "is_steered", False):
+                    continue
+                if getattr(user_msg, "is_queued", False):
+                    user_msg.is_queued = False
+                    user_msg.set_title("user")
+                    user_msg.set_frame_color(theme.USER)
 
+                runtime.active_user_input = user_input
+                runtime.active_user_msg = user_msg
+                self._active_generation_tab = runtime
+                runtime.current_generation_task = asyncio.create_task(
+                    self._process_generation(runtime, user_input, user_msg)
+                )
+                await runtime.current_generation_task
+            except asyncio.CancelledError:
+                runtime.stop_generation()
+                return
+            except Exception as error:
+                logger.error("Conversation generation failed: %s", error, exc_info=True)
+                runtime.chat_history_panel.add_message(str(error), msg_type=SysMsgError())
+            finally:
+                runtime.current_generation_task = None
+                if runtime.requeue_after_cancel and runtime.active_user_input:
+                    runtime.enqueue(runtime.active_user_input, runtime.active_user_msg)
+                runtime.requeue_after_cancel = False
+                runtime.active_user_input = None
+                runtime.active_user_msg = None
+                if self._active_generation_tab is runtime:
+                    self._active_generation_tab = None
+
+    async def command_worker(self):
+        """Dispatch queued slash commands independently of generation workers."""
+        import logging
+        logger = logging.getLogger("tui")
+
+        while not self.shutdown_event.is_set():
+            command_task = asyncio.create_task(self.command_queue.get())
+            shutdown_task = asyncio.create_task(self.shutdown_event.wait())
+            try:
                 done, pending = await asyncio.wait(
-                    [msg_task, cmd_task, shutdown_task],
-                    return_when=asyncio.FIRST_COMPLETED
+                    (command_task, shutdown_task),
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
-
-                # cancel the tasks that didn't complete
-                for p in pending:
-                    p.cancel()
-
-                # If shutdown was triggered, exit immediately
+                for task in pending:
+                    task.cancel()
+                await asyncio.gather(*pending, return_exceptions=True)
                 if shutdown_task in done:
-                    # Cancel any active generation
-                    if self.current_generation_task and not self.current_generation_task.done():
-                        self.current_generation_task.cancel()
-                    break
-
-                completed = done.pop()
-
-                # distinguish source
-                if completed is cmd_task:
-                    command = completed.result()
-                    import logging
-                    logger = logging.getLogger("tui")
-                    logger.debug(f"Processing command: {command}")
-                    await handle_command(self, command)  # exceptions propagate → crash
-                else:
-                    user_input, user_msg = completed.result()
-                    import logging
-                    logger = logging.getLogger("tui")
-                    logger.debug("Agent worker received user input")
-
-                    # Skip messages that were consumed as steer injections
-                    if getattr(user_msg, 'is_steered', False):
-                        logger.debug("Skipping steered message (already consumed as thinking prefill)")
-                        continue
-
-                    # Un-queue: restore normal visual state before processing
-                    if getattr(user_msg, 'is_queued', False):
-                        user_msg.is_queued = False
-                        user_msg.set_title("user")
-                        from pico_chat.ui.tui.colors import theme
-                        user_msg.set_frame_color(theme.USER)
-
-                    # Track the active user input for steer/pause/resume
-                    self._active_user_input = user_input
-                    self._active_user_msg   = user_msg
-
-                    self.current_generation_task = asyncio.create_task(
-                        self._process_generation(user_input, user_msg)
-                    )
-
-                    # Wait for generation to complete, but keep checking for commands
-                    try:
-                        while not self.current_generation_task.done():
-                            # Wait for EITHER generation to finish OR a command to arrive
-                            cmd_task = asyncio.create_task(self.command_queue.get())
-                            gen_task = self.current_generation_task
-                            shutdown_task = asyncio.create_task(self.shutdown_event.wait())
-                            
-                            done, pending = await asyncio.wait(
-                                [cmd_task, gen_task, shutdown_task],
-                                return_when=asyncio.FIRST_COMPLETED
-                            )
-                            
-                            # Handle shutdown - cancel everything
-                            if shutdown_task in done:
-                                # Cancel command task if it's pending
-                                if cmd_task in pending:
-                                    cmd_task.cancel()
-                                # Cancel generation
-                                if not self.current_generation_task.done():
-                                    self.current_generation_task.cancel()
-                                return
-                            
-                            # Handle command during generation
-                            if cmd_task in done:
-                                command = cmd_task.result()
-                                logger.debug(f"Processing command during generation: {command}")
-                                # Cancel shutdown task if pending
-                                if shutdown_task in pending:
-                                    shutdown_task.cancel()
-                                # DO NOT cancel generation - keep it running!
-                                await handle_command(self, command)
-                                # Continue loop to wait for more commands or generation completion
-                            
-                            # Generation completed
-                            if gen_task in done:
-                                # Cancel pending tasks
-                                if cmd_task in pending:
-                                    cmd_task.cancel()
-                                if shutdown_task in pending:
-                                    shutdown_task.cancel()
-                                # Check if it raised an exception
-                                try:
-                                    gen_task.result()
-                                except asyncio.CancelledError:
-                                    pass
-                                break
-                    
-                    except asyncio.CancelledError:
-                        pass
-                    finally:
-                        self.current_generation_task = None
-                        # Steer action: re-queue the active input so it is
-                        # regenerated with the thinking prefill already in place.
-                        if self._requeue_after_cancel and self._active_user_input:
-                            self.message_queue.put_nowait(
-                                (self._active_user_input, self._active_user_msg)
-                            )
-                        self._requeue_after_cancel = False
-                        self._active_user_input = None
-                        self._active_user_msg   = None
-
-            except asyncio.TimeoutError:
-                continue
-            
-            except Exception as e: # Errors during generation or processing
-                import logging
-                import httpx
-                import httpcore
-                logger = logging.getLogger("tui")
-   
-                network_exceptions = (
-                    httpx.RemoteProtocolError,
-                    httpx.ReadError,
-                    httpx.ConnectError,
-                    httpx.ReadTimeout,
-                    httpcore.RemoteProtocolError,
-                    httpcore.ReadError,
-                    httpcore.ConnectError,
-                )
-
-                recoverable_exceptions = (
-                    openai.APIConnectionError,
-                    openai.InternalServerError,
-                ) + network_exceptions
-                
-                # Check if it's a recoverable error (use isinstance for subclass coverage)
-                is_recoverable = isinstance(e, recoverable_exceptions)
-                
-                # Special case: 503 model loading errors should show a better message
-                if isinstance(e, openai.InternalServerError) and e.status_code == 503:
-                    error_message = str(e)
-                    if "Loading model" in error_message or "unavailable" in error_message.lower():
-                        logger.warning(f"Model still loading after retries: {str(e)}")
-                        self.chat_history_panel.add_message(
-                            message="Model is still loading. Please wait a moment and try again.",
-                            msg_type=SysMsgError()
-                        )
-                        continue  # Don't crash, just continue event loop
-                
-                if is_recoverable:
-                    logger.warning(f"Recoverable error: {type(e).__name__}: {str(e)}")
-                    # Give a friendlier message for raw network errors
-                    if isinstance(e, network_exceptions):
-                        self.chat_history_panel.add_message(
-                            message="Server closed the connection mid-stream (the model may have crashed). Response may be incomplete.",
-                            msg_type=SysMsgError()
-                        )
-                    else:
-                        self.chat_history_panel.add_message(
-                            message=f"{str(e)}",
-                            msg_type=SysMsgError()
-                        )
-                    
-                else: # raise for non-recoverable errors
-                    logger.error(f"Non-recoverable error: {type(e).__name__}: {str(e)}", exc_info=True)
-                    raise e
+                    return
+                command = command_task.result()
+                logger.debug("Processing command: %s", command)
+                await handle_command(self, command)
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                logger.error("Command failed", exc_info=True)
 
     def stop_generation(self):
         """Stop the current generation task if active."""
@@ -669,47 +625,143 @@ class chatTUI(ChatActionHandlers):
             return True
         return False
 
+    def _ensure_runtime_worker(self, runtime: ConversationRuntime) -> None:
+        if runtime.worker_task is None or runtime.worker_task.done():
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                return
+            runtime.worker_task = asyncio.create_task(self.agent_worker(runtime))
+
+    def _enqueue_message(self, text: str, message: Message) -> None:
+        """Queue a message and apply conversation-local queued presentation."""
+        runtime = self._active_runtime()
+        if runtime is None:
+            self.message_queue.put_nowait((text, message))
+            return
+
+        if self._message_belongs_to_active_generation(message) and message is not runtime.active_user_msg:
+            message.is_queued = True
+            message.set_title("user (queued)")
+            message.set_frame_color(theme.MUTED)
+
+        self._ensure_runtime_worker(runtime)
+        runtime.enqueue(text, message)
+
     def on_command_submit(self, text: str):
         """Handle execution of commands."""
         self.command_queue.put_nowait(text)
         
     def toggle_debug_console(self):
-        """Toggle the visibility of the debug console."""
+        """Toggle the debug console workspace tab."""
         import logging
-        self.show_debug = not self.show_debug
-        logger = logging.getLogger("tui")
-        logger.info(f"Debug console toggled: {'visible' if self.show_debug else 'hidden'}")
-        
-        children = [
-            self.chat_history_panel.get_component(),
-            self.input_box
-        ]
-        sizes = ["100%", 0]
-        
         if self.show_debug:
-            children.insert(0, self.debug_box)
-            sizes.insert(0, pico_cfg.config.ui_debug_console_height)
-            
-        # Update the root container (Hsplit)
-        if isinstance(self.root, Hsplit):
-            self.root.children = children
-            self.root.sizes = sizes
-            # Update parent references
-            for child in children:
-                child.parent = self.root
+            self._close_debug_tab()
+            return
+
+        self._open_debug_tab()
+        logger = logging.getLogger("tui")
+        logger.info("Debug console toggled: visible")
+
+    def _handle_message_action(self, message, action: MsgAction):
+        handlers = {
+            MsgAction.COPY: self.handle_copy_action,
+            MsgAction.EDIT: self.handle_edit_action,
+            MsgAction.RETRY: self.handle_retry_action,
+            MsgAction.STOP: self.handle_stop_action,
+            MsgAction.ALLOW: self.handle_allow_action,
+            MsgAction.DENY: self.handle_deny_action,
+            MsgAction.OUTPUT: self.handle_output_action,
+            MsgAction.STEER: self.handle_steer_action,
+            MsgAction.PAUSE: self.handle_pause_action,
+            MsgAction.RESUME: self.handle_resume_action,
+            MsgAction.DELETE: self.handle_delete_action,
+        }
+        handler = handlers.get(action)
+        if handler:
+            handler(message)
+
+    def _replace_workspace_screen(self, children):
+        """Install a workspace layout through Navigator when the app is running."""
+        screen = ChatScreen(
+            self.tab_bar,
+            children[0],
+            children[1],
+            self._focus_scope,
+            self._tabs[self._active_tab_index] if self._tabs else None,
+        )
+        self._chat_workspace = screen.workspace
+        self.root = screen.root
+        if self.navigator is not None:
+            self.navigator.replace(screen)
+
+    def _install_chat_screen(self):
+        model = self._tabs[self._active_tab_index] if self._tabs else None
+        screen = ChatScreen(
+            self.tab_bar,
+            self.chat_history_panel,
+            self.input_box,
+            self._focus_scope,
+            model,
+        )
+        self._chat_workspace = screen.workspace
+        self.root = screen.root
+        if self.navigator is not None:
+            self.navigator.replace(screen)
+
+    def _debug_tab_index(self) -> Optional[int]:
+        """Return the debug tab's position in the shared workspace tab list."""
+        for index, tab in enumerate(self._tabs):
+            if tab.kind == "debug":
+                return index
+        return None
+
+    def _show_chat_workspace(self):
+        self.show_debug = False
+        self.input_component.hide_completions()
+        self._install_chat_screen()
+
+    def _open_debug_tab(self):
+        self.input_component.hide_completions()
+        debug_index = self._debug_tab_index()
+        if debug_index is None:
+            debug_index = len(self._tabs)
+            debug_state = ConversationState("debug", kind="debug")
+            self._tabs.append(debug_state)
+            self.tab_view.add("debug", "debug", debug_state, closeable=True)
+        self.show_debug = True
+        self.tab_view.activate(debug_index)
+        self._replace_workspace_screen([self.debug_box, self.input_box])
+        self._set_app_focus("input")
+
+    def _close_debug_tab(self):
+        debug_index = self._debug_tab_index()
+        if debug_index is None:
+            return
+        self.tab_view.close(debug_index)
 
     def show_popup(self, title: str, content: str):
         """Show a popup overlay with the given title and content."""
         self.popup.set_compositor(self.compositor)
-        self.popup.show(title, content)
+        if self.modal_host is None:
+            self.popup.show(title, content)
+            return
+        self.popup_screen = PopupScreen(self.popup, title, content)
+        self.modal_host.present_screen(self.popup_screen)
 
     def hide_popup(self):
         """Hide the popup overlay."""
+        if self.modal_host is not None and self.popup_screen is not None:
+            self.modal_host.dismiss_screen(self.popup_screen)
+            self.popup_screen = None
+            return
         self.popup.hide()
 
     def show_form_popup(self, title: str, fields: list, on_submit, on_cancel=None):
         """Show a form popup overlay with interactive fields."""
         self.form_popup.set_compositor(self.compositor)
+        if self.modal_host is not None:
+            self.form_popup.set_modal_host(self.modal_host)
         self.form_popup.show(title, fields, on_submit, on_cancel)
 
 
@@ -718,7 +770,7 @@ class chatTUI(ChatActionHandlers):
         clean_text = text.strip()
         if not clean_text:
             return  # Ignore empty or whitespace-only input
-            
+
         if clean_text.startswith('/'):
             self.on_command_submit(clean_text)
             return
@@ -741,6 +793,12 @@ class chatTUI(ChatActionHandlers):
                 msg_type=SysMsg()
             )
             return
+
+        if not self._tabs:
+            self._new_tab()
+
+        runtime = self._active_runtime()
+        self._ensure_runtime_worker(runtime)
 
         if clean_text.lower() in ["exit", "quit", "q"]:
             if self.compositor:
@@ -775,12 +833,12 @@ class chatTUI(ChatActionHandlers):
                         self.chat_history_panel.remove_last_message()
                     
                     # Queue the edited message for processing
-                    self.message_queue.put_nowait((text, edited_msg))
+                    self._enqueue_message(text, edited_msg)
                 else:
                     # Message was deleted (e.g., via /clear) - treat as new message
                     logger.warning(f"Edited message at index {self.editing_message_index} no longer exists, creating new message")
                     user_msg = self.chat_history_panel.add_message(text, msg_type=UserMsg())
-                    self.message_queue.put_nowait((text, user_msg))
+                    self._enqueue_message(text, user_msg)
                 
                 # Clear editing state
                 self.editing_message_index = None
@@ -789,16 +847,9 @@ class chatTUI(ChatActionHandlers):
                 
                 # Create user message and queue it
                 user_msg = self.chat_history_panel.add_message(text, msg_type=UserMsg())
+                user_msg._tab_state = self._tabs[self._active_tab_index] if self._tabs else None
 
-                # If a generation is active, mark as queued so the UI shows it
-                if self.current_generation_task and not self.current_generation_task.done():
-                    user_msg.is_queued = True
-                    user_msg.set_title("user (queued)")
-                    user_msg.set_frame_color(
-                        getattr(__import__('pico_chat.ui.tui.colors', fromlist=['theme']).theme, 'MUTED')
-                    )
-
-                self.message_queue.put_nowait((text, user_msg))
+                self._enqueue_message(text, user_msg)
             
             # Enable auto-scroll to show the new message
             self.chat_history_panel.auto_scroll = True
@@ -893,121 +944,152 @@ class chatTUI(ChatActionHandlers):
 
     # --- Tab Management ---
 
-    def _create_default_tab(self):
-        """Create the default first tab."""
-        tab_state = ConversationState(name="chat")
-        self._tabs.append(tab_state)
-        self.tab_bar.add_tab("chat", closeable=False)
-        self._active_tab_index = 0
-    
+    def _bind_runtime_panel(self, runtime: ConversationRuntime):
+        """Make one runtime's history panel the visible chat panel."""
+        self.chat_history_panel = runtime.chat_history_panel
+        self._focus_targets[1].set_component(self.chat_history_panel)
+        self.chat_history_panel.set_compositor(self.compositor)
+        self.chat_history_panel.on_action = self._handle_message_action
+        if self._chat_workspace is not None:
+            self._chat_workspace.children[0] = self.chat_history_panel
+            self.chat_history_panel.parent = self._chat_workspace
+            self.chat_history_panel.set_layout(
+                self._chat_workspace.x,
+                self._chat_workspace.y,
+                self._chat_workspace.width,
+                self._chat_workspace.height,
+            )
+            self.chat_history_panel.layout()
+
     def _save_current_tab(self):
-        """Save current conversation state into the active tab."""
-        if not self._tabs:
-            return
-        tab = self._tabs[self._active_tab_index]
-        tab.harness_history = list(self.agent.history)
-        tab.messages = list(self.chat_history_panel.messages)
-        tab.active_tool_messages = dict(self.active_tool_messages)
-        tab.pending_permission_prompt = self.pending_permission_prompt
-        tab.editing_message_index = self.editing_message_index
-        tab._active_user_input = self._active_user_input
-        tab._active_user_msg = self._active_user_msg
-        tab._paused_user_input = self._paused_user_input
-        tab._paused_user_msg = self._paused_user_msg
+        """Keep the active runtime panel mounted as the visible panel."""
+        return
+
+    def _message_belongs_to_active_generation(self, message: Message) -> bool:
+        """Return whether a message shares the currently generating tab."""
+        message_tab = getattr(message, "_tab_state", None)
+        return (
+            message_tab is self._active_runtime()
+            and self._active_runtime() is not None
+            and self._active_runtime().is_generating
+            and (self._active_generation_tab is None or self._active_generation_tab is message_tab)
+        )
     
     def _restore_tab(self, index: int):
         """Restore conversation state from a tab into the live UI."""
         if not self._tabs or index >= len(self._tabs):
             return
         tab = self._tabs[index]
-        
-        # Restore harness state
-        self.agent.history = list(tab.harness_history)
-        
-        # Restore UI state
-        self.chat_history_panel.clear()
-        for msg in tab.messages:
-            self.chat_history_panel.messages.append(msg)
-            self.chat_history_panel.msg_container.children.append(msg.get_component())
-            self.chat_history_panel.msg_container.sizes.append("auto")
-            msg.get_component().parent = self.chat_history_panel
-        
-        self.active_tool_messages = dict(tab.active_tool_messages)
-        self.pending_permission_prompt = tab.pending_permission_prompt
-        self.editing_message_index = tab.editing_message_index
-        self._active_user_input = tab._active_user_input
-        self._active_user_msg = tab._active_user_msg
-        self._paused_user_input = tab._paused_user_input
-        self._paused_user_msg = tab._paused_user_msg
+        if tab.kind == "debug":
+            return
         
         self._active_tab_index = index
-        self.tab_bar.set_active(index)
-        self.chat_history_panel.auto_scroll = True
-        self.chat_history_panel._request_repaint()
+        self._bind_runtime_panel(tab)
+        self.tab_view.activate(index)
     
     def _on_tab_select(self, index: int):
         """Handle tab click — switch to that tab."""
+        if index < 0 or index >= len(self._tabs):
+            return
+        if self._tabs[index].kind == "debug":
+            self._open_debug_tab()
+            return
+        if self.show_debug:
+            self._show_chat_workspace()
         if index == self._active_tab_index:
+            self.tab_view.activate(index)
             return
         self._save_current_tab()
         self._restore_tab(index)
-    
-    def _on_tab_close(self, index: int):
-        """Handle tab close button click."""
-        if index < len(self._tabs):
-            self._close_tab(index)
+
+    def _on_tab_view_change(self, item):
+        """Apply application state after TabView changes active selection."""
+        index = self.tab_view.items.index(item)
+        if self._pending_tab_restore is not None:
+            restore_index = self._pending_tab_restore
+            self._pending_tab_restore = None
+            self._restore_tab(restore_index)
+            return
+        self._on_tab_select(index)
+
+    def _can_close_tab(self, index, item) -> bool:
+        return True
+
+    def _on_tab_view_close(self, index, item):
+        """Remove application-owned conversation state for a TabView close."""
+        if index < 0 or index >= len(self._tabs):
+            return
+        closing_debug = self._tabs[index].kind == "debug"
+        was_active = index == self._active_tab_index
+        self._tabs.pop(index)
+
+        if index < self._active_tab_index:
+            self._active_tab_index -= 1
+        elif was_active:
+            new_index = min(index, len(self._tabs) - 1)
+            if closing_debug:
+                self._show_chat_workspace()
+            elif not self._tabs:
+                self._active_tab_index = 0
+                self.agent.history = []
+                self.chat_history_panel.clear()
+                self.active_tool_messages = {}
+                self.pending_permission_prompt = None
+                self.editing_message_index = None
+                self._active_user_input = None
+                self._active_user_msg = None
+                self._paused_user_input = None
+                self._paused_user_msg = None
+                self._pending_tab_restore = None
+                self._show_chat_workspace()
+            else:
+                self._active_tab_index = new_index
+                self._pending_tab_restore = new_index
     
     def _close_tab(self, index: int):
         """Close a tab and switch to adjacent one."""
-        if not self._tabs or index >= len(self._tabs):
+        if not self._tabs or index < 0 or index >= len(self._tabs):
             return
-        # Don't close the last tab
-        if len(self._tabs) <= 1:
-            self.chat_history_panel.add_message(
-                "Cannot close the last tab.",
-                msg_type=SysMsgError(),
-                title="tab"
-            )
-            return
-        
-        self._tabs.pop(index)
-        self.tab_bar.remove_tab(index)
-        
-        # If we closed the active tab, switch to nearest
-        if index == self._active_tab_index:
-            new_index = min(index, len(self._tabs) - 1)
-            self._restore_tab(new_index)
-        elif index < self._active_tab_index:
-            self._active_tab_index -= 1
+        self.tab_view.close(index)
     
     def _new_tab(self, name: Optional[str] = None):
         """Create a new conversation tab and switch to it."""
         # Save current tab first
         self._save_current_tab()
+
+        if self.show_debug:
+            self._show_chat_workspace()
         
         # Generate name
         tab_id = self._next_tab_id
         self._next_tab_id += 1
         tab_name = name or f"chat {tab_id}"
         
-        # Create new tab state
-        tab_state = ConversationState(name=tab_name)
+        # Create a runtime with its own agent, queue, and message model.
+        tab_state = ConversationRuntime(
+            agent=self._initial_agent if not self._tabs else None,
+            name=tab_name,
+            agent_factory=self._agent_factory,
+        )
+        if not self._tabs:
+            tab_state.chat_history_panel = self.chat_history_panel
         self._tabs.append(tab_state)
-        self.tab_bar.add_tab(tab_name)
+        self.tab_view.add(f"chat-{tab_id}", tab_name, tab_state)
         
-        # Switch to new tab (clear UI and harness)
+        # Switch to new tab and mount its independent history panel.
         new_index = len(self._tabs) - 1
-        self.agent.history = []
-        self.chat_history_panel.clear()
-        self.active_tool_messages = {}
-        self.pending_permission_prompt = None
-        self.editing_message_index = None
-        self._active_user_input = None
-        self._active_user_msg = None
-        self._paused_user_input = None
-        self._paused_user_msg = None
+        tab_state.ensure_agent().history = []
         self._active_tab_index = new_index
-        self.tab_bar.set_active(new_index)
+        self._bind_runtime_panel(tab_state)
+        tab_state.chat_history_panel.clear()
+        tab_state.active_tool_messages.clear()
+        tab_state.pending_permission_prompt = None
+        tab_state.editing_message_index = None
+        tab_state.active_user_input = None
+        tab_state.active_user_msg = None
+        tab_state.paused_user_input = None
+        tab_state.paused_user_msg = None
+        self.tab_view.activate(new_index)
         self.chat_history_panel.auto_scroll = True
 
     def _update_focus_states(self):
@@ -1015,69 +1097,67 @@ class chatTUI(ChatActionHandlers):
         # Default to input focus if nothing is focused
         if self._last_focus_id is None:
             self._last_focus_id = "input"
+
+        target_index = 0 if self._last_focus_id == "input" else 1
+        self._focus_scope.manager.focus(target_index)
         
         is_input_focused = (self._last_focus_id == "input")
         is_history_focused = (self._last_focus_id == "history")
-        
-        # Update input component focus state
-        self.input_component.set_focused(is_input_focused)
-        
-        # Update input box border style
-        self.input_box.set_focused(is_input_focused)
-        
-        # Update chat history keyboard focus
-        self.chat_history_panel.set_keyboard_focus(is_history_focused)
         
         # Auto-scroll to bottom when input field is focused
         if is_input_focused:
             self.chat_history_panel.auto_scroll = True
             self.chat_history_panel.scroll_offset = 0
 
+    def _set_input_focus(self, focused: bool):
+        self.input_component.set_focused(focused)
+        self.input_box.set_focused(focused)
+
+    def _set_history_focus(self, focused: bool):
+        self.chat_history_panel.set_keyboard_focus(focused)
+
+    def _set_app_focus(self, focus_id: str):
+        if focus_id not in ("input", "history"):
+            raise ValueError(f"Unknown application focus target: {focus_id}")
+        self._last_focus_id = focus_id
+        self._focus_scope.manager.focus(0 if focus_id == "input" else 1)
+        self._update_focus_states()
+
     def handle_global_input(self, event: Any) -> bool:
         """Handle focus logging and input dispatch with navigation between input and history."""
         
-        # Popup takes priority — all input goes to popup when visible
-        if self.popup.is_visible:
-            return self.popup.handle_input(event)
-        
-        # Form popup takes priority — all input goes to form when visible
-        if self.form_popup.is_visible:
-            return self.form_popup.handle_input(event)
-        
         # Handle keyboard navigation between input and history
-        if isinstance(event, str):
+        if isinstance(event, (str, KeyEvent)):
+            key = event.key if isinstance(event, KeyEvent) else event
             if self._last_focus_id == "input" and self.input_component.has_active_completion():
-                if event in ('\x1b', '\x1b[A', '\x1b[B', '\t', '\r', '\n'):
-                    return self._original_handle_input(event)
+                if key in ('\x1b', '\x1b[A', '\x1b[B', '\t', '\r', '\n'):
+                    return self.input_component.handle_input(event)
 
             # Shortcuts to focus input: 'i' or Enter (when not already in input)
             # Skip when an inline editor is active (Enter must go to the editor)
-            if (event == 'i' or event == '\r') and self._last_focus_id != "input" \
-                    and not self.chat_history_panel._inline_editing_msg:
+            if (key == 'i' or key == '\r') and self._last_focus_id != "input" \
+                    and not self.chat_history_panel.is_inline_editing:
                 self.chat_history_panel.clear_focus()
-                self._last_focus_id = "input"
-                self._update_focus_states()
+                self._set_app_focus("input")
                 return True
             
-            if event == '\x1b[A':  # Up arrow
+            if key == '\x1b[A':  # Up arrow
                 # If input has focus and cursor is on first line, move to history
                 if self._last_focus_id == "input" and self.input_component.is_cursor_on_first_line():
                     # Focus the last message (or the first message if list is empty)
                     if self.chat_history_panel.messages:
                         self.chat_history_panel.set_focused_message(len(self.chat_history_panel.messages) - 1)
-                        self._last_focus_id = "history"
-                        self._update_focus_states()
+                        self._set_app_focus("history")
                         return True
                 # Otherwise, let the event pass through to the active component
             
-            elif event == '\x1b[B':  # Down arrow
+            elif key == '\x1b[B':  # Down arrow
                 # Only handle focus change when in history (not when in input)
                 if self._last_focus_id == "history" and self.chat_history_panel.focused_message_index is not None:
                     if self.chat_history_panel.focused_message_index == len(self.chat_history_panel.messages) - 1:
                         # At the bottom of history, switch to input
                         self.chat_history_panel.clear_focus()
-                        self._last_focus_id = "input"
-                        self._update_focus_states()
+                        self._set_app_focus("input")
                         return True
                 # Otherwise: if in input, let DOWN work normally for cursor movement
                 # If in history (not at bottom), let it navigate messages normally
@@ -1087,32 +1167,21 @@ class chatTUI(ChatActionHandlers):
             # Ignore wheel scroll events for focus purposes — they shouldn't
             # change focus, only scroll the panel under the cursor.
             if event.pressed and event.button not in (64, 65):
-                # Find which component was clicked to log focus
-                target_id = None
-                
-                # Very simple hit detection for our two main panels
-                h_comp = self.chat_history_panel.get_component()
-                i_box = self.input_box
-                
-                if h_comp.x <= event.x < h_comp.x + h_comp.width and \
-                   h_comp.y <= event.y < h_comp.y + h_comp.height:
-                    target_id = "history"
-                elif i_box.x <= event.x < i_box.x + i_box.width and \
-                     i_box.y <= event.y < i_box.y + i_box.height:
-                    target_id = "input"
+                if self._focus_scope.focus_at(event.x, event.y):
+                    target_id = "input" if self._focus_scope.focused_index == 0 else "history"
+                    if target_id == "input":
                     # Clear focused message when clicking input
-                    self.chat_history_panel.clear_focus()
+                        self.chat_history_panel.clear_focus()
                     
-                if target_id and target_id != self._last_focus_id:
+                    if target_id != self._last_focus_id:
                     # Log focus change
-                    import logging
-                    logger = logging.getLogger("harness")
-                    logger.info(f"[UI] Focus changed to: {target_id}")
-                    self._last_focus_id = target_id
-                    self._update_focus_states()
+                        import logging
+                        logger = logging.getLogger("harness")
+                        logger.info(f"[UI] Focus changed to: {target_id}")
+                        self._set_app_focus(target_id)
             
-        # Call the original method to avoid infinite recursion
-        return self._original_handle_input(event)
+        # Normal events are dispatched by EventRouter to the active focus target.
+        return False
 
 
     def render(self, force_full=False):
@@ -1128,7 +1197,6 @@ class chatTUI(ChatActionHandlers):
         sys.stdout.write(output)
         sys.stdout.flush()
 
-
     async def run(self):
         """Run the TUI application."""
         import logging
@@ -1140,53 +1208,37 @@ class chatTUI(ChatActionHandlers):
             self.agent.start()
             logger.info("Agent started")
         
-        # Column
-        children = [
-            self.chat_history_panel.get_component(),
-            self.input_box
-        ]
-        sizes = ["100%", 0]
+        self.tab_view.on_change = self._on_tab_view_change
+        self.tab_view.on_close = self._on_tab_view_close
+        self.tab_view.can_close = self._can_close_tab
+        self.tab_view.set_on_new(self._new_tab)
         
-        if self.show_debug:
-            children.insert(0, self.debug_box)
-            sizes.insert(0, pico_cfg.config.ui_debug_console_height)
-            
-        column = Hsplit(children, sizes) # 0 means use preferred height
-
-        # Tab bar + main column
-        self.tab_bar.set_callbacks(
-            on_select=self._on_tab_select,
-            on_close=self._on_tab_close,
-            on_new=self._new_tab,
+        chat_screen = ChatScreen(
+            self.tab_bar,
+            self.chat_history_panel,
+            self.input_box,
+            self._focus_scope,
+            self._tabs[self._active_tab_index] if self._tabs else None,
         )
-        # Create default tab
-        self._create_default_tab()
-        
-        root = Hsplit([self.tab_bar, column], [0, "100%"])
-        self.root = root  # Store root for global handler
-        self.compositor = Compositor(root, fps=TARGET_FPS, shutdown_event=self.shutdown_event)
+        self._chat_workspace = chat_screen.workspace
+        self.root = chat_screen.root  # Store root for global handler
+        self.compositor = Compositor(self.root, fps=TARGET_FPS, shutdown_event=self.shutdown_event)
         self.compositor.padding = pico_cfg.config.ui_app_global_padding  # Apply global padding from config
+        self.modal_host = ModalHost(self.compositor)
+        self._focus_scope.enter()
+        self.navigator = Navigator(
+            self.compositor,
+            chat_screen,
+        )
         
-        # Store the original handle_input method before overriding
-        self._original_handle_input = root.handle_input
-        self.root.handle_input = self.handle_global_input
+        self.compositor.event_router.set_interceptor(self.handle_global_input)
+        self.compositor.event_router.set_focus_scope(self._focus_scope)
 
         # Set compositor for all panels
         self.chat_history_panel.set_compositor(self.compositor)
         self.input_component.set_compositor(self.compositor)
         
-        # Wire up action handlers
-        self.chat_history_panel.on_copy_action = self.handle_copy_action
-        self.chat_history_panel.on_edit_action = self.handle_edit_action
-        self.chat_history_panel.on_retry_action = self.handle_retry_action
-        self.chat_history_panel.on_stop_action = self.handle_stop_action
-        self.chat_history_panel.on_allow_action = self.handle_allow_action
-        self.chat_history_panel.on_deny_action = self.handle_deny_action
-        self.chat_history_panel.on_output_action = self.handle_output_action
-        self.chat_history_panel.on_steer_action = self.handle_steer_action
-        self.chat_history_panel.on_pause_action = self.handle_pause_action
-        self.chat_history_panel.on_resume_action = self.handle_resume_action
-        self.chat_history_panel.on_delete_action = self.handle_delete_action
+        self.chat_history_panel.on_action = self._handle_message_action
         
         # Set initial focus states
         self._update_focus_states()
@@ -1225,7 +1277,9 @@ class chatTUI(ChatActionHandlers):
         try:
             async with asyncio.TaskGroup() as tg:
                 tg.create_task(self.compositor.run())
-                tg.create_task(self.agent_worker())
+                tg.create_task(self.command_worker())
+                for runtime in self._tabs:
+                    self._ensure_runtime_worker(runtime)
                 tg.create_task(background_startup_check())
         except Exception:
             # On exception, cleanup without clearing screen to preserve traceback

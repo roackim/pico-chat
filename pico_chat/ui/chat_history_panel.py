@@ -5,8 +5,7 @@ from dataclasses import dataclass
 from typing import Optional, Any
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.components import TextComponent
-from pico_chat.ui.tui.container import Hsplit
-from pico_chat.ui.tui.terminal import MouseEvent
+from pico_chat.ui.tui.events import MouseEvent
 
 from pico_chat import pico_cfg
 from pico_chat.ui.tui.colors import theme, RGB
@@ -59,6 +58,7 @@ class ChatHistoryPanel(TextComponent):
         # Cache for line map (invalidated on scroll, focus change, message add/remove)
         self._line_map_cache: Optional[list] = None
         self._line_map_cache_key: Optional[tuple] = None  # (auto_scroll, anchored_start_y, msg_count)
+        self._message_height_cache: dict[tuple[int, int, int], int] = {}
         
         # Action click feedback: flash an action with inverted colors briefly
         self._flash_msg: Optional[Message] = None
@@ -69,27 +69,13 @@ class ChatHistoryPanel(TextComponent):
         self._selection_throttle_interval: float = 0.050  # 30ms between repaints
         self._selection_last_update: float = 0.0  # last monotonic time we updated
         
-        # Container for all message boxes
-        self.msg_container = Hsplit([], [])
-        
         # Add welcome message
         # self.add_message(WELCOME_MESSAGE.rstrip())
         
         # Initial component - self is now the component
         self.compositor: Optional[object] = None
         
-        # Action callbacks (set by parent app)
-        self.on_copy_action: Optional[callable] = None
-        self.on_edit_action: Optional[callable] = None
-        self.on_retry_action: Optional[callable] = None
-        self.on_stop_action: Optional[callable] = None
-        self.on_allow_action: Optional[callable] = None
-        self.on_deny_action: Optional[callable] = None
-        self.on_output_action: Optional[callable] = None
-        self.on_steer_action: Optional[callable] = None
-        self.on_pause_action: Optional[callable] = None
-        self.on_resume_action: Optional[callable] = None
-        self.on_delete_action: Optional[callable] = None
+        self.on_action: Optional[callable] = None
 
         # In-place editing state
         self._inline_editing_msg = None  # Message currently being edited in-place
@@ -98,6 +84,10 @@ class ChatHistoryPanel(TextComponent):
     def set_compositor(self, compositor):
         """Set the compositor for updates."""
         self.compositor = compositor
+
+    @property
+    def is_inline_editing(self) -> bool:
+        return self._inline_editing_msg is not None
 
     def mark_changed(self, rect: Optional[tuple[int, int, int, int]] = None):
         """Mark panel dirty and wake compositor for immediate repaint."""
@@ -279,28 +269,10 @@ class ChatHistoryPanel(TextComponent):
         message.box.mark_changed()
         self._request_repaint()
         
-        if action == MsgAction.COPY and self.on_copy_action:
-            self.on_copy_action(message)
-        elif action == MsgAction.EDIT and self.on_edit_action:
-            self.on_edit_action(message)
-        elif action == MsgAction.DELETE and self.on_delete_action:
-            self.on_delete_action(message)
-        elif action == MsgAction.RETRY and self.on_retry_action:
-            self.on_retry_action(message)
-        elif action == MsgAction.STOP and self.on_stop_action:
-            self.on_stop_action(message)
-        elif action == MsgAction.ALLOW and self.on_allow_action:
-            self.on_allow_action(message)
-        elif action == MsgAction.DENY and self.on_deny_action:
-            self.on_deny_action(message)
-        elif action == MsgAction.OUTPUT and self.on_output_action:
-            self.on_output_action(message)
-        elif action == MsgAction.STEER and self.on_steer_action:
-            self.on_steer_action(message)
-        elif action == MsgAction.PAUSE and self.on_pause_action:
-            self.on_pause_action(message)
-        elif action == MsgAction.RESUME and self.on_resume_action:
-            self.on_resume_action(message)
+        if self.on_action:
+            self.on_action(message, action)
+        elif action == MsgAction.DELETE:
+            self.remove_message(message)
 
     def _hit_test_action_bar(self, msg, event_x: int, event_y: int) -> Optional[MsgAction]:
         """Check if a mouse click landed on an action button in the message's bottom border.
@@ -573,15 +545,26 @@ class ChatHistoryPanel(TextComponent):
             if msg_inner_width < 1:
                 msg_inner_width = 1
             message.reformat(msg_inner_width)
+        self._message_height_cache.clear()
         self._request_repaint()
 
     def _get_all_rows(self) -> int:
         """Calculate total number of rows across all message boxes."""
         total = 0
         for msg in self.messages:
-            # Each box's height, accounting for its specific margin
-            total += msg.get_component().get_preferred_height(self.max_width - msg.left_margin - msg.right_margin)
+            total += self._get_message_height(msg)
         return total
+
+    def _get_message_height(self, msg: Message) -> int:
+        """Return a cached message height for the current width and content revision."""
+        width = self.width - msg.left_margin - msg.right_margin
+        revision = getattr(msg, "layout_revision", 0)
+        key = (id(msg), width, revision)
+        height = self._message_height_cache.get(key)
+        if height is None:
+            height = msg.get_component().get_preferred_height(width)
+            self._message_height_cache[key] = height
+        return height
     
     def _build_line_map(self) -> list[Optional[tuple[int, int]]]:
         """Build a map of virtual y-coordinates to message references.
@@ -605,7 +588,7 @@ class ChatHistoryPanel(TextComponent):
             # Add lines for this message
             child = msg.get_component()
             child_w = self.width - msg.left_margin - msg.right_margin
-            child_h = child.get_preferred_height(child_w)
+            child_h = self._get_message_height(msg)
             
             for local_y in range(child_h):
                 line_map.append((i, local_y))
@@ -636,13 +619,13 @@ class ChatHistoryPanel(TextComponent):
                 # Found our message
                 child = msg.get_component()
                 child_w = self.width - msg.left_margin - msg.right_margin
-                child_h = child.get_preferred_height(child_w)
+                child_h = self._get_message_height(msg)
                 return (virtual_y, virtual_y + child_h)
             
             # Move past this message
             child = msg.get_component()
             child_w = self.width - msg.left_margin - msg.right_margin
-            child_h = child.get_preferred_height(child_w)
+            child_h = self._get_message_height(msg)
             virtual_y += child_h
         
         return (0, 0)
@@ -784,7 +767,7 @@ class ChatHistoryPanel(TextComponent):
             
             child = msg.get_component()
             child_w = self.width - msg.left_margin - msg.right_margin
-            child_h = child.get_preferred_height(child_w)
+            child_h = self._get_message_height(msg)
 
             child_y = curr_y
             child_bottom = child_y + child_h
@@ -932,74 +915,12 @@ class ChatHistoryPanel(TextComponent):
             if self.focused_message_index is not None:
                 focused_msg = self.messages[self.focused_message_index]
                 
-                # Delete action
-                if event == 'd' and MsgAction.DELETE in focused_msg.get_active_actions():
-                    if self.on_delete_action:
-                        self.on_delete_action(focused_msg)
-                    else:
-                        # Fallback: UI-only removal
-                        self.remove_message_by_index(self.focused_message_index)
-                    return True
-                
-                # Copy action
-                elif event == 'c' and MsgAction.COPY in focused_msg.type.actions:
-                    if self.on_copy_action:
-                        self.on_copy_action(focused_msg)
-                    return True
-                
-                # Edit action
-                elif event == 'e' and MsgAction.EDIT in focused_msg.get_active_actions():
-                    if self.on_edit_action:
-                        self.on_edit_action(focused_msg)
-                    return True
-                
-                # Retry action
-                elif event == 'r' and MsgAction.RETRY in focused_msg.type.actions:
-                    if self.on_retry_action:
-                        self.on_retry_action(focused_msg)
-                    return True
-                
-                # Stop action
-                elif event == 's' and MsgAction.STOP in focused_msg.type.actions:
-                    if self.on_stop_action:
-                        self.on_stop_action(focused_msg)
-                    return True
-                
-                # Allow action
-                elif event == 'a' and MsgAction.ALLOW in focused_msg.type.actions:
-                    if self.on_allow_action:
-                        self.on_allow_action(focused_msg)
-                    return True
-                
-                # Deny action
-                elif event == 'x' and MsgAction.DENY in focused_msg.type.actions:
-                    if self.on_deny_action:
-                        self.on_deny_action(focused_msg)
-                    return True
-                
-                # Output toggle action
-                elif event == 'o' and MsgAction.OUTPUT in focused_msg.type.actions:
-                    if self.on_output_action:
-                        self.on_output_action(focused_msg)
-                    return True
-
-                # Steer action (queued UserMsg → inject as thinking prefill)
-                # Use get_active_actions so it only fires when is_queued=True
-                elif event == 't' and MsgAction.STEER in focused_msg.get_active_actions():
-                    if self.on_steer_action:
-                        self.on_steer_action(focused_msg)
-                    return True
-
-                # Pause action (live PicoMsg/ThinkingMsg)
-                elif event == 'p' and MsgAction.PAUSE in focused_msg.get_active_actions():
-                    if self.on_pause_action:
-                        self.on_pause_action(focused_msg)
-                    return True
-
-                # Resume action (paused message)
-                elif event == 'u' and MsgAction.RESUME in focused_msg.get_active_actions():
-                    if self.on_resume_action:
-                        self.on_resume_action(focused_msg)
+                action = next(
+                    (candidate for candidate in focused_msg.get_active_actions() if candidate.key == event),
+                    None,
+                )
+                if action is not None:
+                    self._dispatch_action(focused_msg, action)
                     return True
         
         # Handle mouse input
@@ -1196,15 +1117,13 @@ class ChatHistoryPanel(TextComponent):
         
         if append:
             self.messages.append(new_message)
-            self.msg_container.children.append(new_message.get_component())
-            self.msg_container.sizes.append("auto")
             new_message.get_component().parent = self
+            self._message_height_cache.clear()
         
         # Keep only last max_messages
         if len(self.messages) > self.max_messages:
             self.messages = self.messages[-self.max_messages:]
-            self.msg_container.children = [m.get_component() for m in self.messages]
-            self.msg_container.sizes = ["auto"] * len(self.messages)
+            self._message_height_cache.clear()
 
         self._line_map_cache = None
         self._line_map_cache_key = None
@@ -1216,8 +1135,7 @@ class ChatHistoryPanel(TextComponent):
         """Remove the last message from the chat history."""
         if self.messages:
             self.messages.pop()
-            self.msg_container.children.pop()
-            self.msg_container.sizes.pop()
+            self._message_height_cache.clear()
             self._line_map_cache = None
             self._line_map_cache_key = None
             self._request_repaint()
@@ -1262,8 +1180,7 @@ class ChatHistoryPanel(TextComponent):
             
             # Remove the message
             self.messages.pop(index)
-            self.msg_container.children.pop(index)
-            self.msg_container.sizes.pop(index)
+            self._message_height_cache.clear()
             self._line_map_cache = None
             self._line_map_cache_key = None
             
@@ -1291,9 +1208,8 @@ class ChatHistoryPanel(TextComponent):
             
             # Replace the message
             self.messages[index] = new
-            self.msg_container.children[index] = new.get_component()
             new.get_component().parent = self
-            # sizes remain the same ("auto")
+            self._message_height_cache.clear()
             
             # Transfer focus to the new message if the old one was focused
             if was_focused:
@@ -1330,8 +1246,23 @@ class ChatHistoryPanel(TextComponent):
     def clear(self):
         """Clear the chat history UI."""
         self.messages = []
-        self.msg_container.children = []
-        self.msg_container.sizes = []
+        self._message_height_cache.clear()
+        self.scroll_offset = 0
+        self.auto_scroll = True
+        self.anchored_start_y = None
+        self._request_repaint()
+
+    def restore_messages(self, messages: list) -> None:
+        """Restore message objects and rebuild the panel's layout state."""
+        self.messages = list(messages)
+        for message in self.messages:
+            message.get_component().parent = self
+        self.focused_message_index = None
+        self._selection = None
+        self._selection_dragging = False
+        self._message_height_cache.clear()
+        self._line_map_cache = None
+        self._line_map_cache_key = None
         self.scroll_offset = 0
         self.auto_scroll = True
         self.anchored_start_y = None
@@ -1355,9 +1286,3 @@ class ChatHistoryPanel(TextComponent):
     def get_messages(self) -> list:
         """Get the list of Message objects."""
         return self.messages
-
-    def get_component(self):
-        """Get the component for layout."""
-        return self
-
-

@@ -23,10 +23,16 @@ from typing import Any, Callable, Dict, List, Optional
 
 from pico_chat.ui.tui.components.base import Component
 from pico_chat.ui.tui.components.box import Box
-from pico_chat.ui.tui.components.form import FormContainer, FormField, TextField
+from pico_chat.ui.tui.components.form import (
+    FormContainer, FormField, TextField, TextAreaField, RadioListField,
+)
+from pico_chat.ui.tui.actions import Action, Actions
+from pico_chat.ui.tui.events import KeyEvent, TickEvent
 from pico_chat.ui.tui.buffer import Buffer
-from pico_chat.ui.tui.terminal import MouseEvent
+from pico_chat.ui.tui.events import MouseEvent
 from pico_chat.ui.tui.colors import theme
+from pico_chat.ui.tui.navigation import ModalHost
+from pico_chat.ui.tui.screen import Screen
 
 
 # ── lightweight action descriptors for the bottom bar ──────────
@@ -44,6 +50,17 @@ _OK_ACTION = _FormAction("Enter", "ok")
 _CANCEL_ACTION = _FormAction("Esc", "cancel")
 
 
+class FormPopupScreen(Screen):
+    """Screen adapter that lets ``ModalHost`` own a ``FormPopup`` lifecycle."""
+
+    def __init__(self, popup: "FormPopup"):
+        super().__init__(popup)
+        self.popup = popup
+
+    def on_leave(self) -> None:
+        self.popup._hide_state()
+
+
 class FormPopup(Component):
     """A centered modal overlay that displays form fields.
 
@@ -52,7 +69,8 @@ class FormPopup(Component):
     """
 
     def __init__(self, compositor: Optional[Any] = None, id: Optional[str] = None,
-                 max_width_ratio: float = 0.6, max_height_ratio: float = 0.7):
+                 max_width_ratio: float = 0.6, max_height_ratio: float = 0.7,
+                 modal_host: Optional[ModalHost] = None):
         super().__init__(id)
         self.max_width_ratio = max_width_ratio
         self.max_height_ratio = max_height_ratio
@@ -61,13 +79,18 @@ class FormPopup(Component):
         self._form_container: Optional[FormContainer] = None
         self._on_submit: Optional[Callable[[Dict[str, Any]], None]] = None
         self._on_cancel: Optional[Callable[[], None]] = None
+        self._on_action: Optional[Callable[[Action], None]] = None
         self._error_msg: Optional[str] = None
+        self._background_focus_scope = None
+        self._background_focus_index = None
 
         # Box wrapping the FormContainer (built in _build_box)
         self._box: Optional[Box] = None
 
         # Compositor integration
         self.compositor = compositor
+        self.modal_host = modal_host
+        self._modal_screen = FormPopupScreen(self) if modal_host else None
         self._registered_with_compositor = False
 
     # ── compositor registration ────────────────────────────────
@@ -75,7 +98,13 @@ class FormPopup(Component):
     def set_compositor(self, compositor):
         self.compositor = compositor
 
+    def set_modal_host(self, modal_host: ModalHost):
+        self.modal_host = modal_host
+        self._modal_screen = FormPopupScreen(self)
+
     def _sync_compositor(self):
+        if self.modal_host:
+            return
         if not self.compositor:
             return
         if self.is_visible and not self._registered_with_compositor:
@@ -87,9 +116,28 @@ class FormPopup(Component):
 
     # ── show / hide ────────────────────────────────────────────
 
+    def _suspend_background_focus(self):
+        if not self.compositor or not hasattr(self.compositor, "event_router"):
+            return
+        scope = self.compositor.event_router.focus_scope
+        if scope is None or not scope.active:
+            return
+        self._background_focus_scope = scope
+        self._background_focus_index = scope.focused_index
+        scope.manager.clear()
+
+    def _restore_background_focus(self):
+        scope = self._background_focus_scope
+        index = self._background_focus_index
+        self._background_focus_scope = None
+        self._background_focus_index = None
+        if scope is not None and index is not None:
+            scope.manager.focus(index)
+
     def show(self, title: str, fields: List[FormField],
              on_submit: Callable[[Dict[str, Any]], None],
-             on_cancel: Optional[Callable[[], None]] = None):
+             on_cancel: Optional[Callable[[], None]] = None,
+             on_action: Optional[Callable[[Action], None]] = None):
         """Display the form popup.
 
         Args:
@@ -97,10 +145,13 @@ class FormPopup(Component):
             fields:  List of ``FormField`` instances.
             on_submit: Called with ``{field.label: field.get_value()}``.
             on_cancel: Called when the user dismisses the form (optional).
+            on_action: Optional semantic action sink, called before legacy callbacks.
         """
         self._on_submit = on_submit
         self._on_cancel = on_cancel
+        self._on_action = on_action
         self._error_msg = None
+        self._suspend_background_focus()
 
         self._form_container = FormContainer(fields)
         self._box = Box(
@@ -110,21 +161,46 @@ class FormPopup(Component):
             focused=True,
             actions=[_OK_ACTION, _CANCEL_ACTION],
         )
+        self._form_container.focus_scope.enter()
 
         self.is_visible = True
         self._center_and_layout()
-        self._sync_compositor()
+        if self.modal_host and self._modal_screen:
+            self.modal_host.present_screen(self._modal_screen)
+        else:
+            self._sync_compositor()
         if self.compositor:
             self.compositor.request_render()
 
     def hide(self):
+        if self.modal_host and self._modal_screen is not None:
+            if self.modal_host.current is self:
+                self.modal_host.dismiss_screen(self._modal_screen)
+                return
+        self._hide_state()
+
+    def _hide_state(self):
         was_visible = self.is_visible
         self.is_visible = False
+        if self._form_container:
+            self._form_container.focus_scope.leave()
         self._form_container = None
         self._box = None
+        self._restore_background_focus()
         self._sync_compositor()
         if was_visible and self.compositor:
             self.compositor.request_render()
+
+    @property
+    def dirty(self) -> bool:
+        return bool(self._form_container and self._form_container.dirty)
+
+    def reset(self):
+        if self._form_container:
+            self._form_container.reset()
+            self._error_msg = None
+            self._center_and_layout()
+            self.mark_changed()
 
     # ── layout ─────────────────────────────────────────────────
 
@@ -171,6 +247,14 @@ class FormPopup(Component):
 
         # Validate required fields
         for f in self._form_container.fields:
+            if f.model is not None and not f.validate():
+                if f.model.error == "This field is required":
+                    self._error_msg = f"'{f.label}' is required"
+                else:
+                    self._error_msg = f"'{f.label}': {f.model.error}"
+                self._center_and_layout()
+                self.mark_changed()
+                return False
             if f.required:
                 val = f.get_value()
                 if val is None or (isinstance(val, str) and not val.strip()):
@@ -181,11 +265,16 @@ class FormPopup(Component):
 
         values = {f.label: f.get_value() for f in self._form_container.fields}
         self.hide()
+        if self._on_action:
+            self._on_action(Action(Actions.SUBMIT, values))
         self._on_submit(values)
         return True
 
     def _do_cancel(self):
+        self.reset()
         self.hide()
+        if self._on_action:
+            self._on_action(Action(Actions.CANCEL))
         if self._on_cancel:
             self._on_cancel()
 
@@ -195,26 +284,39 @@ class FormPopup(Component):
         if not self.is_visible:
             return False
 
+        if isinstance(event, TickEvent):
+            return bool(self._form_container and self._form_container.handle_input(event))
+
         # Keyboard
-        if isinstance(event, str):
-            if event == "\x1b":  # Escape
+        if isinstance(event, (str, KeyEvent)):
+            key = event.key if isinstance(event, KeyEvent) else event
+            # Terminal Alt+Enter commonly arrives as ESC followed by CR/LF.
+            # Treat it as Enter so modal input cannot leak to the application.
+            if key in ("\x1b\r", "\x1b\n", "\x1b[13;3u", "\x1b[27;3;13~"):
+                event = "\r"
+                key = event
+            if key == "\x1b":  # Escape
                 self._do_cancel()
                 return True
-            if event == "\r" or event == "\n":  # Enter — check if a text field is focused
+            if key == "\r" or key == "\n":  # Enter — check if a text field is focused
                 fc = self._form_container.get_focused_field() if self._form_container else None
                 # If a text field is focused and the user presses Enter, move to next field
                 # (not submit).  Shift is not easily detectable in raw mode, so use a
                 # heuristic: if the focused field is NOT a TextField, Enter submits.
+                if fc and isinstance(fc, TextAreaField):
+                    return self._form_container.handle_input(event)
                 if fc and isinstance(fc, TextField):
                     # Move focus to next field instead of submitting
+                    if self._on_action:
+                        self._on_action(Action(Actions.NEXT))
                     self._form_container.focus_next()
                     return True
                 else:
                     return self._try_submit()
-            if event == "\x1b[Z":  # Shift+Tab — let FormContainer handle
+            if key == "\x1b[Z":  # Shift+Tab — let FormContainer handle
                 if self._form_container:
                     return self._form_container.handle_input(event)
-            if event == "\t":  # Tab — let FormContainer handle
+            if key == "\t":  # Tab — let FormContainer handle
                 if self._form_container:
                     return self._form_container.handle_input(event)
 
@@ -261,6 +363,10 @@ class FormPopup(Component):
             field_bottom = field_y + fh
             if field_y <= event.y < field_bottom:
                 container._set_focus(i)
+                if isinstance(field, RadioListField):
+                    option_index = event.y - field_y - 1
+                    if 0 <= option_index < len(field.options):
+                        field.set_value(option_index)
                 container._ensure_focus_visible()
                 return
 

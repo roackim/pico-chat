@@ -4,7 +4,7 @@ from pico_chat.ui.tui.components.box import Box
 from pico_chat.ui.tui.components.debug_panel import DebugLogPanel
 from pico_chat.ui.tui.components.popup import PopupAction
 from pico_chat.ui.tui.buffer import Buffer
-from pico_chat.ui.tui.terminal import MouseEvent
+from pico_chat.ui.tui.events import KeyEvent, MouseEvent
 from pico_chat.ui.tui.colors import theme
 
 
@@ -86,8 +86,9 @@ class DebugPopup(Component):
         if not self.is_visible:
             return False
         
-        if isinstance(event, str):
-            if event == '\x1b':  # Escape closes
+        if isinstance(event, (str, KeyEvent)):
+            key = event.key if isinstance(event, KeyEvent) else event
+            if key == '\x1b':  # Escape closes
                 self.hide()
                 return True
         

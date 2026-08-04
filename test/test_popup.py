@@ -1,8 +1,9 @@
 """Tests for the Popup overlay component."""
 import pytest
-from pico_chat.ui.tui.components.popup import Popup
+from pico_chat.ui.tui.components.popup import Popup, PopupScreen
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.terminal import MouseEvent
+from pico_chat.ui.tui.navigation import ModalHost
 
 
 class FakeCompositor:
@@ -24,6 +25,25 @@ class FakeCompositor:
 
 
 class TestPopup:
+    def test_popup_screen_uses_modal_host_lifecycle(self):
+        comp = FakeCompositor()
+        popup = Popup()
+        host = ModalHost(comp)
+        screen = PopupScreen(popup, "title", "content")
+        popup.set_compositor(comp)
+
+        host.present_screen(screen)
+
+        assert host.current is popup
+        assert popup.is_visible
+        assert popup in comp.overlays
+
+        host.dismiss_screen(screen)
+
+        assert host.current is None
+        assert not popup.is_visible
+        assert popup not in comp.overlays
+
     def test_show_hide(self):
         comp = FakeCompositor()
         popup = Popup(compositor=comp)

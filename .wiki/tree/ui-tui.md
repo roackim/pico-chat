@@ -15,6 +15,48 @@ See [notes/ui.md](../notes/ui.md) for the component model and layer stack.
 - `Terminal.write(data)` — flushes bytes to stdout
 - `ANSI` constants: cursor movement, color codes, clear sequences
 
+### `events.py`
+Typed event dataclasses shared by terminal input and TUI components:
+`KeyEvent`, `MouseEvent`, `PasteEvent`, `ResizeEvent`, `TickEvent`, and `CommandEvent`.
+`KeyEvent` is string-compatible for existing handlers while exposing `key` and
+`text` metadata. `Terminal.get_input()` normalizes keyboard input before
+dispatch; compositor resize notifications use `ResizeEvent`. Reusable widgets
+import these event types from this module; `terminal.py` remains the input
+adapter that constructs them.
+
+### `focus.py`
+`FocusManager` — owns focus for an ordered collection of interactive widgets,
+including focus transitions and enabled/focusable filtering.
+`FocusScope` — provides an active focus boundary with optional focus trapping
+for forms and dialogs, with enter/leave lifecycle callbacks. `focus_at(x, y)`
+selects the topmost focusable widget containing a laid-out coordinate.
+
+### `router.py`
+`EventRouter` — dispatches events through overlays and the component tree.
+Mouse events use component layout rectangles for child-first hit testing and
+handled events bubble to parents. Semantic `Action` events are dispatched
+through an optional `ActionMap` before root fallback.
+
+### `actions.py`
+`Action` — immutable semantic operation with an optional payload.
+`ActionMap` — binds action names to handlers independently of physical keys.
+
+### `screen.py` and `navigation.py`
+`Screen` owns a root component, optional focus/action scopes, and an optional
+screen model supplied by the application.
+`Navigator` manages push/pop/replace/back and screen lifecycle hooks.
+`ModalHost` delegates modal ownership to the compositor overlay stack and can
+present modal screens with lifecycle hooks.
+
+### `chat_screen.py`
+`ChatScreen` composes the tab bar, chat history, and input workspace while
+leaving conversation state and callbacks in `chatTUI`.
+
+### `example_screen.py`
+`ExampleScreen` — minimal library-only screen demonstrating component
+composition, layout, focus, semantic actions, and rendering without
+application-specific state.
+
 ### `buffer.py`
 `Cell` — single character with foreground and background `RGB`.
 `Buffer` — 2D grid of `Cell` objects representing the full screen.
@@ -27,11 +69,20 @@ See [notes/ui.md](../notes/ui.md) for the component model and layer stack.
 - `invalidate()` — marks frame dirty; next loop iteration redraws
 - Overlay stack for floating UI (menus, permission prompts)
 - FPS tracking
+- Ctrl-C shutdown consumes canonical `KeyEvent` metadata while retaining raw
+	string compatibility
 
 ### `container.py`
-`Container` abstract base. Concrete: `Vsplit` (horizontal split), `Hsplit` (vertical split).
-- Flexible sizing: `int` (fixed columns/rows), `float` (percentage), `str` (e.g. `"*"` for fill)
-- Allocates `SubBuffer` slices to child components
+`Container` groups child components. Concrete: `Vsplit` (column split), `Hsplit` (row split).
+- Flexible sizing: fixed integers, percentages, and auto/fill slots
+- `layout()` calculates child rectangles before `render()` paints them
+- `Padding` insets a child by fixed edges
+- `Align` positions content using preferred or explicit dimensions
+- `Stack`/`Overlay` layer children in shared geometry; later children paint on top
+- `ScrollView` clips one child to a viewport and supports canonical `KeyEvent`
+	keyboard navigation plus mouse scrolling
+- Size policies: `Fixed`, `Percent`, `Content`, and `Fill`
+- Components support `min_width`, `max_width`, `min_height`, and `max_height` constraints
 
 ### `colors.py`
 `RGB` — color class with hex parsing and ANSI escape code generation.

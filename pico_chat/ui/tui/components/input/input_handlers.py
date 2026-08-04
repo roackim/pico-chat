@@ -1,7 +1,7 @@
 """Input event handlers for the input component."""
 
 from typing import Any, TYPE_CHECKING
-from pico_chat.ui.tui.terminal import MouseEvent, PasteEvent
+from pico_chat.ui.tui.events import KeyEvent, MouseEvent, PasteEvent
 
 if TYPE_CHECKING:
     from .text_buffer import TextBuffer
@@ -84,28 +84,30 @@ class KeyboardHandler(InputHandler):
         self.on_submit = None  # Callback for when enter is pressed
     
     def can_handle(self, event: Any) -> bool:
-        return isinstance(event, str)
+        return isinstance(event, (str, KeyEvent))
     
     def handle(self, event: str, context: InputContext) -> bool:
+        key = event.key if isinstance(event, KeyEvent) else event
+        text = event.text if isinstance(event, KeyEvent) else event
         # Ignore naked escape
-        if event == self.KEY_ESC:
+        if key == self.KEY_ESC:
             return True
         
         # Navigation keys
-        if self._handle_navigation(event, context):
+        if self._handle_navigation(key, context):
             return True
         
         # Editing keys
-        if self._handle_editing(event, context):
+        if self._handle_editing(key, context):
             return True
         
         # Special combinations
-        if self._handle_special_keys(event, context):
+        if self._handle_special_keys(key, context):
             return True
         
         # Default: insert printable character
-        if len(event) == 1 and ord(event) >= 32:
-            context.buffer.insert(event)
+        if text is not None and len(text) == 1 and ord(text) >= 32:
+            context.buffer.insert(text)
             return True
         
         return False

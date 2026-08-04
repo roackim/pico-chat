@@ -63,6 +63,7 @@ class Message:
         
         self.base_text = text
         self.max_width = max_width
+        self.layout_revision = 0
         self.left_pad = left_pad
         self.right_pad = right_pad
         self.title = title
@@ -239,6 +240,7 @@ class Message:
             The newly formatted text (plain-text fallback for markdown)
         """
         self.max_width = max_width
+        self.layout_revision += 1
 
         if self._is_markdown():
             # MarkdownComponent handles wrapping internally via set_layout / width

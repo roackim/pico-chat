@@ -200,7 +200,7 @@ class ChatActionHandlers:
                 self.chat_history_panel.remove_last_message()
             # Re-queue
             self.chat_history_panel.auto_scroll = True
-            self.message_queue.put_nowait((text, message))
+            self._enqueue_message(text, message)
 
         self.chat_history_panel.start_inline_edit(
             message,
@@ -276,7 +276,7 @@ class ChatActionHandlers:
                 # Resubmit the user message (as tuple to match normal submit)
                 user_text = user_msg.base_text
                 self.chat_history_panel.auto_scroll = True
-                self.message_queue.put_nowait((user_text, user_msg))
+                self._enqueue_message(user_text, user_msg)
                 logger.info(f"Retrying with message: {user_text[:50]}...")
             else:
                 self.chat_history_panel.add_message(
@@ -480,7 +480,7 @@ class ChatActionHandlers:
 
         # Re-queue the original user input (thinking prefill already set)
         self.chat_history_panel.auto_scroll = True
-        self.message_queue.put_nowait((paused_input, paused_msg))
+        self._enqueue_message(paused_input, paused_msg)
 
         # Clear pause state
         self._paused_user_input = None

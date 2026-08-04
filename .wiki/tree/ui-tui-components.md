@@ -22,6 +22,8 @@ See [notes/ui.md](../notes/ui.md) for the component model overview.
 ### `text.py`
 `TextComponent` — displays static or dynamically updated text with auto-scroll.
 Used as base for `ChatHistoryPanel`.
+`Label` — reusable text widget with ANSI-aware wrapping and left, center, or
+right horizontal alignment plus top, center, or bottom vertical alignment.
 
 ### `box.py`
 `Box` — wraps another component with a border, optional title, and optional action buttons.
@@ -31,11 +33,50 @@ Constructor params include `compact_when_unfocused` (render without borders when
 `_action_hit_regions` — tracks screen positions of action buttons during render for click detection.
 Supports **action flash feedback**: when `parent_msg._flash_action_key` is set, the matching action button renders with `reverse=True` for brief visual feedback.
 
+### `button.py`
+`Button` — focusable control activated by Enter, Space, or a left mouse click;
+supports disabled state, callbacks, and semantic `activate` actions. Keyboard
+activation consumes canonical `KeyEvent` values while retaining raw-string
+compatibility.
+
+### `choice.py`
+`Checkbox` — focusable boolean control with keyboard and mouse toggling.
+`RadioGroup` — focusable single-selection list with arrow-key navigation and
+keyboard or mouse selection. Both normalize canonical `KeyEvent` values while
+retaining raw-string compatibility.
+
+Popup, form, debug, config, and action-bar controls also normalize canonical
+`KeyEvent` values while retaining their existing raw-string and mouse paths.
+
+### `list_view.py`
+`SelectionModel` stores ordered items and a selected index independently of
+rendering. `ListView` provides focusable keyboard/mouse navigation with
+scrolling, while `Select` adds a compact field that opens an inline list. These
+widgets consume canonical `KeyEvent` values while retaining raw-string input.
+
+### `table_view.py`
+`TableView` renders measured or explicitly sized columns with a fixed header,
+vertical row scrolling, horizontal clipping, and mouse/keyboard row selection.
+Keyboard navigation consumes canonical `KeyEvent` values.
+
+### `bars.py`
+`BarStyle` centralizes bar padding and theme colors. `StatusBar` renders left
+and right status text, while `ActionBar` renders keyboard/mouse actions with
+shared spacing and focus styling.
+
 ### `menu.py`
 `SelectionMenu` — floating dropdown list.
 - Fuzzy search filtering via `fuzzy.py`
 - Keyboard navigation (up/down/enter/escape)
 - Used for autocomplete popups in `InputComponent`
+
+### `input/basic.py`
+Reusable cursor-aware text editors:
+- `LineInput` — single-line value editing with placeholder and reverse-video cursor
+- `BoxInput` — multiline value editing with cursor navigation and boxed layout support
+Both editors consume canonical `KeyEvent` metadata while retaining raw-string
+compatibility.
+`TextField` and `TextAreaField` delegate their editing behavior to these components.
 
 ### `debug_panel.py`
 `DebugLogPanel` — scrolling log display (extends `TextComponent`).
@@ -44,14 +85,23 @@ Supports **action flash feedback**: when `parent_msg._flash_action_key` is set, 
 - Auto-scrolls to bottom on new entries (`auto_scroll_bottom=True`)
 - Toggled visible/hidden via Hsplit layout in `app.py`
 
+### `config_overlay.py`
+`ConfigOverlay` — server configuration tab component.
+- Renders server rows and dispatches add, edit, remove, and use callbacks
+- Supports keyboard shortcuts, mouse actions, and scrolling
+- Keyboard shortcuts consume canonical `KeyEvent` metadata while retaining
+	raw-string compatibility
+
 ### `popup.py`
 `Popup` — centered overlay popup built on `Box` + `TextComponent`.
 - Component tree: `Popup` → `Box` (borders/title/action bar) → `TextComponent` (content)
 - `show(title, content)` — displays popup, auto-centers, registers with compositor
+- `PopupScreen` — adapts read-only popup visibility to `ModalHost` lifecycle ownership
 
 ### `form.py`
 Form field components and layout container.
 - `FormField` — ABC for all fields: `get_value()`, `set_value()`, `render()`, `handle_input()`
+- Fields can bind to a standalone `FieldModel` for value, dirty, reset, and synchronous validation state.
 - `ToggleField` — `[x]`/`[ ]` boolean toggle
 - `TextField` — single-line text input with cursor
 - `TextAreaField` — multiline text input with cursor navigation
@@ -59,14 +109,28 @@ Form field components and layout container.
 - `RadioListField` — single-select `()`/`(x)` list
 - `FormContainer` — vertical layout manager with Tab/Shift+Tab focus navigation, scroll offset, field spacing
 
+### `field_models.py`
+Standalone form value models independent of rendering and layout.
+- `FieldModel` — generic value, initial value, dirty tracking, reset, required validation, and custom synchronous validation.
+- `validate_async()` — optional asynchronous validation extension after synchronous checks.
+- `TextFieldModel`, `BoolFieldModel`, `ChoiceFieldModel` — typed convenience models for common field values.
+
+### `form_schema.py`
+Declarative construction helpers for regular form fields.
+- `FormFieldSpec` — describes field label, kind, value, options, and validation callbacks.
+- `build_field()` / `build_fields()` — construct existing field widgets in schema order.
+
 ### `form_popup.py`
 `FormPopup` — modal overlay wrapping a `FormContainer` inside a `Box`.
+- `FormPopupScreen` — `Screen` adapter for `ModalHost` lifecycle ownership; compositor-only usage remains supported.
 - `show(title, fields, on_submit, on_cancel)` — displays form, registers with compositor
 - Action bar: `[Enter] ok` / `[Esc] cancel`
-- Required field validation with error message overlay
+- Required and model validation with error message overlay
+- `dirty` / `reset()` expose and restore form state; cancel resets before dismissal
 - Enter on TextField moves to next field; Enter on other fields submits
 - Mouse: clickable actions, click-to-focus fields
 - Used by: `/server add` (no-args form mode)
+- Optional semantic action sink emits `submit`, `cancel`, and `next` while legacy callbacks remain supported
 - `hide()` — dismisses popup, unregisters from compositor
 - Auto-centers based on terminal dimensions (`max_width_ratio`, `max_height_ratio`)
 - **Bottom action bar** with `[Esc] close` — uses Box's native action rendering, so it looks and positions exactly like message box actions
@@ -98,6 +162,19 @@ See [notes/ui.md](../notes/ui.md) for the rendering overview.
 - `set_active(index)` — highlight a tab
 - Used by: `/tab new | close | switch | list`
 
+### `tab_view.py`
+`TabView` — generic owner of tab identity, titles, closability, active selection,
+and view instances. It preserves inactive views and calls `Screen` lifecycle
+hooks when views are entered, suspended, resumed, or closed.
+- `TabItem` — stable tab ID, title, view, and closeability metadata.
+- `ActionMap` integration supports activate, close, next, and previous actions.
+- Close callbacks run after the tab item and visual strip entry are removed,
+  so application domain state can synchronize before replacement selection.
+- Applications may keep zero tabs; `TabView.active_index` becomes `None` and
+	the tab bar still exposes its new-tab control.
+- `chatTUI` uses it for conversation and debug tabs while keeping
+	`ConversationState` outside the widget layer.
+
 ---
 
 ## Input Subcomponent (`input/`)
@@ -108,6 +185,7 @@ The multi-line text editor. Responsibilities split across sub-modules:
 `InputComponent` — the coordinator.
 - Orchestrates cursor animation, completion menu visibility, multi-line layout
 - Delegates text storage to `TextBuffer`, key handling to `InputHandlers`
+- Extracts canonical `KeyEvent.key` values while retaining raw-string compatibility
 - Shows schema-driven parameter hints via `_get_parameter_hint()` (reads `Command.params` from registry)
 - `setup_command_registry(registry)` — receives the `COMMANDS` dict from `app.py`
 
@@ -118,8 +196,10 @@ The multi-line text editor. Responsibilities split across sub-modules:
 - Cursor position as `(line, col)` offset
 
 ### `input/input_handlers.py`
-Handles raw keyboard, mouse, and paste events.
+Handles canonical keyboard, mouse, and paste events.
 - Maps key sequences to `TextBuffer` mutations
+- Uses `KeyEvent.key` for controls and `KeyEvent.text` for printable insertion
+	while retaining raw-string compatibility
 - Triggers completion queries on relevant keystrokes
 
 ### Completion Modules

@@ -1,8 +1,8 @@
 from typing import Optional
 from pico_chat.ui.tui.components.base import Component
 from pico_chat.ui.tui.buffer import Buffer
-
 from pico_chat.ui.tui.colors import theme
+from pico_chat.ui.tui.layout_utils import display_width, wrap_text
 
 class TextComponent(Component):
     def __init__(self, text: str, id: Optional[str] = None, fg=None, bg=None, auto_scroll_bottom: bool = False):
@@ -40,7 +40,58 @@ class TextComponent(Component):
         # we still consider splitlines() count.
         return len(self._lines)
 
+    def get_preferred_width(self) -> int:
+        return max((len(line) for line in self._lines), default=0)
+
     def update(self, text: str):
         self.text = text
         self._lines = text.splitlines()
         self.mark_changed((self.x, self.y, self.width, self.height))
+
+
+class Label(TextComponent):
+    """Static text with explicit wrapping and alignment policies."""
+
+    def __init__(self, text: str, id: Optional[str] = None, fg=None, bg=None,
+                 wrap: bool = True, horizontal: str = "left",
+                 vertical: str = "top"):
+        if horizontal not in ("left", "center", "right"):
+            raise ValueError("horizontal must be left, center, or right")
+        if vertical not in ("top", "center", "bottom"):
+            raise ValueError("vertical must be top, center, or bottom")
+        super().__init__(text, id=id, fg=fg, bg=bg)
+        self.wrap = wrap
+        self.horizontal = horizontal
+        self.vertical = vertical
+
+    def _display_lines(self, width: Optional[int] = None) -> list[str]:
+        if not self.wrap or not width or width <= 0:
+            return list(self._lines)
+        wrapped = wrap_text(self.text, width, first_line_padding=False)
+        return wrapped.split("\n")
+
+    def render(self, buffer: Buffer):
+        lines = self._display_lines(self.width)
+        if self.vertical == "bottom":
+            start_y = self.y + max(0, self.height - len(lines))
+        elif self.vertical == "center":
+            start_y = self.y + max(0, (self.height - len(lines)) // 2)
+        else:
+            start_y = self.y
+
+        for offset, line in enumerate(lines[:max(0, self.height)]):
+            line_width = display_width(line)
+            if self.horizontal == "right":
+                start_x = self.x + max(0, self.width - line_width)
+            elif self.horizontal == "center":
+                start_x = self.x + max(0, (self.width - line_width) // 2)
+            else:
+                start_x = self.x
+            buffer.write_str(start_x, start_y + offset, line,
+                             fg=self.fg, bg=self.bg, max_width=self.width)
+
+    def get_preferred_height(self, width: int) -> int:
+        return len(self._display_lines(width))
+
+    def get_preferred_width(self) -> int:
+        return max((display_width(line) for line in self._lines), default=0)

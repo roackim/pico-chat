@@ -2,7 +2,9 @@
 
 import asyncio
 import pytest
+import pico_chat.ui.app as app_module
 from pico_chat.ui.app import chatTUI
+from pico_chat.ui.tui.events import normalize_key
 from pico_chat.ui.tui.msg_types import SysMsg
 from pico_chat.harness import chunks
 
@@ -54,12 +56,28 @@ class TestCommandMenuNavigation:
 
         selected_before = ui.input_component.command_completion.menu.selected_index
 
-        handled = ui.handle_global_input('\x1b[A')
+        handled = ui.handle_global_input(normalize_key('\x1b[A'))
 
         assert handled is True
         assert ui._last_focus_id == "input"
         assert ui.chat_history_panel.focused_message_index is None
         assert ui.input_component.command_completion.menu.selected_index != selected_before
+
+
+class TestCommandWorker:
+    def test_command_worker_dispatches_queued_commands(self, monkeypatch):
+        ui = chatTUI(StubAgent())
+        dispatched = []
+
+        async def fake_handle_command(_ui, command):
+            dispatched.append(command)
+            ui.shutdown_event.set()
+
+        monkeypatch.setattr(app_module, "handle_command", fake_handle_command)
+        ui.on_command_submit("/status")
+        asyncio.run(ui.command_worker())
+
+        assert dispatched == ["/status"]
 
 
 class TestPendingPermissionPromptClearing:

@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Optional, Any, List
 from pico_chat.ui.tui.components.base import Component
 from pico_chat.ui.tui.buffer import Buffer, SubBuffer
-from pico_chat.ui.tui.terminal import MouseEvent
+from pico_chat.ui.tui.events import MouseEvent
 from pico_chat.ui.tui.msg_types import MsgAction
 
 from pico_chat import pico_cfg

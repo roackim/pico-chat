@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Callable
 from pico_chat.ui.tui.components.base import Component
 from pico_chat.ui.tui.buffer import Buffer
-from pico_chat.ui.tui.terminal import MouseEvent
+from pico_chat.ui.tui.events import MouseEvent
 from pico_chat.ui.tui.colors import theme, RGB
 
 
@@ -48,6 +48,14 @@ class TabBar(Component):
         self.tabs.append(Tab(id=tab_id, name=name, closeable=closeable))
         self.mark_changed()
         return tab_id
+
+    def insert_tab(self, index: int, name: str, closeable: bool = True) -> int:
+        """Insert a tab at an existing tab-strip position."""
+        index = max(0, min(index, len(self.tabs)))
+        tab_id = len(self.tabs)
+        self.tabs.insert(index, Tab(id=tab_id, name=name, closeable=closeable))
+        self.mark_changed()
+        return tab_id
     
     def remove_tab(self, index: int):
         """Remove tab at index."""
@@ -74,12 +82,16 @@ class TabBar(Component):
     
     def get_preferred_height(self, width: int) -> int:
         return 1
+
+    def set_layout(self, x: int, y: int, width: int, height: int):
+        old_layout = (self.x, self.y, self.width, self.height)
+        super().set_layout(x, y, width, height)
+        if old_layout != (x, y, width, height):
+            self._click_regions = []
+            self._new_btn_region = None
     
     def render(self, buffer: Buffer):
         """Render tab bar as a single line."""
-        if not self.tabs:
-            return
-        
         self._click_regions = []
         self._new_btn_region = None
         x = self.x
@@ -134,7 +146,8 @@ class TabBar(Component):
     
     def handle_input(self, event) -> bool:
         """Handle mouse clicks on tabs."""
-        if isinstance(event, MouseEvent) and event.pressed and event.button == 0:
+        if isinstance(event, MouseEvent) and event.pressed and event.button == 0 \
+            and self.y <= event.y < self.y + self.height:
             # Check "+" button first
             if self._new_btn_region:
                 x_start, x_end = self._new_btn_region
@@ -146,7 +159,7 @@ class TabBar(Component):
             for x_start, x_end, tab_index, is_close in self._click_regions:
                 if x_start <= event.x < x_end:
                     if is_close:
-                        if self._on_close:
+                        if self.tabs[tab_index].closeable and self._on_close:
                             self._on_close(tab_index)
                     else:
                         if self._on_select:
