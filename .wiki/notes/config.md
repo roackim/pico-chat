@@ -79,12 +79,15 @@ All other settings are read-only at runtime — no save mechanism exists for UI 
 
 **File:** `pico_chat/harness/tool_permissions.py`
 
-Permission policies (`ALLOW` / `ASK` / `DENY`) for tool operations are a separate system, not stored in the TOML file and not part of `Config`. They live in `tool_permissions.py` as a standalone `permissions` object.
+Permission policies (`ALLOW` / `ASK` / `DENY`) for tool operations are a separate system, not stored in the main TOML file and not part of `Config`. They live in `tool_permissions.py` as a standalone `permissions` object.
 
 Permission checking is handled by `PermissionGate` (`harness/permission_gate.py`), which owns the user-response queue and delegates to `ToolPermissionsProfile`.
 
 In practice this means:
-- Permission policies cannot be set via `config.toml`
+- Permission policies cannot be set via `config.toml`. They can be edited through `/permissions` and named profiles are persisted in `~/.config/pico-chat/permission-profiles.toml`.
+- The no-argument `/permissions` popup is a live editor: selecting, creating,
+  duplicating, renaming, removing, or changing a policy applies the active
+  profile immediately and persists edits through `ProfileEditorModel`.
 - For permission architecture details, see [notes/security.md](./security.md) and [notes/tools-and-permissions.md](./tools-and-permissions.md)
 
 ---
@@ -96,4 +99,4 @@ In practice this means:
 | Server definitions | `pico_cfg.Config.servers` | Yes |
 | UI settings | `pico_cfg.Config.ui_*` | Yes |
 | General settings | `pico_cfg.Config.*` | Yes |
-| Tool permissions | `tool_permissions.py` | No |
+| Tool permissions | `tool_permissions.py` / `permission-profiles.toml` | Via `/permissions`, not `config.toml` |

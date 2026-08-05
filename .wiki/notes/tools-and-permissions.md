@@ -60,6 +60,30 @@ Configuration object specifying the default policy per tool type. Policies: `ALL
 
 Predefined profiles: `strict`, `permissive` (default global singleton), `unrestricted`, `locked`, `TESTING`, `scaffolder` (used by subagents).
 
+### Interactive profile editor
+
+`ProfileEditorModel` (`pico_chat/ui/profile_editor_model.py`) is the UI-safe
+boundary for profile lifecycle changes. It keeps the selected profile name and
+an isolated draft separate from TUI focus state and exposes:
+
+- `profile_names()` — selected/active name followed by saved profile names
+- `select(name)` — load a saved or predefined profile and apply it immediately
+- `create()` — create, save, select, and apply a complete conservative default
+- `duplicate(name)` — copy a profile under a unique name, then select/apply it
+- `rename(new_name, old_name=None)` — rename saved profiles or persist an
+        initially unsaved active profile under its new name
+- `remove(name=None)` — remove the active saved profile and select a remaining
+        profile, or create a safe replacement when none remain
+- `update_permissions(profile)` — replace the selected profile draft, save it,
+        and apply it immediately
+
+The `/permissions` interactive form uses a dynamic `ProfileList` for profile
+rows and regular fields for policy values. Each policy/toggle change builds a
+complete `ToolPermissionsProfile` and calls `update_permissions()` rather
+than writing profile storage from a widget callback. The command-line
+`/permissions list|load|save|rename` operations remain separate compatibility
+commands.
+
 Dangerous pattern detection can upgrade `ALLOW` → `ASK`. It never downgrades `DENY`.
 
 See [notes/security.md](./security.md) for the security layer details.

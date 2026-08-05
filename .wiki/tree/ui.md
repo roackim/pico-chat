@@ -93,8 +93,18 @@ Slash command system with generic parameter schema.
 - `StatusCommand` renders in popup (async: shows "Checking..." placeholder, then updates with actual status)
 - `ToolsCommand` renders in popup
 - `PermissionsCommand` renders in popup
+- The interactive no-argument permissions editor composes `ProfileList`,
+  `FormSectionTitle`, horizontal policy selectors, and container toggles.
+  Changes are persisted immediately through `ProfileEditorModel`; profile
+  selection is separate from widget focus.
 - `DebugCommand` (no args) renders subcommand help in popup
 - See [notes/ui.md](../notes/ui.md) for how to add a new command.
+
+### `profile_editor_model.py`
+`ProfileEditorModel` — UI-independent state and persistence boundary for the
+interactive permissions editor. It isolates the active draft, applies profile
+selection immediately, and exposes create, rename, duplicate, remove, and
+update operations without requiring a rendered form.
 
 ### Shell Commands (`$` prefix)
 - `$ <command>` — Execute shell command directly (not visible to LLM)

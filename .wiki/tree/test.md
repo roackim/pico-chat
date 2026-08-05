@@ -21,6 +21,9 @@ All tests use pytest. See [notes/testing.md](../notes/testing.md) for run instru
 | `test_permission_chain_policy.py` | `security.py`, `tool_permissions.py` | Quote-aware chain operator detection and chain_policy |
 | `test_containerization.py` | `tools.py` | bwrap sandboxing (skipped if bubblewrap not installed) |
 | `test_buffer.py` | `ui/tui/buffer.py` | Cell operations, ANSI-aware text writing, SubBuffer |
+| `test_forms.py` | `ui/tui/components/form.py` | Form fields, dynamic profile-list composition, layout, and input routing |
+| `test_tui_form_actions.py` | `ui/tui/components/form_popup.py`, `ui/tui/components/form.py` | Shared keyboard/mouse actions, modal submit/cancel, focus, and typed events |
+| `test_profile_editor_model.py` | `ui/profile_editor_model.py` | Profile selection, immediate persistence, lifecycle operations, and isolated drafts |
 | `test_basic_inputs.py` | `ui/tui/components/input/` | Line/box editors and typed keyboard metadata |
 | `test_compaction.py` | `harness.py` | Conversation history summarization (uses FakeServer fixture) |
 | `test_context_builder.py` | `context_builder.py` | Git repo detection, file tree building guardrails |

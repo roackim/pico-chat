@@ -161,6 +161,103 @@ Vertical layout manager for a list of fields:
 - Input routes to the focused field
 - Scroll offset for forms taller than available height
 - 1-row spacing between fields
+- Recomputes field heights and offsets before rendering, so a field whose
+    child rows change size does not overwrite fields below it
+- Accepts `InputResult` focus intents from composite fields; a child handles
+    local navigation first and requests `focus="previous"` or `focus="next"`
+    only at its boundary
+- `activate_focused()` calls the field's public `activate()` method, keeping
+    Enter, Space, and mouse activation on the same action path
+
+### Building complex interactive forms
+
+Use a form as three separate layers rather than putting persistence and
+navigation into one field:
+
+1. **Model** — owns domain state, validation, and persistence. UI callbacks
+     should call public model methods and receive a safe, already-updated value.
+     For permission profiles this is `ProfileEditorModel`, which owns the active
+     profile draft and operations such as `select()`, `create()`, `rename()`,
+     `duplicate()`, `remove()`, and `update_permissions()`.
+2. **Fields/components** — own local value editing and rendering. Compose
+     `FormField` implementations for scalar values, and compose `ProfileRow`
+     and `Button` instances for repeated interactive content. Keep selection,
+     keyboard focus, and text-editing state distinct.
+3. **Container/popup** — owns sibling focus, scrolling, modal cancellation,
+     submission, and layout. It should not inspect private state or special-case
+     a particular child type.
+
+#### Recommended composition pattern
+
+```python
+model = ProfileEditorModel()
+fields = [
+        ProfileList("Profiles", options=model.profile_names(), value=0,
+                                on_select=load_profile, on_create=create_profile,
+                                on_rename=rename_profile, on_duplicate=duplicate_profile,
+                                on_remove=remove_profile),
+        FormSectionTitle("Settings:"),
+        HorizontalSelector("Read", options=["allow", "ask", "deny"],
+                                             value=0, on_change=save_draft),
+        ToggleField("Use container", value=False, on_change=save_draft),
+]
+container = FormContainer(fields)
+```
+
+The exact callbacks are application-specific, but the flow should remain:
+
+- `on_select` calls `model.select(name)` and copies the returned draft into
+    the controls with `set_value()`.
+- Scalar field `on_change` callbacks construct a complete draft from the
+    fields and call `model.update_permissions(draft)`; do not mutate the
+    profile store directly from a widget.
+- Create/duplicate/rename/remove callbacks update the model first, then
+    refresh the profile-list options and selected index. Rebuild the list's
+    rows after changing its options.
+- A dynamic list must report its full preferred height. `FormContainer`
+    recalculates offsets during render, which keeps the controls below the list
+    aligned after rows are added or removed.
+
+#### Input routing contract
+
+New composite fields should override `handle_input_result()` and return an
+`InputResult`:
+
+- `handled=True` stops propagation.
+- `redraw=True` asks the owning container to repaint.
+- `focus="next"` or `focus="previous"` bubbles a sibling-navigation request
+    to `FormContainer`; the child must not choose a sibling itself.
+- At an internal edge, consume the arrow key and move the local cursor. At a
+    boundary, return the focus intent instead.
+
+Leaves should expose `activate()`. `Button` uses it for Enter, Space, and
+left-click, while `ProfileRow` delegates to its focused button. This makes
+keyboard and mouse behavior identical and avoids parent code branching on
+concrete child types. Existing boolean `handle_input()` fields remain
+compatible through `InputResult.from_legacy()`.
+
+#### Inline editing and repeated rows
+
+For rename-like interactions, keep an explicit editing index and draft text
+on the composite control. While editing, printable characters and deletion
+are handled locally; Enter commits through the model callback and Escape
+cancels without changing the model. A row should contain a selection control
+plus independent action buttons for rename, duplicate, and remove. Activating
+the row selects it; moving focus among its action buttons must not change the
+selected profile.
+
+#### Testing checklist
+
+Test the model without rendering, then test the component and popup paths:
+
+- selection is independent from focus and loads/applies the complete draft;
+- Enter, Space, and click invoke the same action;
+- local arrow movement bubbles only at first/last boundaries;
+- Tab and Shift+Tab move between top-level fields;
+- rename supports typing, deletion, commit, and Escape cancellation;
+- create, duplicate, and remove update list rows and following-field layout;
+- persistence and invalid-name errors leave the model unchanged on failure;
+- Escape dismisses only the active modal and does not leak to the app.
 
 ### FormPopup (`form_popup.py`)
 

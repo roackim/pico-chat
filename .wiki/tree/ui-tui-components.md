@@ -101,13 +101,37 @@ compatibility.
 ### `form.py`
 Form field components and layout container.
 - `FormField` — ABC for all fields: `get_value()`, `set_value()`, `render()`, `handle_input()`
+- `InputResult` — explicit routing result with `handled`, optional sibling
+	`focus` intent, and `redraw`; legacy boolean handlers are adapted with
+	`from_legacy()`
 - Fields can bind to a standalone `FieldModel` for value, dirty, reset, and synchronous validation state.
 - `ToggleField` — `[x]`/`[ ]` boolean toggle
 - `TextField` — single-line text input with cursor
 - `TextAreaField` — multiline text input with cursor navigation
 - `CheckboxListField` — multi-select `[ ]`/`[x]` list
 - `RadioListField` — single-select `()`/`(x)` list
-- `FormContainer` — vertical layout manager with Tab/Shift+Tab focus navigation, scroll offset, field spacing
+- `InlineChoiceField` / `HorizontalSelector` — compact horizontal selector
+- `FormActionField` / `ButtonField` — clickable and keyboard-activatable form action
+- `ProfileListField` — legacy profile list retained for compatibility
+- `ProfileList` — composable dynamic list of `ProfileRow` controls plus a
+	real create button; selection and action focus are separate
+- `ProfileRow` — profile selection control composed with rename, duplicate, and
+	remove `Button` leaves
+- `FormContainer` — vertical layout manager with Tab/Shift+Tab focus
+	navigation, scroll offset, dynamic height recomputation, and `InputResult`
+	focus-intent routing
+
+`button.py` provides the reusable `Button` component. Use `activate()` as the
+single semantic action path for Enter, Space, and left mouse click.
+
+`input_result.py` defines `InputResult` and `FocusIntent` for composable
+controls. A leaf returns a focus intent only when it reaches a local edge;
+the nearest `FormContainer` performs the sibling move.
+
+`profile_editor_model.py` provides `ProfileEditorModel`, the persistence and
+selection boundary used by the permissions editor. It isolates drafts,
+immediately applies and saves edits, and exposes profile lifecycle operations
+without requiring a TUI or widget.
 
 ### `field_models.py`
 Standalone form value models independent of rendering and layout.
