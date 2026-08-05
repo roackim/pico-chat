@@ -1,0 +1,38 @@
+I have several features i would like but i need to flesh out a bit
+
+[ ] Permissions
+	[x] make /permissions a form to change settings
+	[x] add a profile saving/loading feature
+
+[ ] Add Ollama servers possible
+[ ] Move to REAL tokens counts returned by server
+  	[ ] llamacpp / ollama / openrouter
+  	
+[ ] not a fan of hardcoded models / servers
+	[ ] what about servers that serves many models ? changing ? (updated for example)
+
+[ ] What do you think about adding a status bar vim like ?
+	[ ] display window context and other infos like openrouter balance, current model etc
+        [ ] customizable ? 
+	[ ] Should we move the commands to the status bar, instead of message input, like vim ?
+
+[ ] Add a /subagents commands
+	[ ] creates a tab (like /debug panel)
+	[ ] lists all subagents calls (finished / active)
+		[ ] open the convo
+		[ ] close / shutdown the subagent
+        
+[ ] we need better ui for when the model is doing something, sometimes it looks like it is frozen or finished but it is still working
+[x] improve read tool api to be more llm-friendly
+
+[ ] when a tool call require user permission (ask) the message should alwayys be BOXED, in purple not single line, to be really visible
+    [ ] should always show the full command while asking for permission so user can read all
+                
+BUGFIXES
+
+
+[ ] focused single line message are invisible
+[ ] when pasting multilines in inputfield the empty lines/space are not cleared
+[ ] move openrouter balance to a modal
+
+

@@ -25,6 +25,7 @@ All tests use pytest. See [notes/testing.md](../notes/testing.md) for run instru
 | `test_tui_form_actions.py` | `ui/tui/components/form_popup.py`, `ui/tui/components/form.py` | Shared keyboard/mouse actions, modal submit/cancel, focus, and typed events |
 | `test_profile_editor_model.py` | `ui/profile_editor_model.py` | Profile selection, immediate persistence, lifecycle operations, and isolated drafts |
 | `test_basic_inputs.py` | `ui/tui/components/input/` | Line/box editors and typed keyboard metadata |
+| `test_chat_message.py` | `ui/chat_message.py` | Focused compact-message layout invalidation |
 | `test_compaction.py` | `harness.py` | Conversation history summarization (uses FakeServer fixture) |
 | `test_context_builder.py` | `context_builder.py` | Git repo detection, file tree building guardrails |
 | `test_patch_parser.py` | `patch_parser.py` | `parse_patch` format validation, `apply_patch` 3-mode cascade |

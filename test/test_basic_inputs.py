@@ -49,6 +49,19 @@ def test_box_input_supports_home_end_and_delete():
     assert field.get_value() == "bcdef"
 
 
+def test_box_input_clears_cells_after_multiline_content_shrinks():
+    field = BoxInput("long line\nold second line")
+    field.set_layout(0, 0, 20, 2)
+    buffer = Buffer(20, 2)
+    field.render(buffer)
+
+    field.set_value("new\n")
+    field.render(buffer)
+
+    assert "".join(cell.char for cell in buffer.cells[0]) == "new" + " " * 17
+    assert "".join(cell.char for cell in buffer.cells[1]) == " " * 20
+
+
 def test_line_input_supports_word_editing_and_paste():
     field = LineInput("hello brave world")
     field.cursor_pos = len(field.value)

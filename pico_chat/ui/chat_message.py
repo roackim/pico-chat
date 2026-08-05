@@ -175,6 +175,12 @@ class Message:
     
     def set_focused(self, focused: bool):
         """Set the focused state of this message."""
+        # Focus can change the preferred height of compact messages (for
+        # example tool/permission messages expand from one line to a box with
+        # borders).  Make the history panel discard its height-cache entry so
+        # the newly focused single-line message receives a real layout.
+        if self.box.focused != focused:
+            self.layout_revision += 1
         self.box.set_focused(focused)
     
     def _format_line_wrap(self) -> str:

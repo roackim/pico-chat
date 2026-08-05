@@ -1103,44 +1103,31 @@ class OpenRouterBalanceCommand(Command):
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         from pico_chat.harness.server_service import ServerService
 
-        placeholder = ui.chat_history_panel.add_message(
-            "Fetching OpenRouter balance...",
-            msg_type=SysMsg(),
-            title="openrouter",
-        )
+        # Balance is transient account information, so keep it in a modal
+        # rather than adding a permanent chat-history message.
+        ui.show_popup("OpenRouter balance", "Fetching balance...")
 
         svc = ServerService()
         ok, message, balance = await svc.get_openrouter_balance()
 
         if not ok:
-            error_msg = ui.chat_history_panel.new_message(
-                message,
-                msg_type=SysMsgError(),
-                title="openrouter",
-            )
-            ui.chat_history_panel.replace_message(placeholder, error_msg)
+            ui.show_popup("OpenRouter balance", message)
             return
 
-        color = str(theme.WARNING)
-        reset = theme.reset()
-
         if balance.remaining > 5:
-            balance_color = theme.SUCCESS
+            status = "healthy"
         elif balance.remaining > 1:
-            balance_color = theme.WARNING
+            status = "low"
         else:
-            balance_color = theme.ERROR
+            status = "critical"
 
-        msg  = color + f"Remaining        : {reset}{balance_color}${balance.remaining:.4f}{reset}\n"
-        msg += color + f"Total Credits    : {reset}${balance.total_credits:.4f}\n"
-        msg += color + f"Total Usage      : {reset}${balance.total_usage:.4f}\n"
-
-        result_msg = ui.chat_history_panel.new_message(
-            msg.rstrip(),
-            msg_type=SysMsg(),
-            title="openrouter",
+        content = (
+            f"Status           : {status}\n"
+            f"Remaining        : ${balance.remaining:.4f}\n"
+            f"Total credits    : ${balance.total_credits:.4f}\n"
+            f"Total usage      : ${balance.total_usage:.4f}"
         )
-        ui.chat_history_panel.replace_message(placeholder, result_msg)
+        ui.show_popup("OpenRouter balance", content)
 
 
 class OpenRouterCommand(Command):

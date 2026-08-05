@@ -59,6 +59,10 @@ class LineInput(Component):
         self.mark_changed()
 
     def render(self, buffer: Buffer):
+        # Clear the allocated row first.  Pasting newlines can make the value
+        # shorter on a subsequent edit; without clearing, old spaces/chars
+        # remain visible beyond the new value.
+        buffer.fill(self.x, self.y, self.width, self.height, " ", bg=theme.get_bg())
         text = self.value if self.value else self.placeholder
         fg = theme.DEFAULT if self.value else theme.MUTED
         buffer.write_str(self.x, self.y, text, fg=fg, max_width=self.width)
@@ -188,6 +192,10 @@ class BoxInput(Component):
         self.cursor_col = len(lines[-1])
 
     def render(self, buffer: Buffer):
+        # Clear all allocated rows before drawing.  This is important when a
+        # multiline paste leaves empty lines or removes content: rendering
+        # only the new lines cannot erase cells from the previous frame.
+        buffer.fill(self.x, self.y, self.width, self.height, " ", bg=theme.get_bg())
         lines = self._lines()
         for row, line in enumerate(lines):
             if row >= self.height:
