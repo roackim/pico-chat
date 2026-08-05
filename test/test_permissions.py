@@ -17,7 +17,32 @@ from pico_chat.harness.tool_permissions import (
     FilePermissions,
     RunPermissions,
 )
+from pico_chat.harness.permission_gate import PermissionGate
 import pico_chat.harness.tool_permissions as tool_permissions_module
+
+
+def test_run_permission_prompt_preserves_full_command():
+    command = "printf " + "x" * 120
+
+    prompt = PermissionGate.build_prompt("run", {"command": command})
+
+    assert command in prompt
+
+
+def test_delegation_tools_require_approval():
+    profile = ToolPermissionsProfile(
+        name="ask-all",
+        read=FilePermissions("ask", "ask"),
+        write=FilePermissions("ask", "ask"),
+        patch=FilePermissions("ask", "ask"),
+        run=RunPermissions(allow=set(), ask=set(), deny=set(), others="ask"),
+        search="ask",
+    )
+    gate = PermissionGate(".", permissions=profile)
+
+    assert gate.check("subagent", {}) == "ask"
+    assert gate.check("wait_for_subagents", {}) == "ask"
+
 
 # Shared test helpers (from conftest)
 from conftest import NoopDebugStream, StubReadTool, run_harness_tool_call

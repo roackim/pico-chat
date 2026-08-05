@@ -107,7 +107,7 @@ class Message:
         self.box = Box(
             self.component,
             parent_msg=self,
-            compact_when_unfocused=(isinstance(msg_type, (msg_types.ToolCallMsg, msg_types.AskPermissionMsg)))  # Tool calls and permission requests use compact mode
+            compact_when_unfocused=isinstance(msg_type, msg_types.ToolCallMsg)
         )
     
     def finalize(self):

@@ -45,6 +45,10 @@ class ProfileEditorModel:
             profile = self._permissions.load_profile(name)
         else:
             profile = self._builtin(name)
+        if profile.run.others == "ask" and profile.run.allow:
+            profile.run.allow.clear()
+            if name in self._permissions.list_profiles():
+                self._permissions.save_profile(name, profile)
         self._selected_name = name
         self._draft = deepcopy(profile)
         self._permissions.apply_profile(profile)

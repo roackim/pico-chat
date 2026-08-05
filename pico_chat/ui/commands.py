@@ -949,6 +949,8 @@ class PermissionsCommand(Command):
             name = fields[0].get_value()
             if not name:
                 return
+            draft = editor.draft
+            unknown_commands = policy("Unknown commands")
             updated = tool_permissions.ToolPermissionsProfile(
                 name=name,
                 read=tool_permissions.FilePermissions(policy("Read inside repo"), policy("Read outside repo")),
@@ -956,8 +958,9 @@ class PermissionsCommand(Command):
                 patch=tool_permissions.FilePermissions(policy("Patch inside repo"), policy("Patch outside repo")),
                 search=policy("Search"),
                 run=tool_permissions.RunPermissions(
-                    allow=set(perm.run.allow), ask=set(perm.run.ask), deny=set(perm.run.deny),
-                    others=policy("Unknown commands"),
+                    allow=set() if unknown_commands == "ask" else set(draft.run.allow),
+                    ask=set(draft.run.ask), deny=set(draft.run.deny),
+                    others=unknown_commands,
                     chain_policy=policy("Command chains"),
                     use_container=policy("Use container"),
                     container_network=policy("Container network"),

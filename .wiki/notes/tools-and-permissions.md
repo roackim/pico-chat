@@ -98,6 +98,8 @@ See [notes/security.md](./security.md) for the security layer details.
 `WaitForSubagentsTool` collects results from all queued background subagents.
 
 Subagents always run under the **`scaffolder`** profile: read-only inside the repo, deny everything else. The main agent's permission profile is not inherited.
+Starting delegation and waiting for delegated work still pass through the main
+agent's permission gate, so an ask-all profile prompts before either operation.
 
 See [notes/subagents.md](./subagents.md) for the full lifecycle, depth limit, timeout, and config reference.
 

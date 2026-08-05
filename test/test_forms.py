@@ -403,6 +403,32 @@ class TestFormContainer:
         assert container.handle_input("\x1b[B") is True
         assert following.focused is True
 
+    def test_composable_profile_list_wraps_at_vertical_edges(self):
+        profiles = ProfileList("Profiles", options=["default", "second"])
+        following = TextField("Following")
+        container = FormContainer([profiles, following])
+
+        profiles._cursor = 0
+        assert container.handle_input("\x1b[A") is True
+        assert following.focused is True
+
+        assert container.handle_input("\x1b[B") is True
+        assert profiles.focused is True
+
+    def test_composable_profile_list_rename_uses_block_cursor(self):
+        profiles = ProfileList("Profiles", options=["default"])
+        profiles.focused = True
+        profiles._rename_profile("default")
+        profiles.x, profiles.y = 0, 0
+        profiles.width = 60
+        profiles.height = profiles.get_preferred_height(60)
+        buffer = Buffer(60, profiles.height)
+
+        profiles.render(buffer, profiles.x, profiles.y, profiles.width, profiles.height)
+
+        cursor_x = len("(x) ") + len("default") + 2
+        assert buffer.cells[1][cursor_x].reverse is True
+
     def test_composable_profile_list_renames_inline(self):
         renamed = []
         profiles = ProfileList(
@@ -560,20 +586,64 @@ class TestFormPopup:
         assert fp.is_visible is False
         assert fp._form_container is None
 
-    def test_enter_on_textfield_moves_to_next(self):
+    def test_enter_on_textfield_does_not_advance(self):
         fp = FormPopup()
         f1 = TextField("A")
         f2 = TextField("B")
         fp.show("Test", [f1, f2], lambda v: None)
         assert f1.focused is True
-        fp.handle_input("\r")  # Enter on TextField should move to next
-        assert f2.focused is True
-        assert f1.get_value() == ""  # not submitted
+        assert fp.handle_input("\r") is True
+        assert f1.focused is True
+        assert f2.focused is False
 
-    def test_enter_on_non_textfield_submits(self):
+    def test_enter_on_toggle_acts_like_space_without_submitting(self):
         fp = FormPopup()
         results = []
         f1 = ToggleField("A")
         fp.show("Test", [f1], lambda v: results.append(v))
-        fp.handle_input("\r")  # Enter on ToggleField should submit
-        assert len(results) == 1
+        fp.handle_input("\r")
+        assert f1.get_value() is True
+        assert results == []
+
+    def test_validate_action_submits(self):
+        fp = FormPopup()
+        results = []
+        fp.show("Test", [TextField("Name", value="ok")], results.append)
+        assert any(action.key == "Enter" and action.label == "validate"
+               for action in fp._box.actions)
+        assert fp._try_submit()
+        assert results == [{"Name": "ok"}]
+
+    def test_down_focuses_validate_and_enter_submits(self):
+        fp = FormPopup()
+        results = []
+        fp.show("Test", [ToggleField("Enabled")], results.append)
+
+        assert fp.handle_input("\x1b[B") is True
+        assert fp._action_focus_index == 0
+        assert fp._box.focused_action_key == "Enter"
+        assert fp.handle_input("\r") is True
+        assert results == [{"Enabled": False}]
+
+    def test_up_from_action_returns_to_last_field(self):
+        fp = FormPopup()
+        field = ToggleField("Enabled")
+        fp.show("Test", [field], lambda values: None)
+
+        fp.handle_input("\x1b[B")
+        fp.handle_input("\x1b[A")
+
+        assert fp._action_focus_index is None
+        assert field.focused is True
+
+    def test_clicking_field_leaves_action_focus(self):
+        fp = FormPopup()
+        field = TextField("Name")
+        fp.show("Test", [field], lambda values: None)
+        fp.handle_input("\x1b[B")
+        fp.render(Buffer(80, 24))
+        fp._form_container._compute_layout()
+
+        fp.handle_input(MouseEvent(fp._box.x + 3, fp._box.y + 1, 0, True))
+
+        assert fp._action_focus_index is None

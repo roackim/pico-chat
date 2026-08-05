@@ -34,6 +34,7 @@ is opt-in through `padding`, as used by form popups for their focus gutter.
 `_render_compact_to_subbuffer()` — compact borderless render path.
 `_action_hit_regions` — tracks screen positions of action buttons during render for click detection.
 Supports **action flash feedback**: when `parent_msg._flash_action_key` is set, the matching action button renders with `reverse=True` for brief visual feedback.
+`AskPermissionMsg` uses the non-compact Box path so pending tool requests stay visibly framed.
 
 ### `button.py`
 `Button` — focusable control activated by Enter, Space, or a left mouse click;
@@ -122,6 +123,7 @@ Form field components and layout container.
 - `ProfileRow` — profile selection control composed with rename, duplicate, and
 	remove `Button` leaves
 - `FormContainer` — vertical layout manager with Tab/Shift+Tab focus
+- `FormPopup` — modal form with explicit Validate/Cancel actions; Enter remains field-local and vertical navigation wraps
 	navigation, scroll offset, dynamic height recomputation, and `InputResult`
 	focus-intent routing
 
@@ -152,7 +154,7 @@ Declarative construction helpers for regular form fields.
 `FormPopup` — modal overlay wrapping a `FormContainer` inside a `Box`.
 - `FormPopupScreen` — `Screen` adapter for `ModalHost` lifecycle ownership; compositor-only usage remains supported.
 - `show(title, fields, on_submit, on_cancel)` — displays form, registers with compositor
-- Action bar: `[Enter] ok` / `[Esc] cancel`
+- Action bar: `[Enter] validate` / `[Esc] cancel`; Down from the final field focuses the primary action
 - Required and model validation with error message overlay
 - `dirty` / `reset()` expose and restore form state; cancel resets before dismissal
 - Enter on TextField moves to next field; Enter on other fields submits

@@ -264,10 +264,14 @@ Test the model without rendering, then test the component and popup paths:
 Modal overlay wrapping a `FormContainer` inside a `Box`:
 - `show(title, fields, on_submit, on_cancel)` — displays form, registers with compositor
 - `hide()` — dismisses, unregisters from compositor
-- **Action bar**: `[Enter] ok` / `[Esc] cancel` in bottom border
+- **Action bar**: `[Enter] validate` / `[Esc] cancel` in bottom border; Down from the final field focuses the primary action
 - **Validation**: required and custom model validation block submit with an error message
 - **Lifecycle**: `dirty` reports changed model values; `reset()` restores initial values, and cancel resets before dismissing
-- **Enter behavior**: on `TextField` moves to next field; on other fields submits
+- **Enter behavior**: routed to the focused field like Space; it never performs a generic submit or focus advance
+- **Focused actions**: Enter/Space activates the focused bottom action; Up returns to the final field and Left/Right moves between actions
+- **Navigation**: vertical arrows cycle through fields at the form boundaries
+- **Profile selection**: selecting a profile applies its complete draft immediately; validation saves edits to that selected profile
+- **Profile rename**: the inline name editor uses a reverse-video block cursor
 - **Mouse**: clickable OK/Cancel buttons, click-to-focus fields
 - Callback receives `Dict[str, Any]` mapping field labels to values
 

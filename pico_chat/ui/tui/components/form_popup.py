@@ -46,7 +46,7 @@ class _FormAction:
         return f"[{self.key}] {self.label}"
 
 
-_OK_ACTION = _FormAction("Enter", "ok")
+_VALIDATE_ACTION = _FormAction("Enter", "ok")
 _CANCEL_ACTION = _FormAction("Esc", "cancel")
 _NEW_PROFILE_ACTION = _FormAction("New", "new profile")
 
@@ -83,6 +83,7 @@ class FormPopup(Component):
         self._on_action: Optional[Callable[[Action], None]] = None
         self._on_new_profile: Optional[Callable[[], None]] = None
         self._error_msg: Optional[str] = None
+        self._action_focus_index: Optional[int] = None
         self._background_focus_scope = None
         self._background_focus_index = None
 
@@ -156,6 +157,8 @@ class FormPopup(Component):
         self._on_action = on_action
         self._on_new_profile = on_new_profile
         self._error_msg = None
+        self._action_focus_index = None
+        self._set_action_focus(None)
         self._suspend_background_focus()
 
         self._form_container = FormContainer(fields, field_spacing=field_spacing)
@@ -164,8 +167,8 @@ class FormPopup(Component):
             title=title,
             fg=theme.PERMISSION,
             focused=True,
-            actions=([_NEW_PROFILE_ACTION, _OK_ACTION, _CANCEL_ACTION]
-                     if on_new_profile else [_OK_ACTION, _CANCEL_ACTION]),
+            actions=([_NEW_PROFILE_ACTION, _VALIDATE_ACTION, _CANCEL_ACTION]
+                     if on_new_profile else [_VALIDATE_ACTION, _CANCEL_ACTION]),
             padding=1,
             focus_in_padding=True,
         )
@@ -299,6 +302,41 @@ class FormPopup(Component):
         self.mark_changed()
         return True
 
+    def _form_actions(self) -> list[_FormAction]:
+        return ([_NEW_PROFILE_ACTION, _VALIDATE_ACTION, _CANCEL_ACTION]
+                if self._on_new_profile else [_VALIDATE_ACTION, _CANCEL_ACTION])
+
+    def _set_action_focus(self, index: Optional[int]) -> None:
+        self._action_focus_index = index
+        if self._box is not None:
+            actions = self._form_actions()
+            self._box.focused_action_key = (
+                actions[index].key if index is not None and 0 <= index < len(actions)
+                else None
+            )
+            self._box.mark_changed()
+
+    def _focus_primary_action(self) -> bool:
+        actions = self._form_actions()
+        for index, action in enumerate(actions):
+            if action.key == _VALIDATE_ACTION.key:
+                self._set_action_focus(index)
+                return True
+        return False
+
+    def _activate_action(self) -> bool:
+        if self._action_focus_index is None:
+            return False
+        action = self._form_actions()[self._action_focus_index]
+        if action.key == _VALIDATE_ACTION.key:
+            return self._try_submit()
+        if action.key == "Esc":
+            self._do_cancel()
+            return True
+        if action.key == "New":
+            return self._new_profile()
+        return False
+
     # ── input ──────────────────────────────────────────────────
 
     def handle_input(self, event: Any) -> bool:
@@ -329,22 +367,30 @@ class FormPopup(Component):
             if key == "\x1b":  # Escape
                 self._do_cancel()
                 return True
-            if key == "\r" or key == "\n":  # Enter
-                fc = self._form_container.get_focused_field() if self._form_container else None
-                if fc and isinstance(fc, TextAreaField):
-                    # Multiline fields insert a newline on Enter.
-                    return self._form_container.handle_input(event)
-                if self._form_container and self._form_container.activate_focused():
+            if self._action_focus_index is not None:
+                actions = self._form_actions()
+                if key in ("\r", "\n", " "):
+                    return self._activate_action()
+                if key == "\x1b[A":
+                    self._set_action_focus(None)
+                    if self._form_container:
+                        self._form_container._set_focus(len(self._form_container.fields) - 1)
                     return True
-                if fc is not None and not self._is_last_field(fc):
-                    # Enter advances to the next field; on the last field it submits.
-                    # This gives predictable validation: fill fields, then Enter on
-                    # the final field (or click [Enter] ok) to validate.
-                    if self._on_action:
-                        self._on_action(Action(Actions.NEXT))
-                    self._form_container.focus_next()
+                if key in ("\x1b[D", "h"):
+                    self._set_action_focus((self._action_focus_index - 1) % len(actions))
                     return True
-                return self._try_submit()
+                if key in ("\x1b[C", "l"):
+                    self._set_action_focus((self._action_focus_index + 1) % len(actions))
+                    return True
+                return True
+            if key == "\x1b[B" and self._form_container:
+                focused = self._form_container.get_focused_field()
+                if focused is self._form_container.fields[-1]:
+                    return self._focus_primary_action()
+            if key in ("\r", "\n"):
+                if self._form_container:
+                    self._form_container.handle_input(event)
+                return True
             if key == "\x1b[Z":  # Shift+Tab — let FormContainer handle
                 if self._form_container:
                     return self._form_container.handle_input(event)
@@ -392,6 +438,7 @@ class FormPopup(Component):
 
                 # Click on a field to focus it
                 if self._form_container:
+                    self._set_action_focus(None)
                     self._handle_field_click(event)
 
         # Consume all input when visible

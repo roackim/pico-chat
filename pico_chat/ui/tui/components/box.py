@@ -19,6 +19,7 @@ class Box(Component):
         self.fg = fg
         self.focused = focused
         self.actions = actions or []
+        self.focused_action_key = None
         self.compact_when_unfocused = compact_when_unfocused  # If True, render without borders when unfocused
         # Horizontal content padding is the default. Vertical padding is
         # opt-in; otherwise every compact form row would gain blank lines.
@@ -292,8 +293,10 @@ class Box(Component):
                     actions_start_in_str = 0
                     if len(bottom_content_parts) == 2:
                         actions_start_in_str = len(bottom_content_parts[0]) + len("│")
-                    # Each action occupies "[key] label " (with trailing space)
-                    x_offset = left_border_width + 1 + actions_start_in_str
+                    # Each action occupies "[key] label " (with trailing space).
+                    # The action block has one separator space before its first
+                    # label; regions begin on the visible action text.
+                    x_offset = left_border_width + 1 + actions_start_in_str + 1
                     flash_key = getattr(self.parent_msg, '_flash_action_key', None)
                     for action in actions:
                         formatted = action.format()
@@ -301,7 +304,8 @@ class Box(Component):
                         region_end = x_offset + len(formatted)
                         self._action_hit_regions.append((region_start, region_end, action))
                         # Flash feedback: overwrite this action's cells with reverse
-                        if flash_key and action.key == flash_key:
+                        if ((flash_key and action.key == flash_key)
+                            or action.key == self.focused_action_key):
                             for fx in range(region_start, region_end):
                                 self.subbuffer.set(fx, self.height - 1,
                                                    self.subbuffer.cells[self.height - 1][fx].char,

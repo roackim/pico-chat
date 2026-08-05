@@ -82,7 +82,9 @@ class PermissionGate:
             return perms.get_search_permission()
 
         elif tool_name in ("subagent", "wait_for_subagents"):
-            return "allow"
+            # Delegation can execute tools in a child harness, so it must not
+            # bypass the active profile's approval policy.
+            return "ask"
 
         return "ask"  # Default to asking
 
@@ -97,8 +99,6 @@ class PermissionGate:
             return f"Allow patching file: {args.get('path', 'unknown')}?"
         elif tool_name == "run":
             command = args.get("command", "unknown")
-            if len(command) > 100:
-                command = command[:97] + "..."
             return f"Allow running command: {command}?"
         return f"Allow {tool_name}?"
 

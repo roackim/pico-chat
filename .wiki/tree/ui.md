@@ -23,6 +23,7 @@ See [notes/ui.md](../notes/ui.md) for the full architecture overview.
 - Application startup also launches one app-level command worker; slash commands
 	are consumed independently of per-conversation generation workers
 - Popup and form input are routed by registered EventRouter overlays rather than duplicated in `handle_global_input`
+- Permission-request messages remain boxed and purple even when they are not focused; long run commands are preserved for wrapping in the message box
 - History/input mouse focus is selected through the reusable `FocusScope.focus_at()` API
 - Application focus adapters delegate layout geometry to their wrapped components for mouse hit testing
 - Completion-menu input is dispatched directly to the input component; no root-handler compatibility fallback remains

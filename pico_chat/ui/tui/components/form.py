@@ -8,7 +8,7 @@ that can be composed into a FormPopup modal dialog.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 from pico_chat.ui.tui.components.base import Component
 from pico_chat.ui.tui.buffer import Buffer
@@ -747,7 +747,7 @@ class ProfileList(FormField):
 
     def render(self, buffer: Buffer, x: int, y: int, width: int, height: int):
         self._write(buffer, x, y, f"{self.focus_marker()}{self.label}:",
-                    fg=_label_color() if self.focused else theme.DEFAULT,
+                    fg=_label_color(),
                     max_width=width)
         for index, row in enumerate(self._rows):
             row_y = y + index + 1
@@ -756,13 +756,19 @@ class ProfileList(FormField):
             row.selected = index == self._selected
             row.external_focus_marker = self.suppress_focus_marker
             if self._renaming_index == index:
-                row.name = f"{self._rename_text}▏"
+                row.name = self._rename_text
             for button in row.buttons:
                 button.focused = self.focused and index == self._cursor and button is row.buttons[self._action_cursor]
             # Keep the radio controls visually nested under the profile
             # heading while leaving the action row aligned with the form.
             row.set_layout(x + 2, row_y, max(1, width - 2), 1)
             row.render(buffer)
+            if self._renaming_index == index:
+                row_prefix = ("▸ " if row.buttons[0].focused and not row.external_focus_marker else "")
+                row_prefix += "(x) " if row.selected else "( ) "
+                cursor_x = row.x + len(row_prefix) + len(self._rename_text)
+                if cursor_x < row.x + row.width:
+                    buffer.set(cursor_x, row.y, " ", fg=theme.DEFAULT, reverse=True)
         create_y = y + len(self._rows) + 1
         if create_y < y + height:
             self._create.focused = self.focused and self._cursor == len(self._rows)

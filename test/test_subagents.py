@@ -361,15 +361,15 @@ class TestHarnessSubagentIntegration:
         h.abort_subagents()
         assert h._abort_subagents_event.is_set()
 
-    def test_subagent_tools_always_approved(self, tmp_path):
-        """_check_tool_permission must return 'allow' for subagent/wait_for_subagents."""
+    def test_subagent_tools_require_approval(self, tmp_path):
+        """Delegation must honor the main harness permission gate."""
         from pico_chat.harness.harness import Harness
 
         with patch("pico_chat.harness.harness.create_server"):
             h = Harness(workspace_path=str(tmp_path), depth=0)
 
-        assert h._check_tool_permission("subagent", {}) == "allow"
-        assert h._check_tool_permission("wait_for_subagents", {}) == "allow"
+        assert h._check_tool_permission("subagent", {}) == "ask"
+        assert h._check_tool_permission("wait_for_subagents", {}) == "ask"
 
     def test_subagent_write_denied_by_scaffolder(self, tmp_path):
         """A depth>0 Harness should deny write requests via the scaffolder profile."""

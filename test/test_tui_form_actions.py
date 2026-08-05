@@ -19,7 +19,7 @@ def test_form_popup_emits_cancel_and_preserves_callback():
     assert callbacks == ["cancel"]
 
 
-def test_form_popup_emits_submit_and_preserves_callback():
+def test_form_popup_enter_activates_toggle_without_submitting():
     actions = []
     callbacks = []
     popup = FormPopup()
@@ -27,8 +27,8 @@ def test_form_popup_emits_submit_and_preserves_callback():
                on_action=actions.append)
 
     assert popup.handle_input("\r")
-    assert actions == [Action(Actions.SUBMIT, {"Enabled": True})]
-    assert callbacks == [{"Enabled": True}]
+    assert actions == []
+    assert callbacks == []
 
 
 def test_invalid_form_does_not_emit_submit():
@@ -43,15 +43,15 @@ def test_invalid_form_does_not_emit_submit():
     assert callbacks == []
 
 
-def test_text_field_enter_emits_next_action_without_submit():
+def test_text_field_enter_does_not_advance_or_submit():
     actions = []
     callbacks = []
     popup = FormPopup()
     popup.show("Form", [TextField("Name"), ToggleField("Enabled")], callbacks.append,
                on_action=actions.append)
 
-    assert popup.handle_input("\r")
-    assert actions == [Action(Actions.NEXT)]
+    assert popup.handle_input("\r") is True
+    assert actions == []
     assert callbacks == []
 
 

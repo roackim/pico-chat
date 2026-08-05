@@ -39,6 +39,21 @@ def test_select_loads_and_applies_saved_profile(profile_store):
     assert tool_permissions.permissions.read.inside_repo == "allow"
 
 
+def test_selecting_ask_profile_clears_inherited_command_allows(profile_store):
+    model = ProfileEditorModel()
+    profile = model.create()
+    profile.run.allow = {"ls", "echo"}
+    profile.run.others = "ask"
+    model.update_permissions(profile)
+    model.rename("hesitant")
+
+    selected = model.select("hesitant")
+
+    assert selected.run.allow == set()
+    assert tool_permissions.permissions.run.allow == set()
+    assert tool_permissions.load_profile("hesitant").run.allow == set()
+
+
 def test_builtin_permissive_can_be_reselected_after_switching_profiles(profile_store):
     model = ProfileEditorModel()
     model.create()

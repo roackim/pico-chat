@@ -76,6 +76,7 @@ Main agent: 3 results/search, unlimited searches. Subagents: 10 results/search, 
 Subagent wrappers:
 - `SubagentTool` — spawns a read-only child `Harness`; foreground or background mode; enforces depth limit, timeout, and context cap
 - `WaitForSubagentsTool` — `asyncio.gather` over all pending background tasks; clears the list on completion
+The main permission gate prompts before starting or waiting for delegated work when the active profile requires approval.
 
 ### `tool_permissions.py`
 `ToolPermissionsProfile` — per-tool policy configuration (`ALLOW` / `ASK` / `DENY`).
