@@ -41,7 +41,7 @@ class ChatUIProtocol(Protocol):
     input_panel: Any
     compositor: Any
     
-    def show_popup(self, title: str, content: str) -> None: ...
+    def show_popup(self, title: str, content: str, content_padding: int = 1) -> None: ...
     def hide_popup(self) -> None: ...
     def show_form_popup(self, title: str, fields: list, on_submit, on_cancel=None, on_new_profile=None, field_spacing=1) -> None: ...
 
@@ -882,7 +882,8 @@ class PermissionsCommand(Command):
             action = args[0].lower()
             if action == "list":
                 names = tool_permissions.list_profiles()
-                ui.show_popup("permission profiles", "\n".join(names) if names else "No saved profiles.")
+                ui.show_popup("permission profiles", "\n".join(names) if names else "No saved profiles.",
+                              content_padding=0)
                 return
             if action == "rename":
                 if len(args) != 3:

@@ -4,6 +4,8 @@ from pico_chat.ui.tui.components.popup import Popup, PopupScreen
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.terminal import MouseEvent
 from pico_chat.ui.tui.navigation import ModalHost
+from pico_chat.ui.tui.focus import FocusScope
+from pico_chat.ui.tui.components.form import TextField
 
 
 class FakeCompositor:
@@ -22,6 +24,12 @@ class FakeCompositor:
 
     def request_render(self):
         self._render_requested = True
+
+
+class FocusCompositor(FakeCompositor):
+    def __init__(self, focus_scope):
+        super().__init__()
+        self.event_router = type("Router", (), {"focus_scope": focus_scope})()
 
 
 class TestPopup:
@@ -60,6 +68,32 @@ class TestPopup:
         popup.hide()
         assert not popup.is_visible
         assert popup not in comp.overlays
+
+    def test_popup_screen_forwards_content_padding(self):
+        comp = FakeCompositor()
+        popup = Popup(compositor=comp)
+        screen = PopupScreen(popup, "test", "content", content_padding=1)
+
+        screen.on_enter()
+
+        assert popup._content_pad == 1
+        assert popup._text.text == " content"
+
+        screen.on_leave()
+
+    def test_popup_suspends_and_restores_background_focus(self):
+        background = TextField("Background")
+        scope = FocusScope([background])
+        scope.enter()
+        popup = Popup(FocusCompositor(scope))
+
+        popup.show("Help", "content")
+        assert scope.focused is None
+        assert not background.focused
+
+        popup.hide()
+        assert scope.focused is background
+        assert background.focused
 
     def test_center_positioning(self):
         comp = FakeCompositor(80, 24)
@@ -204,9 +238,9 @@ class TestPopup:
         buf = Buffer(80, 24)
         popup.render(buf)
         
-        # Content is inside the border and the Box's default content padding.
+        # Content starts immediately inside the border.
         content_y = popup.y + 1
-        content_start = popup.x + 2
+        content_start = popup.x + 1
         
         # Should find 'h' from "hello world"
         assert buf.cells[content_y][content_start].char == 'h'

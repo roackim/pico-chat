@@ -166,6 +166,7 @@ class FormPopup(Component):
             focused=True,
             actions=([_NEW_PROFILE_ACTION, _OK_ACTION, _CANCEL_ACTION]
                      if on_new_profile else [_OK_ACTION, _CANCEL_ACTION]),
+            padding=1,
             focus_in_padding=True,
         )
         self._form_container.focus_scope.enter()

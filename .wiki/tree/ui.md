@@ -92,7 +92,7 @@ Slash command system with generic parameter schema.
 - `HelpCommand` renders output in a popup overlay via `ui.show_popup()` instead of chat history
 - `StatusCommand` renders in popup (async: shows "Checking..." placeholder, then updates with actual status)
 - `ToolsCommand` renders in popup
-- `PermissionsCommand` renders in popup
+- `PermissionsCommand` renders in popup; the profile-list view preserves zero content padding
 - The interactive no-argument permissions editor composes `ProfileList`,
   `FormSectionTitle`, horizontal policy selectors, and container toggles.
   Changes are persisted immediately through `ProfileEditorModel`; profile

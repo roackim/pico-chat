@@ -740,13 +740,14 @@ class chatTUI(ChatActionHandlers):
             return
         self.tab_view.close(debug_index)
 
-    def show_popup(self, title: str, content: str):
+    def show_popup(self, title: str, content: str, content_padding: int = 1):
         """Show a popup overlay with the given title and content."""
         self.popup.set_compositor(self.compositor)
         if self.modal_host is None:
-            self.popup.show(title, content)
+            self.popup.show(title, content, content_padding=content_padding)
             return
-        self.popup_screen = PopupScreen(self.popup, title, content)
+        self.popup_screen = PopupScreen(self.popup, title, content,
+                                        content_padding=content_padding)
         self.modal_host.present_screen(self.popup_screen)
 
     def hide_popup(self):

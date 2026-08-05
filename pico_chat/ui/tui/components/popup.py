@@ -34,7 +34,7 @@ class Popup(Component):
     - Bottom action bar with [Esc] close (matches message box style)
     - Arrow keys and mouse wheel scroll content
     - Clickable action bar (close button)
-    - 1-space left/right content padding (via Box borders)
+    - Configurable left/right content padding
     """
     
     def __init__(self,
@@ -54,6 +54,8 @@ class Popup(Component):
         self._lines: List[str] = []
         self._scroll_offset = 0
         self._content_pad = 0  # Box borders provide the content spacing.
+        self._background_focus_scope = None
+        self._background_focus_index = None
         
         # Build component tree: Box(title, actions) wrapping TextComponent
         self._text = TextComponent("", fg=self.content_color, bg=theme.get_bg())
@@ -83,11 +85,31 @@ class Popup(Component):
         elif not self.is_visible and self._registered_with_compositor:
             self.compositor.remove_overlay(self)
             self._registered_with_compositor = False
+
+    def _suspend_background_focus(self):
+        if not self.compositor or not hasattr(self.compositor, "event_router"):
+            return
+        scope = self.compositor.event_router.focus_scope
+        if scope is None or not scope.active:
+            return
+        self._background_focus_scope = scope
+        self._background_focus_index = scope.focused_index
+        scope.manager.clear()
+
+    def _restore_background_focus(self):
+        scope = self._background_focus_scope
+        index = self._background_focus_index
+        self._background_focus_scope = None
+        self._background_focus_index = None
+        if scope is not None and index is not None:
+            scope.manager.focus(index)
     
-    def show(self, title: str, content: str):
+    def show(self, title: str, content: str, content_padding: int = 0):
         """Show the popup with the given title and content."""
         self._box.title = title
         self._lines = content.split("\n")
+        self._content_pad = max(0, content_padding)
+        self._suspend_background_focus()
         self.is_visible = True
         self._scroll_offset = 0
         self._center_popup()       # sets self.width/height first
@@ -102,6 +124,7 @@ class Popup(Component):
         self.is_visible = False
         self._lines = []
         self._scroll_offset = 0
+        self._restore_background_focus()
         self._update_compositor_registration()
         if was_visible and self.compositor:
             self.compositor.request_render()
@@ -232,14 +255,15 @@ class Popup(Component):
 class PopupScreen(Screen):
     """Screen lifecycle wrapper for a read-only popup."""
 
-    def __init__(self, popup: Popup, title: str, content: str):
+    def __init__(self, popup: Popup, title: str, content: str, content_padding: int = 0):
         super().__init__(popup)
         self.popup = popup
         self.title = title
         self.content = content
+        self.content_padding = content_padding
 
     def on_enter(self):
-        self.popup.show(self.title, self.content)
+        self.popup.show(self.title, self.content, content_padding=self.content_padding)
 
     def on_leave(self):
         self.popup.hide()

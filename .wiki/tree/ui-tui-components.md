@@ -29,6 +29,8 @@ right horizontal alignment plus top, center, or bottom vertical alignment.
 `Box` — wraps another component with a border, optional title, and optional action buttons.
 Focus state changes border color. Actions appear as labeled buttons in the border.
 Constructor params include `compact_when_unfocused` (render without borders when unfocused) and `parent_msg` (link to owning message).
+Content starts one column inside the border by default; additional horizontal padding
+is opt-in through `padding`, as used by form popups for their focus gutter.
 `_render_compact_to_subbuffer()` — compact borderless render path.
 `_action_hit_regions` — tracks screen positions of action buttons during render for click detection.
 Supports **action flash feedback**: when `parent_msg._flash_action_key` is set, the matching action button renders with `reverse=True` for brief visual feedback.
@@ -95,6 +97,8 @@ compatibility.
 ### `popup.py`
 `Popup` — centered overlay popup built on `Box` + `TextComponent`.
 - Component tree: `Popup` → `Box` (borders/title/action bar) → `TextComponent` (content)
+- `show(..., content_padding=...)` controls the content inset; regular app popups use one space while callers can opt out.
+- Opening a popup suspends the active background focus scope and closing it restores the previous focused target.
 - `show(title, content)` — displays popup, auto-centers, registers with compositor
 - `PopupScreen` — adapts read-only popup visibility to `ModalHost` lifecycle ownership
 
