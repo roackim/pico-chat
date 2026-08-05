@@ -43,7 +43,7 @@ class ChatUIProtocol(Protocol):
     
     def show_popup(self, title: str, content: str) -> None: ...
     def hide_popup(self) -> None: ...
-    def show_form_popup(self, title: str, fields: list, on_submit, on_cancel=None) -> None: ...
+    def show_form_popup(self, title: str, fields: list, on_submit, on_cancel=None, on_new_profile=None, field_spacing=1) -> None: ...
 
 class Command:
     def __init__(self, name: str, description: str,
@@ -873,74 +873,228 @@ class DebugCommand(Command):
 
 class PermissionsCommand(Command):
     def __init__(self):
-        super().__init__("permissions", "Show current permission configuration")
+        super().__init__("permissions", "Edit, save, and load tool permission profiles")
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         from pico_chat.harness import tool_permissions
-        
+
+        if args:
+            action = args[0].lower()
+            if action == "list":
+                names = tool_permissions.list_profiles()
+                ui.show_popup("permission profiles", "\n".join(names) if names else "No saved profiles.")
+                return
+            if action == "rename":
+                if len(args) != 3:
+                    ui.chat_history_panel.add_message(
+                        "Usage: /permissions rename OLD_NAME NEW_NAME", msg_type=SysMsgError())
+                    return
+                try:
+                    tool_permissions.rename_profile(args[1], args[2])
+                    ui.chat_history_panel.add_message(
+                        f"Renamed permission profile: {args[1]} → {args[2]}", msg_type=SysMsg())
+                except (KeyError, OSError, ValueError, TypeError) as exc:
+                    ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
+                return
+            if action in {"load", "save"}:
+                if len(args) != 2:
+                    ui.chat_history_panel.add_message(
+                        f"Usage: /permissions {action} NAME", msg_type=SysMsgError())
+                    return
+                try:
+                    if action == "load":
+                        tool_permissions.apply_profile(tool_permissions.load_profile(args[1]))
+                        message = f"Loaded permission profile: {args[1]}"
+                    else:
+                        tool_permissions.save_profile(args[1])
+                        message = f"Saved permission profile: {args[1]}"
+                    ui.chat_history_panel.add_message(message, msg_type=SysMsg())
+                except (KeyError, OSError, ValueError, TypeError) as exc:
+                    ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
+                return
+
         perm = tool_permissions.permissions
-        
-        output = f"Current Profile: {perm.name}\n"
-        output += "=" * 60 + "\n\n"
-        
-        # File permissions
-        output += "File Permissions:\n"
-        output += "-" * 60 + "\n"
-        output += f"  read  (inside repo):  {perm.read.inside_repo}\n"
-        output += f"  read  (outside repo): {perm.read.outside_repo}\n"
-        output += f"  write (inside repo):  {perm.write.inside_repo}\n"
-        output += f"  write (outside repo): {perm.write.outside_repo}\n"
-        output += f"  patch (inside repo):  {perm.patch.inside_repo}\n"
-        output += f"  patch (outside repo): {perm.patch.outside_repo}\n\n"
-        
-        # Run permissions
-        output += "Run Permissions:\n"
-        output += "-" * 60 + "\n"
-        output += f"  others policy:     {perm.run.others}\n"
-        output += f"  chain policy:      {perm.run.chain_policy}\n"
-        output += f"  use container:     {perm.run.use_container}\n"
-        output += f"  container network: {perm.run.container_network}\n\n"
-        
-        # Command lists
-        output += f"  ALLOW commands ({len(perm.run.allow)}):\n"
-        if perm.run.allow:
-            allow_sorted = sorted(perm.run.allow)
-            for i in range(0, len(allow_sorted), 8):
-                chunk = allow_sorted[i:i+8]
-                output += f"    {', '.join(chunk)}\n"
-        else:
-            output += "    (none)\n"
-        output += "\n"
-        
-        output += f"  ASK commands ({len(perm.run.ask)}):\n"
-        if perm.run.ask:
-            ask_sorted = sorted(perm.run.ask)
-            for i in range(0, len(ask_sorted), 8):
-                chunk = ask_sorted[i:i+8]
-                output += f"    {', '.join(chunk)}\n"
-        else:
-            output += "    (none)\n"
-        output += "\n"
-        
-        output += f"  DENY commands ({len(perm.run.deny)}):\n"
-        if perm.run.deny:
-            deny_sorted = sorted(perm.run.deny)
-            for i in range(0, len(deny_sorted), 8):
-                chunk = deny_sorted[i:i+8]
-                output += f"    {', '.join(chunk)}\n"
-        else:
-            output += "    (none)\n"
-        output += "\n"
-        
-        # Dangerous patterns
-        from pico_chat.harness.tool_permissions import CMD_DANGEROUS_PATTERNS
-        output += "Dangerous Pattern Detection:\n"
-        output += "-" * 60 + "\n"
-        for cmd, patterns in sorted(CMD_DANGEROUS_PATTERNS.items()):
-            output += f"  {cmd}: {', '.join(patterns)}\n"
-        output += "\n"
-        
-        ui.show_popup("permissions", output.rstrip())
+        from pico_chat.ui.tui.components.form import (
+            FormSectionTitle, InlineChoiceField, ProfileList, ToggleField,
+        )
+        from pico_chat.ui.profile_editor_model import ProfileEditorModel
+
+        policies = ["allow", "ask", "deny"]
+        editor = ProfileEditorModel()
+        profile_options = editor.profile_names()
+        def selected(value: str) -> int:
+            return policies.index(value)
+
+        fields = [
+            ProfileList("Available profiles", options=profile_options, value=0),
+            FormSectionTitle("Settings:"),
+            InlineChoiceField("Read inside repo", options=policies, value=selected(perm.read.inside_repo)),
+            InlineChoiceField("Read outside repo", options=policies, value=selected(perm.read.outside_repo)),
+            InlineChoiceField("Write inside repo", options=policies, value=selected(perm.write.inside_repo)),
+            InlineChoiceField("Write outside repo", options=policies, value=selected(perm.write.outside_repo)),
+            InlineChoiceField("Patch inside repo", options=policies, value=selected(perm.patch.inside_repo)),
+            InlineChoiceField("Patch outside repo", options=policies, value=selected(perm.patch.outside_repo)),
+            InlineChoiceField("Search", options=policies, value=selected(perm.search)),
+            InlineChoiceField("Unknown commands", options=policies, value=selected(perm.run.others)),
+            InlineChoiceField("Command chains", options=["ask", "deny"], value=["ask", "deny"].index(perm.run.chain_policy)),
+            ToggleField("Use container", value=perm.run.use_container),
+            ToggleField("Container network", value=perm.run.container_network),
+        ]
+        def save_current_profile(*_args) -> None:
+            """Apply and persist every permission edit immediately."""
+            def policy(label: str) -> str:
+                return next(field for field in fields if field.label == label).get_value()
+
+            name = fields[0].get_value()
+            if not name:
+                return
+            updated = tool_permissions.ToolPermissionsProfile(
+                name=name,
+                read=tool_permissions.FilePermissions(policy("Read inside repo"), policy("Read outside repo")),
+                write=tool_permissions.FilePermissions(policy("Write inside repo"), policy("Write outside repo")),
+                patch=tool_permissions.FilePermissions(policy("Patch inside repo"), policy("Patch outside repo")),
+                search=policy("Search"),
+                run=tool_permissions.RunPermissions(
+                    allow=set(perm.run.allow), ask=set(perm.run.ask), deny=set(perm.run.deny),
+                    others=policy("Unknown commands"),
+                    chain_policy=policy("Command chains"),
+                    use_container=policy("Use container"),
+                    container_network=policy("Container network"),
+                ),
+            )
+            editor.update_permissions(updated)
+
+        for field in fields[2:]:
+            field.indent = 2
+            if isinstance(field, InlineChoiceField):
+                field.value_column = 24
+                field._on_change = save_current_profile
+            elif isinstance(field, ToggleField):
+                field._on_change = save_current_profile
+
+        def load_selected_profile(profile_name: str):
+            try:
+                loaded = editor.select(profile_name)
+            except (KeyError, OSError, TypeError) as exc:
+                ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
+                return
+
+            values = {
+                "Read inside repo": policies.index(loaded.read.inside_repo),
+                "Read outside repo": policies.index(loaded.read.outside_repo),
+                "Write inside repo": policies.index(loaded.write.inside_repo),
+                "Write outside repo": policies.index(loaded.write.outside_repo),
+                "Patch inside repo": policies.index(loaded.patch.inside_repo),
+                "Patch outside repo": policies.index(loaded.patch.outside_repo),
+                "Search": policies.index(loaded.search),
+                "Unknown commands": policies.index(loaded.run.others),
+                "Command chains": ["ask", "deny"].index(loaded.run.chain_policy),
+                "Use container": loaded.run.use_container,
+                "Container network": loaded.run.container_network,
+            }
+            for field in fields[2:]:
+                field.set_value(values[field.label])
+
+        fields[0]._on_select = load_selected_profile
+
+        def new_profile():
+            try:
+                created = editor.create()
+                new_name = created.name
+                profile_options.append(new_name)
+                fields[0].options = profile_options
+                fields[0].set_value(len(profile_options) - 1)
+                loaded = editor.draft
+            except (OSError, ValueError, TypeError) as exc:
+                ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
+                return
+            values = {
+                "Read inside repo": policies.index(loaded.read.inside_repo),
+                "Read outside repo": policies.index(loaded.read.outside_repo),
+                "Write inside repo": policies.index(loaded.write.inside_repo),
+                "Write outside repo": policies.index(loaded.write.outside_repo),
+                "Patch inside repo": policies.index(loaded.patch.inside_repo),
+                "Patch outside repo": policies.index(loaded.patch.outside_repo),
+                "Search": policies.index(loaded.search),
+                "Unknown commands": policies.index(loaded.run.others),
+                "Command chains": ["ask", "deny"].index(loaded.run.chain_policy),
+                "Use container": loaded.run.use_container,
+                "Container network": loaded.run.container_network,
+            }
+            for field in fields[2:]:
+                field.set_value(values[field.label])
+            if fields[0].parent:
+                fields[0].parent.mark_changed()
+
+        def duplicate_profile(name: str):
+            try:
+                copy = editor.duplicate(name)
+                profile_options.append(copy.name)
+                fields[0].options = profile_options
+                fields[0].set_value(len(profile_options) - 1)
+                ui.chat_history_panel.add_message(f"Duplicated profile as: {copy.name}", msg_type=SysMsg())
+            except (KeyError, OSError, ValueError, TypeError) as exc:
+                ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
+
+        def rename_profile(old_name: str, new_name: str) -> bool:
+            try:
+                editor.rename(new_name, old_name)
+                index = profile_options.index(old_name)
+                profile_options[index] = new_name
+                fields[0].options = profile_options
+                fields[0].set_value(index)
+                if fields[0].parent:
+                    fields[0].parent.mark_changed()
+                ui.chat_history_panel.add_message(
+                    f"Renamed permission profile: {old_name} → {new_name}", msg_type=SysMsg())
+                return True
+            except (KeyError, OSError, ValueError, TypeError) as exc:
+                ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
+                return False
+
+        def delete_profile(name: str):
+            try:
+                replacement = editor.remove(name)
+                if name in profile_options:
+                    profile_options.remove(name)
+                if replacement.name not in profile_options:
+                    profile_options.append(replacement.name)
+                fields[0].options = profile_options
+                fields[0].set_value(profile_options.index(replacement.name))
+                loaded = editor.draft
+                values = {
+                    "Read inside repo": policies.index(loaded.read.inside_repo),
+                    "Read outside repo": policies.index(loaded.read.outside_repo),
+                    "Write inside repo": policies.index(loaded.write.inside_repo),
+                    "Write outside repo": policies.index(loaded.write.outside_repo),
+                    "Patch inside repo": policies.index(loaded.patch.inside_repo),
+                    "Patch outside repo": policies.index(loaded.patch.outside_repo),
+                    "Search": policies.index(loaded.search),
+                    "Unknown commands": policies.index(loaded.run.others),
+                    "Command chains": ["ask", "deny"].index(loaded.run.chain_policy),
+                    "Use container": loaded.run.use_container,
+                    "Container network": loaded.run.container_network,
+                }
+                for field in fields[2:]:
+                    field.set_value(values[field.label])
+                ui.chat_history_panel.add_message(f"Deleted profile: {name}", msg_type=SysMsg())
+            except (KeyError, OSError) as exc:
+                ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
+
+        fields[0]._on_create = new_profile
+        fields[0]._on_rename = rename_profile
+        fields[0]._on_duplicate = duplicate_profile
+        fields[0]._on_remove = delete_profile
+
+        def on_submit(values: dict):
+            try:
+                save_current_profile()
+                suffix = f" and saved as '{fields[0].get_value()}'"
+            except (OSError, ValueError) as exc:
+                suffix = f" (not saved: {exc})"
+            ui.chat_history_panel.add_message(f"Permission settings updated{suffix}", msg_type=SysMsg())
+
+        ui.show_form_popup("Permissions", fields, on_submit, field_spacing=0)
 
 class OpenRouterBalanceCommand(Command):
     def __init__(self):

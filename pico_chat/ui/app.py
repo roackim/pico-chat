@@ -757,12 +757,12 @@ class chatTUI(ChatActionHandlers):
             return
         self.popup.hide()
 
-    def show_form_popup(self, title: str, fields: list, on_submit, on_cancel=None):
+    def show_form_popup(self, title: str, fields: list, on_submit, on_cancel=None, on_new_profile=None, field_spacing=1):
         """Show a form popup overlay with interactive fields."""
         self.form_popup.set_compositor(self.compositor)
         if self.modal_host is not None:
             self.form_popup.set_modal_host(self.modal_host)
-        self.form_popup.show(title, fields, on_submit, on_cancel)
+        self.form_popup.show(title, fields, on_submit, on_cancel, on_new_profile=on_new_profile, field_spacing=field_spacing)
 
 
     def on_user_submit(self, text: str):

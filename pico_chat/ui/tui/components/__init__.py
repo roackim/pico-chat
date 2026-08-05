@@ -11,7 +11,9 @@ from pico_chat.ui.tui.components.menu import SelectionMenu
 from pico_chat.ui.tui.components.markdown import MarkdownComponent
 from pico_chat.ui.tui.components.form import (
     FormField, FormContainer, ToggleField, TextField, TextAreaField,
-    CheckboxListField, RadioListField,
+    CheckboxListField, RadioListField, ProfileListField, ProfileList, ProfileRow,
+    InlineChoiceField, FormActionField,
+    HorizontalSelector, ButtonField,
 )
 from pico_chat.ui.tui.components.form_popup import FormPopup, FormPopupScreen
 from pico_chat.ui.tui.components.field_models import (
@@ -37,6 +39,7 @@ __all__ = [
     'FormField', 'FormContainer',
     'ToggleField', 'TextField', 'TextAreaField',
     'CheckboxListField', 'RadioListField',
+    'ProfileList', 'ProfileRow',
     'FormPopup', 'FormPopupScreen',
     'FieldModel', 'TextFieldModel', 'BoolFieldModel', 'ChoiceFieldModel',
     'FormFieldSpec', 'build_field', 'build_fields',

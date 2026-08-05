@@ -23,6 +23,34 @@ import pico_chat.harness.tool_permissions as tool_permissions_module
 from conftest import NoopDebugStream, StubReadTool, run_harness_tool_call
 
 
+def test_permission_profile_round_trip(tmp_path, monkeypatch):
+    profile_path = tmp_path / "permission-profiles.toml"
+    monkeypatch.setattr(tool_permissions_module, "_PROFILE_PATH", profile_path)
+    profile = tool_permissions_module.ToolPermissionsProfile(
+        name="custom",
+        read=FilePermissions(inside_repo="ask", outside_repo="deny"),
+        write=FilePermissions(inside_repo="allow", outside_repo="deny"),
+        patch=FilePermissions(inside_repo="allow", outside_repo="deny"),
+        search="allow",
+        run=RunPermissions(
+            allow={"ls"}, ask={"git"}, deny={"sudo"}, others="ask",
+            chain_policy="deny", use_container=True, container_network=False,
+        ),
+    )
+
+    tool_permissions_module.save_profile(profile.name, profile)
+    loaded = tool_permissions_module.load_profile("custom")
+
+    assert tool_permissions_module.list_profiles() == ["custom"]
+    assert loaded.read.inside_repo == "ask"
+    assert loaded.run.allow == {"ls"}
+    assert loaded.run.chain_policy == "deny"
+
+    tool_permissions_module.apply_profile(loaded)
+    assert tool_permissions_module.permissions.name == "custom"
+    assert tool_permissions_module.permissions.run.use_container is True
+
+
 def _build_harness_stub(tmp_path, read_tool):
     from pico_chat.harness.permission_gate import PermissionGate
     harness = Harness.__new__(Harness)

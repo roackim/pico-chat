@@ -369,7 +369,7 @@ def test_radio_option_click_selects_clicked_option():
     popup._form_container._compute_layout()
     popup.render(Buffer(80, 24))
 
-    field_y = popup._box.y + 1 + popup._form_container._field_offsets[0]
+    field_y = popup._box.y + 1 + popup._box.padding_y + popup._form_container._field_offsets[0]
     click = MouseEvent(popup.x + 3, field_y + 2, 0, True)
     assert popup.handle_input(click) is True
     assert field.get_value() == 1

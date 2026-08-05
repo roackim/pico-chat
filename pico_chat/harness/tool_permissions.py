@@ -5,8 +5,12 @@ Provides granular permission control for LLM tools:
 - read/write/patch: Inside/outside repo granularity
 - run: Command execution with configurable command lists and policies
 """
+from copy import deepcopy
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
+
+import toml
 
 
 Permission = Literal["allow", "ask", "deny"]
@@ -220,4 +224,131 @@ scaffolder = ToolPermissionsProfile(
 )
 
 # Global permissions profile (can be changed at runtime)
-permissions: ToolPermissionsProfile = permissive # permissive
+# Keep the predefined profile as a pristine template.  The active profile is
+# a separate object so editing it cannot silently corrupt the built-in default.
+permissions: ToolPermissionsProfile = deepcopy(permissive)
+
+
+_PROFILE_PATH = Path("~/.config/pico-chat/permission-profiles.toml").expanduser()
+
+
+def _profile_to_dict(profile: ToolPermissionsProfile) -> dict:
+    """Serialize a permission profile to TOML-compatible values."""
+    return {
+        "read": {"inside_repo": profile.read.inside_repo, "outside_repo": profile.read.outside_repo},
+        "write": {"inside_repo": profile.write.inside_repo, "outside_repo": profile.write.outside_repo},
+        "patch": {"inside_repo": profile.patch.inside_repo, "outside_repo": profile.patch.outside_repo},
+        "search": profile.search,
+        "run": {
+            "allow": sorted(profile.run.allow),
+            "ask": sorted(profile.run.ask),
+            "deny": sorted(profile.run.deny),
+            "others": profile.run.others,
+            "chain_policy": profile.run.chain_policy,
+            "use_container": profile.run.use_container,
+            "container_network": profile.run.container_network,
+        },
+    }
+
+
+def _profile_from_dict(name: str, data: dict) -> ToolPermissionsProfile:
+    """Build a profile loaded from TOML."""
+    def file_permissions(key: str) -> FilePermissions:
+        values = data.get(key, {})
+        return FilePermissions(
+            inside_repo=values.get("inside_repo", "deny"),
+            outside_repo=values.get("outside_repo", "deny"),
+        )
+
+    run = data.get("run", {})
+    return ToolPermissionsProfile(
+        name=name,
+        read=file_permissions("read"),
+        write=file_permissions("write"),
+        patch=file_permissions("patch"),
+        search=data.get("search", "deny"),
+        run=RunPermissions(
+            allow=set(run.get("allow", [])),
+            ask=set(run.get("ask", [])),
+            deny=set(run.get("deny", [])),
+            others=run.get("others", "deny"),
+            chain_policy=run.get("chain_policy", "ask"),
+            use_container=bool(run.get("use_container", False)),
+            container_network=bool(run.get("container_network", False)),
+        ),
+    )
+
+
+def apply_profile(source: ToolPermissionsProfile, target: ToolPermissionsProfile | None = None) -> None:
+    """Apply a profile in place so existing harnesses see the new settings."""
+    if target is None:
+        target = permissions
+    target.name = source.name
+    target.read = FilePermissions(source.read.inside_repo, source.read.outside_repo)
+    target.write = FilePermissions(source.write.inside_repo, source.write.outside_repo)
+    target.patch = FilePermissions(source.patch.inside_repo, source.patch.outside_repo)
+    target.search = source.search
+    target.run = RunPermissions(
+        allow=set(source.run.allow), ask=set(source.run.ask), deny=set(source.run.deny),
+        others=source.run.others, chain_policy=source.run.chain_policy,
+        use_container=source.run.use_container, container_network=source.run.container_network,
+    )
+
+
+def save_profile(name: str, profile: ToolPermissionsProfile | None = None) -> None:
+    """Save a named permission profile to the user config directory."""
+    if profile is None:
+        profile = permissions
+    name = name.strip()
+    if not name or any(char in name for char in "[]\\"):
+        raise ValueError("Profile name must be non-empty and cannot contain '[' or '\\'")
+    data = toml.load(_PROFILE_PATH) if _PROFILE_PATH.exists() else {}
+    data.setdefault("profiles", {})[name] = _profile_to_dict(profile)
+    _PROFILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _PROFILE_PATH.write_text(toml.dumps(data), encoding="utf-8")
+
+
+def load_profile(name: str) -> ToolPermissionsProfile:
+    """Load a named permission profile without applying it."""
+    if not _PROFILE_PATH.exists():
+        raise KeyError(f"Permission profile not found: {name}")
+    data = toml.load(_PROFILE_PATH).get("profiles", {})
+    if name not in data:
+        raise KeyError(f"Permission profile not found: {name}")
+    return _profile_from_dict(name, data[name])
+
+
+def list_profiles() -> list[str]:
+    """Return saved permission profile names."""
+    if not _PROFILE_PATH.exists():
+        return []
+    return sorted(toml.load(_PROFILE_PATH).get("profiles", {}).keys())
+
+
+def delete_profile(name: str) -> None:
+    """Delete a saved permission profile."""
+    if not _PROFILE_PATH.exists():
+        raise KeyError(f"Permission profile not found: {name}")
+    data = toml.load(_PROFILE_PATH)
+    profiles = data.get("profiles", {})
+    if name not in profiles:
+        raise KeyError(f"Permission profile not found: {name}")
+    del profiles[name]
+    _PROFILE_PATH.write_text(toml.dumps(data), encoding="utf-8")
+
+
+def rename_profile(old_name: str, new_name: str) -> None:
+    """Rename a saved permission profile without changing its policy."""
+    new_name = new_name.strip()
+    if not new_name or any(char in new_name for char in "[]\\"):
+        raise ValueError("Profile name must be non-empty and cannot contain '[' or '\\'")
+    if not _PROFILE_PATH.exists():
+        raise KeyError(f"Permission profile not found: {old_name}")
+    data = toml.load(_PROFILE_PATH)
+    profiles = data.get("profiles", {})
+    if old_name not in profiles:
+        raise KeyError(f"Permission profile not found: {old_name}")
+    if new_name != old_name and new_name in profiles:
+        raise ValueError(f"Permission profile already exists: {new_name}")
+    profiles[new_name] = profiles.pop(old_name)
+    _PROFILE_PATH.write_text(toml.dumps(data), encoding="utf-8")

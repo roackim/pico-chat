@@ -9,7 +9,7 @@ from pico_chat import pico_cfg
 from pico_chat.ui.tui.colors import theme
 
 class Box(Component):
-    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None, parent_msg=None, compact_when_unfocused: bool = False):
+    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None, parent_msg=None, compact_when_unfocused: bool = False, padding: int = 1, padding_y: Optional[int] = None, focus_in_padding: bool = False):
         super().__init__(id)
         self.child = child
         self.child.parent = self
@@ -20,6 +20,11 @@ class Box(Component):
         self.focused = focused
         self.actions = actions or []
         self.compact_when_unfocused = compact_when_unfocused  # If True, render without borders when unfocused
+        # Horizontal content padding is the default. Vertical padding is
+        # opt-in; otherwise every compact form row would gain blank lines.
+        self.padding = max(0, padding)
+        self.padding_y = max(0, 0 if padding_y is None else padding_y)
+        self.focus_in_padding = focus_in_padding
         
         if self.bg is None: self.bg = theme.get_bg()
         if self.fg is None: self.fg = theme.DEFAULT
@@ -50,6 +55,10 @@ class Box(Component):
         old_size = (self.width, self.height)
         size_changed = old_size != (width, height)
 
+        if self.focus_in_padding and hasattr(self.child, "fields"):
+            for field in self.child.fields:
+                field.suppress_focus_marker = True
+
         # In compact mode when unfocused, no borders - child gets full size
         if self.compact_when_unfocused and not self.focused:
             if size_changed:
@@ -68,16 +77,21 @@ class Box(Component):
             # Normal mode with borders
             if size_changed:
                 super().set_layout(x, y, width, height)
-                self.child.set_layout(x + 1, y + 1, width - 2, height - 2)
+                inset_x = 1 + self.padding
+                inset_y = 1 + self.padding_y
+                self.child.set_layout(x + inset_x, y + inset_y,
+                                      width - 2 * inset_x, height - 2 * inset_y)
             else:
                 self.x = x
                 self.y = y
                 self.width = width
                 self.height = height
-                self.child.x = x + 1
-                self.child.y = y + 1
-                self.child.width = width - 2
-                self.child.height = height - 2
+                inset_x = 1 + self.padding
+                inset_y = 1 + self.padding_y
+                self.child.x = x + inset_x
+                self.child.y = y + inset_y
+                self.child.width = width - 2 * inset_x
+                self.child.height = height - 2 * inset_y
         
         # Initialize or resize SubBuffer if size changed
         if size_changed:
@@ -98,25 +112,28 @@ class Box(Component):
         if self.inline_editor is not None:
             lpad = getattr(self.parent_msg, 'left_pad', 0) if self.parent_msg else 0
             rpad = getattr(self.parent_msg, 'right_pad', 0) if self.parent_msg else 0
-            ex = x + 1 + lpad
-            ew = max(1, width - 2 - lpad - rpad)
-            self.inline_editor.set_layout(ex, y + 1, ew, max(1, height - 2))
+            inset_x = 1 + self.padding
+            inset_y = 1 + self.padding_y
+            ex = x + inset_x + lpad
+            ew = max(1, width - 2 * inset_x - lpad - rpad)
+            self.inline_editor.set_layout(ex, y + inset_y, ew,
+                                           max(1, height - 2 * inset_y))
 
     def get_preferred_height(self, width: int) -> int:
         """Box adds 2 rows of height for borders (top/bottom), unless in compact unfocused mode."""
         if self.inline_editor is not None:
             lpad = getattr(self.parent_msg, 'left_pad', 0) if self.parent_msg else 0
             rpad = getattr(self.parent_msg, 'right_pad', 0) if self.parent_msg else 0
-            inner_w = max(1, width - 2 - lpad - rpad)
-            return self.inline_editor.get_preferred_height(inner_w) + 2
+            inner_w = max(1, width - 2 - 2 * self.padding - lpad - rpad)
+            return self.inline_editor.get_preferred_height(inner_w) + 2 + 2 * self.padding_y
         if hasattr(self.child, 'get_preferred_height'):
             # In compact mode when unfocused, no borders
             if self.compact_when_unfocused and not self.focused:
                 return self.child.get_preferred_height(width)
             # Height of child inside the box plus top/bottom borders.
             # Child's width inside box is box_width - 2.
-            inner_height = self.child.get_preferred_height(width - 2)
-            return inner_height + 2
+            inner_height = self.child.get_preferred_height(width - 2 - 2 * self.padding)
+            return inner_height + 2 + 2 * self.padding_y
         # Otherwise fall back to a reasonable default or 0
         return 0
     
@@ -145,6 +162,15 @@ class Box(Component):
         
         # Phase 2: Blit SubBuffer to main buffer (always happens, position updates are free!)
         self.subbuffer.blit(buffer, clip_rect=getattr(buffer, 'clip_rect', None))
+
+        # Optional focus gutter: containers may keep their content unindented
+        # while the focus arrow occupies the Box padding immediately to the
+        # left of the focused child.
+        if self.focus_in_padding and self.padding > 0:
+            focused = getattr(self.child, "get_focused_field", lambda: None)()
+            if focused is not None and getattr(focused, "focused", False):
+                buffer.write_str(self.child.x - 1, focused.y, "▸",
+                                 fg=theme.FOCUSED, max_width=1)
         
         # Phase 3: Render cursor overlay (outside SubBuffer caching)
         cursor_target = self.inline_editor if self.inline_editor is not None else self.child

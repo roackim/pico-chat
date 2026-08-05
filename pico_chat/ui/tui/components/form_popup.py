@@ -24,7 +24,7 @@ from typing import Any, Callable, Dict, List, Optional
 from pico_chat.ui.tui.components.base import Component
 from pico_chat.ui.tui.components.box import Box
 from pico_chat.ui.tui.components.form import (
-    FormContainer, FormField, TextField, TextAreaField, RadioListField,
+    FormContainer, FormField, TextField, TextAreaField, RadioListField, ProfileListField,
 )
 from pico_chat.ui.tui.actions import Action, Actions
 from pico_chat.ui.tui.events import KeyEvent, TickEvent, PasteEvent
@@ -48,6 +48,7 @@ class _FormAction:
 
 _OK_ACTION = _FormAction("Enter", "ok")
 _CANCEL_ACTION = _FormAction("Esc", "cancel")
+_NEW_PROFILE_ACTION = _FormAction("New", "new profile")
 
 
 class FormPopupScreen(Screen):
@@ -80,6 +81,7 @@ class FormPopup(Component):
         self._on_submit: Optional[Callable[[Dict[str, Any]], None]] = None
         self._on_cancel: Optional[Callable[[], None]] = None
         self._on_action: Optional[Callable[[Action], None]] = None
+        self._on_new_profile: Optional[Callable[[], None]] = None
         self._error_msg: Optional[str] = None
         self._background_focus_scope = None
         self._background_focus_index = None
@@ -137,7 +139,9 @@ class FormPopup(Component):
     def show(self, title: str, fields: List[FormField],
              on_submit: Callable[[Dict[str, Any]], None],
              on_cancel: Optional[Callable[[], None]] = None,
-             on_action: Optional[Callable[[Action], None]] = None):
+             on_action: Optional[Callable[[Action], None]] = None,
+             on_new_profile: Optional[Callable[[], None]] = None,
+             field_spacing: int = 1):
         """Display the form popup.
 
         Args:
@@ -150,16 +154,19 @@ class FormPopup(Component):
         self._on_submit = on_submit
         self._on_cancel = on_cancel
         self._on_action = on_action
+        self._on_new_profile = on_new_profile
         self._error_msg = None
         self._suspend_background_focus()
 
-        self._form_container = FormContainer(fields)
+        self._form_container = FormContainer(fields, field_spacing=field_spacing)
         self._box = Box(
             self._form_container,
             title=title,
             fg=theme.PERMISSION,
             focused=True,
-            actions=[_OK_ACTION, _CANCEL_ACTION],
+            actions=([_NEW_PROFILE_ACTION, _OK_ACTION, _CANCEL_ACTION]
+                     if on_new_profile else [_OK_ACTION, _CANCEL_ACTION]),
+            focus_in_padding=True,
         )
         self._form_container.focus_scope.enter()
 
@@ -228,7 +235,10 @@ class FormPopup(Component):
         # Preferred height: all fields + borders + error line
         inner_h = self._form_container.get_preferred_height(popup_w - 4)
         error_h = 1 if self._error_msg else 0
-        popup_h = min(int(term_h * self.max_height_ratio), inner_h + 2 + error_h + 2)
+        popup_h = min(
+            int(term_h * self.max_height_ratio),
+            inner_h + 2 + 2 * self._box.padding + error_h + 2,
+        )
         popup_h = max(popup_h, 6)
 
         self.x = max(0, (term_w - popup_w) // 2)
@@ -279,6 +289,15 @@ class FormPopup(Component):
         if self._on_cancel:
             self._on_cancel()
 
+    def _new_profile(self) -> bool:
+        if not self._on_new_profile:
+            return False
+        self._on_new_profile()
+        self._error_msg = None
+        self._center_and_layout()
+        self.mark_changed()
+        return True
+
     # ── input ──────────────────────────────────────────────────
 
     def handle_input(self, event: Any) -> bool:
@@ -300,8 +319,12 @@ class FormPopup(Component):
             # Terminal Alt+Enter commonly arrives as ESC followed by CR/LF.
             # Treat it as Enter so modal input cannot leak to the application.
             if key in ("\x1b\r", "\x1b\n", "\x1b[13;3u", "\x1b[27;3;13~"):
-                event = "\r"
-                key = event
+                # Alt+Enter is a consumed modifier variant, not the modal's
+                # submit command.  This prevents terminal protocol sequences
+                # from unexpectedly closing a form.
+                if self._form_container:
+                    self._form_container.handle_input(KeyEvent("\r"))
+                return True
             if key == "\x1b":  # Escape
                 self._do_cancel()
                 return True
@@ -310,6 +333,8 @@ class FormPopup(Component):
                 if fc and isinstance(fc, TextAreaField):
                     # Multiline fields insert a newline on Enter.
                     return self._form_container.handle_input(event)
+                if self._form_container and self._form_container.activate_focused():
+                    return True
                 if fc is not None and not self._is_last_field(fc):
                     # Enter advances to the next field; on the last field it submits.
                     # This gives predictable validation: fill fields, then Enter on
@@ -335,7 +360,19 @@ class FormPopup(Component):
                 return self._form_container.handle_input(event)
 
         # Mouse
-        if isinstance(event, MouseEvent) and event.pressed and not event.drag:
+        if isinstance(event, MouseEvent) and event.pressed:
+            if event.button in (64, 65) and self._form_container:
+                max_scroll = max(0, self._form_container._total_height - self._form_container.height)
+                delta = max(1, event.scroll_delta) * 3
+                if event.button == 64:
+                    self._form_container._scroll_offset = max(0, self._form_container._scroll_offset - delta)
+                else:
+                    self._form_container._scroll_offset = min(
+                        max_scroll, self._form_container._scroll_offset + delta)
+                self._form_container.mark_changed()
+                return True
+            if event.drag:
+                return True
             if event.button == 0:  # Left click
                 bottom_y = self.y + self.height - 1
                 # Action bar click
@@ -349,6 +386,8 @@ class FormPopup(Component):
                             elif action.key == "Esc":
                                 self._do_cancel()
                                 return True
+                            elif action.key == "New":
+                                return self._new_profile()
 
                 # Click on a field to focus it
                 if self._form_container:
@@ -370,14 +409,21 @@ class FormPopup(Component):
         for i, field in enumerate(container.fields):
             fy = container._field_offsets[i] - container._scroll_offset
             fh = container._field_heights[i]
-            field_y = self._box.y + 1 + fy  # +1 for top border
+            field_y = self._box.y + 1 + self._box.padding_y + fy
             field_bottom = field_y + fh
             if field_y <= event.y < field_bottom:
                 container._set_focus(i)
-                if isinstance(field, RadioListField):
+                # ProfileListField owns row buttons and must receive the click
+                # itself. Generic radio handling would otherwise select the
+                # row before its rename/duplicate/remove hit testing runs.
+                if isinstance(field, ProfileListField):
+                    field.handle_input(event)
+                elif isinstance(field, RadioListField):
                     option_index = event.y - field_y - 1
                     if 0 <= option_index < len(field.options):
                         field.set_value(option_index)
+                else:
+                    field.handle_input(event)
                 container._ensure_focus_visible()
                 return
 
@@ -387,6 +433,11 @@ class FormPopup(Component):
         if not self.is_visible or not self._box:
             return
 
+        # Form fields can change their preferred height dynamically (for
+        # example, adding/removing a profile row). Recalculate the popup and
+        # all field positions before drawing rather than painting over stale
+        # lines from the previous layout.
+        self._center_and_layout()
         self._box.set_layout(self.x, self.y, self.width, self.height)
         self._box.render(buffer)
 

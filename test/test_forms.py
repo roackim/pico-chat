@@ -3,9 +3,12 @@
 import pytest
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.components.form import (
-    ToggleField, TextField, TextAreaField,
-    CheckboxListField, RadioListField, FormContainer,
+    FormField, ToggleField, TextField, TextAreaField,
+    CheckboxListField, RadioListField, ProfileListField, ProfileList,
+    InlineChoiceField, FormContainer,
 )
+from pico_chat.ui.tui.input_result import InputResult
+from pico_chat.ui.tui.events import MouseEvent
 from pico_chat.ui.tui.components.form_popup import FormPopup
 
 
@@ -51,10 +54,11 @@ class TestToggleField:
         f = ToggleField("Verbose", value=True)
         buf = Buffer(40, 1)
         f.render(buf, 0, 0, 40, 1)
-        # Unfocused: "  [x] Verbose" — marker(2) + check(3) + space(1) + label
-        assert buf.cells[0][2].char == "["
-        assert buf.cells[0][3].char == "x"
-        assert buf.cells[0][4].char == "]"
+        # Unfocused: label on the left and checkbox on the right.
+        assert buf.cells[0][0].char == "V"
+        assert buf.cells[0][37].char == "["
+        assert buf.cells[0][38].char == "x"
+        assert buf.cells[0][39].char == "]"
 
     def test_render_focused(self):
         f = ToggleField("Verbose", value=True)
@@ -68,8 +72,8 @@ class TestToggleField:
         f = ToggleField("Verbose", value=False)
         buf = Buffer(40, 1)
         f.render(buf, 0, 0, 40, 1)
-        # "  [ ] Verbose"
-        assert buf.cells[0][3].char == " "
+        assert buf.cells[0][37].char == "["
+        assert buf.cells[0][38].char == " "
 
     def test_preferred_height(self):
         f = ToggleField("Verbose")
@@ -145,8 +149,8 @@ class TestTextField:
         f = TextField("Name", value="test")
         buf = Buffer(30, 1)
         f.render(buf, 0, 0, 30, 1)
-        # Unfocused: "  Name: test" — marker(2) + "Name: "(6)
-        assert buf.cells[0][2].char == "N"
+        # Unfocused: "Name: test" starts at the content origin.
+        assert buf.cells[0][0].char == "N"
 
     def test_render_focused(self):
         f = TextField("Name", value="test")
@@ -358,6 +362,66 @@ class TestFormContainer:
         assert f1.get_value() == "x"
         assert f2.get_value() == ""
 
+    def test_field_focus_intent_moves_to_sibling(self):
+        class EdgeField(FormField):
+            def get_value(self): return None
+            def set_value(self, value): pass
+            def render(self, buffer, x, y, width, height): pass
+            def handle_input(self, event): return False
+            def handle_input_result(self, event):
+                return InputResult(handled=True, focus="next")
+
+        first = EdgeField("First")
+        second = TextField("Second")
+        container = FormContainer([first, second])
+        assert container.handle_input("x") is True
+        assert second.focused is True
+
+    def test_profile_list_bubbles_down_at_create_action(self):
+        profiles = ProfileListField("Profiles", options=["default", "+ create new"], value=0)
+        following = TextField("Following")
+        container = FormContainer([profiles, following])
+        profiles._cursor = 1
+        assert container.handle_input("\x1b[B") is True
+        assert following.focused is True
+
+    def test_composable_profile_list_selects_with_space(self):
+        selected = []
+        profiles = ProfileList(
+            "Profiles", options=["default", "+ create new"],
+            on_select=selected.append,
+        )
+        profiles._cursor = 0
+        assert profiles.handle_input(" ") is True
+        assert selected == ["default"]
+
+    def test_composable_profile_list_moves_past_create_action(self):
+        profiles = ProfileList("Profiles", options=["default", "second"])
+        following = TextField("Following")
+        container = FormContainer([profiles, following])
+        profiles._cursor = 2
+        assert container.handle_input("\x1b[B") is True
+        assert following.focused is True
+
+    def test_composable_profile_list_renames_inline(self):
+        renamed = []
+        profiles = ProfileList(
+            "Profiles", options=["default"],
+            on_rename=lambda old, new: renamed.append((old, new)) or True,
+        )
+        profiles._action_cursor = 1
+        profiles.handle_input("\r")
+        profiles.handle_input("x")
+        profiles.handle_input("\r")
+        assert renamed == [("default", "defaultx")]
+
+    def test_inline_choice_mouse_selects_clicked_option(self):
+        field = InlineChoiceField("Policy", options=["allow", "ask", "deny"], value=0)
+        field.x, field.y, field.width, field.height = 0, 0, 60, 1
+        # The second option starts after the fixed-width first option.
+        assert field.handle_input(MouseEvent(23, 0, 0, True)) is True
+        assert field.get_value() == "ask"
+
     def test_preferred_height_with_spacing(self):
         f1 = ToggleField("A")
         f2 = ToggleField("B")
@@ -373,10 +437,10 @@ class TestFormContainer:
         c.set_layout(0, 0, 40, 10)
         buf = Buffer(40, 10)
         c.render(buf)
-        # First field has focus: "▸ [x] A"
+        # First field has focus; the checkbox is aligned on the right.
         assert buf.cells[0][0].char == "▸"
-        assert buf.cells[0][2].char == "["
-        assert buf.cells[0][3].char == "x"
+        assert buf.cells[0][2].char == "A"
+        assert buf.cells[0][37].char == "["
 
     def test_scroll_offset_on_overflow(self):
         fields = [TextField(f"Field{i}") for i in range(20)]

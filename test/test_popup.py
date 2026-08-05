@@ -204,10 +204,9 @@ class TestPopup:
         buf = Buffer(80, 24)
         popup.render(buf)
         
-        # Content row is at y + 1 (inside top border)
+        # Content is inside the border and the Box's default content padding.
         content_y = popup.y + 1
-        # Content starts at x + 1 (inside left border)
-        content_start = popup.x + 1
+        content_start = popup.x + 2
         
         # Should find 'h' from "hello world"
         assert buf.cells[content_y][content_start].char == 'h'
@@ -270,9 +269,9 @@ class TestPopup:
         assert not popup.is_visible
 
     def test_visible_content_height(self):
-        """Visible content height should be height - 2 (top border + action bar)."""
+        """Visible content height excludes borders and Box content padding."""
         comp = FakeCompositor(80, 24)
         popup = Popup(compositor=comp)
         popup.show("test", "\n".join(f"line {i}" for i in range(30)))
         
-        assert popup._visible_content_height() == popup.height - 2
+        assert popup._visible_content_height() == popup.height - 2 - 2 * popup._box.padding_y

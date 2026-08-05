@@ -53,7 +53,7 @@ class Popup(Component):
         self.is_visible = False
         self._lines: List[str] = []
         self._scroll_offset = 0
-        self._content_pad = 1  # horizontal breathing space (chars) on each side
+        self._content_pad = 0  # Box borders provide the content spacing.
         
         # Build component tree: Box(title, actions) wrapping TextComponent
         self._text = TextComponent("", fg=self.content_color, bg=theme.get_bg())
@@ -118,8 +118,8 @@ class Popup(Component):
     
     def _visible_content_height(self) -> int:
         """Number of content lines the Box interior can display."""
-        # Box interior = height - 2 borders
-        return max(0, self.height - 2)
+        # Account for both the border and the Box content padding.
+        return max(0, self.height - 2 - 2 * self._box.padding_y)
     
     def _center_popup(self):
         """Size and center the popup based on terminal dimensions."""
@@ -138,8 +138,11 @@ class Popup(Component):
             popup_w = int(term_w * self.max_width_ratio)
         popup_w = max(popup_w, 20)
         
-        # Height: content + borders, clamped
-        popup_h = min(int(term_h * self.max_height_ratio), len(self._lines) + 2)
+        # Height: content + border + the Box's default content padding.
+        popup_h = min(
+            int(term_h * self.max_height_ratio),
+            len(self._lines) + 2 + 2 * self._box.padding_y,
+        )
         popup_h = max(popup_h, 4)
         
         self.x = max(0, (term_w - popup_w) // 2)
