@@ -53,6 +53,7 @@ class Popup(Component):
         self.is_visible = False
         self._lines: List[str] = []
         self._scroll_offset = 0
+        self._content_pad = 1  # horizontal breathing space (chars) on each side
         
         # Build component tree: Box(title, actions) wrapping TextComponent
         self._text = TextComponent("", fg=self.content_color, bg=theme.get_bg())
@@ -111,7 +112,9 @@ class Popup(Component):
         start = self._scroll_offset
         end = start + visible_count
         visible = self._lines[start:end]
-        self._text.update("\n".join(visible))
+        # Pad each line on the left so content isn't flush against the border.
+        pad = " " * self._content_pad
+        self._text.update("\n".join(pad + line for line in visible))
     
     def _visible_content_height(self) -> int:
         """Number of content lines the Box interior can display."""
@@ -126,9 +129,13 @@ class Popup(Component):
         term_w = self.compositor.width
         term_h = self.compositor.height
         
-        # Width: fit content + borders
-        popup_w = min(int(term_w * self.max_width_ratio),
-                      max(len(line) for line in self._lines) + 2) if self._lines else 30
+        # Width: fit content + horizontal padding + borders
+        if self._lines:
+            longest = max(len(line) for line in self._lines)
+            popup_w = min(int(term_w * self.max_width_ratio),
+                          longest + 2 * self._content_pad + 2)
+        else:
+            popup_w = int(term_w * self.max_width_ratio)
         popup_w = max(popup_w, 20)
         
         # Height: content + borders, clamped

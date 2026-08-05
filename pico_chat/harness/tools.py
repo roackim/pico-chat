@@ -83,12 +83,24 @@ class FileTools:
         except Exception as e:
             raise ToolError(f"Invalid path '{path}': {e}")
     
-    def read(self, path: str) -> str:
+    def read(
+        self,
+        path: str,
+        offset: int = 0,
+        limit: int | None = None,
+        max_chars: int | None = None,
+        include_line_numbers: bool = False,
+    ) -> str:
         """
         Read file content.
         
         Args:
             path: File path relative to workspace or absolute
+            offset: Zero-based first line to return
+            limit: Optional number of lines to return
+            max_chars: Optional maximum size of the returned content
+            include_line_numbers: Prefix each returned line with its source line
+                number
             
         Returns:
             File content as string
@@ -100,6 +112,12 @@ class FileTools:
             >>> tools.read("config.py")
             'import os\\n...'
         """
+        for name, value in (("offset", offset), ("limit", limit), ("max_chars", max_chars)):
+            minimum = 0 if name == "offset" else 1
+            if value is not None and (isinstance(value, bool) or not isinstance(value, int) or value < minimum):
+                expectation = "a non-negative integer" if name == "offset" else "a positive integer"
+                raise ToolError(f"Invalid {name}: expected {expectation}")
+
         target, is_inside = self._validate_path(path)
         
         # Check permissions
@@ -116,11 +134,26 @@ class FileTools:
             raise ToolError(f"Not a file: {path}")
         
         try:
-            return target.read_text(encoding='utf-8')
+            content = target.read_text(encoding='utf-8')
         except UnicodeDecodeError:
             raise ToolError(f"File is not UTF-8 text: {path}")
         except Exception as e:
             raise ToolError(f"Error reading file: {e}")
+
+        # Keep line endings while slicing so a selected block can be copied
+        # directly into the patch tool.
+        lines = content.splitlines(keepends=True)
+        first = offset
+        last = offset + limit if limit is not None else len(lines)
+        selected = lines[first:last]
+
+        if include_line_numbers:
+            selected = [f"{number:>6}\t{line}" for number, line in zip(range(first + 1, last + 1), selected)]
+
+        result = "".join(selected)
+        if max_chars is not None and len(result) > max_chars:
+            result = result[:max_chars] + f"\n[truncated: showing {max_chars} of {len(result)} characters]"
+        return result
     
     def write(self, path: str, content: str) -> str:
         """
@@ -480,9 +513,22 @@ class MinimalToolset:
         
         self.permissions = perms
     
-    def read(self, path: str) -> str:
-        """Read file content"""
-        return self.file_tools.read(path)
+    def read(
+        self,
+        path: str,
+        offset: int = 0,
+        limit: int | None = None,
+        max_chars: int | None = None,
+        include_line_numbers: bool = False,
+    ) -> str:
+        """Read all or part of a file."""
+        return self.file_tools.read(
+            path,
+            offset=offset,
+            limit=limit,
+            max_chars=max_chars,
+            include_line_numbers=include_line_numbers,
+        )
     
     def write(self, path: str, content: str) -> str:
         """Write file content"""

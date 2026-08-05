@@ -42,13 +42,37 @@ class ReadTool(ToolWrapper):
     def __init__(self, toolset: MinimalToolset):
         super().__init__(
             name="read",
-            description="Read the content of a file from the workspace",
+            description=(
+                "Read all or part of a UTF-8 text file from the workspace. "
+                "Use offset/limit for large files or targeted inspection. Offset "
+                "is zero-based and limit is the number of lines. Use "
+                "include_line_numbers when you need stable references for a patch."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
                         "description": "File path relative to workspace (e.g., 'config.py' or 'src/main.py')"
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Optional zero-based first line to return (defaults to 0)"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Optional number of lines to return"
+                    },
+                    "max_chars": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Optional maximum number of characters to return"
+                    },
+                    "include_line_numbers": {
+                        "type": "boolean",
+                        "description": "Prefix each returned line with its source line number"
                     }
                 },
                 "required": ["path"]
@@ -56,9 +80,22 @@ class ReadTool(ToolWrapper):
         )
         self.toolset = toolset
     
-    def execute(self, path: str) -> str:
+    def execute(
+        self,
+        path: str,
+        offset: int = 0,
+        limit: int | None = None,
+        max_chars: int | None = None,
+        include_line_numbers: bool = False,
+    ) -> str:
         try:
-            return self.toolset.read(path)
+            return self.toolset.read(
+                path,
+                offset=offset,
+                limit=limit,
+                max_chars=max_chars,
+                include_line_numbers=include_line_numbers,
+            )
         except ToolError as e:
             return str(e)
 

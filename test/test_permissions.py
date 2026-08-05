@@ -38,6 +38,38 @@ def _build_harness_stub(tmp_path, read_tool):
 
 class TestReadPermissions:
     """Test read permission enforcement."""
+
+    def test_read_supports_line_ranges_and_line_numbers(self, tmp_path):
+        test_file = tmp_path / "test.txt"
+        test_file.write_text("one\ntwo\nthree\nfour\n")
+        permissions = ToolPermissionsProfile(
+            name="test",
+            read=FilePermissions(inside_repo="allow", outside_repo="deny"),
+            write=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            patch=FilePermissions(inside_repo="deny", outside_repo="deny"),
+            run=RunPermissions(others="deny"),
+        )
+
+        tools = MinimalToolset(tmp_path, permissions=permissions)
+
+        assert tools.read("test.txt", offset=1, limit=2) == "two\nthree\n"
+        assert tools.read("test.txt", offset=1, limit=2, include_line_numbers=True) == (
+            "     2\ttwo\n     3\tthree\n"
+        )
+
+    def test_read_rejects_invalid_offset(self, tmp_path):
+        (tmp_path / "test.txt").write_text("content")
+        tools = MinimalToolset(tmp_path)
+
+        with pytest.raises(ToolError, match="Invalid offset"):
+            tools.read("test.txt", offset=-1)
+
+    def test_read_marks_character_truncation(self, tmp_path):
+        (tmp_path / "test.txt").write_text("abcdefgh")
+        tools = MinimalToolset(tmp_path)
+
+        result = tools.read("test.txt", max_chars=3)
+        assert result.startswith("abc\n[truncated:")
     
     def test_read_allowed_inside_repo(self, tmp_path):
         """Read should work when allowed inside repo."""

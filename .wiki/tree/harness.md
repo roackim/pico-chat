@@ -56,6 +56,9 @@ Tool classes: `MinimalToolset` (read/list), `FileTools` (+ write/patch), `ShellT
 `SearchTools` — web search via DuckDuckGo HTML and Wikipedia MediaWiki API. Returns formatted results (title/URL/snippet). Supports time range filtering for DDG.
 Pure functions — no internal state. See [notes/tools-and-permissions.md](../notes/tools-and-permissions.md).
 
+`FileTools.read()` supports optional 1-based inclusive line ranges, character
+limits with an explicit truncation marker, and source line-number prefixes.
+
 ### `tool_wrappers.py`
 `*ToolWrapper` classes — adapt tool functions to the OpenAI function-calling JSON schema.
 - `get_schema()` — returns function schema for the LLM

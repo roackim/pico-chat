@@ -15,6 +15,11 @@ The tool system exposes file and shell operations to the LLM agent. Every tool c
 
 `ToolError` — exception raised by tool functions on failure.
 
+`read` accepts optional `offset` (zero-based first line) and `limit` (number
+of lines) values for targeted reads, `max_chars` for bounded output, and
+`include_line_numbers` for stable source references when preparing patches.
+The default call remains a complete, unnumbered file read for compatibility.
+
 Tools are pure functions — no internal state. The `Harness` owns all state and passes it in.
 
 ## Tool Wrappers (`tool_wrappers.py`)

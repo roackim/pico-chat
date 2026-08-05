@@ -27,7 +27,7 @@ from pico_chat.ui.tui.components.form import (
     FormContainer, FormField, TextField, TextAreaField, RadioListField,
 )
 from pico_chat.ui.tui.actions import Action, Actions
-from pico_chat.ui.tui.events import KeyEvent, TickEvent
+from pico_chat.ui.tui.events import KeyEvent, TickEvent, PasteEvent
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.events import MouseEvent
 from pico_chat.ui.tui.colors import theme
@@ -69,7 +69,7 @@ class FormPopup(Component):
     """
 
     def __init__(self, compositor: Optional[Any] = None, id: Optional[str] = None,
-                 max_width_ratio: float = 0.6, max_height_ratio: float = 0.7,
+                 max_width_ratio: float = 0.72, max_height_ratio: float = 0.7,
                  modal_host: Optional[ModalHost] = None):
         super().__init__(id)
         self.max_width_ratio = max_width_ratio
@@ -211,18 +211,19 @@ class FormPopup(Component):
         term_w = self.compositor.width
         term_h = self.compositor.height
 
-        # Preferred width: longest label + option text + padding
-        content_w = 40  # reasonable default
+        # Preferred width: longest label + input space + padding.
+        # Give text fields room to breathe; the form must be wide enough to
+        # comfortably type server names/URLs into.
+        content_w = 56  # generous default so the form isn't cramped
         if self._form_container.fields:
             for f in self._form_container.fields:
-                # rough estimate
                 label_len = len(f.label) + 4
                 if isinstance(f, TextField):
-                    label_len += 20  # space for input
+                    label_len += 34  # space for the input value
                 content_w = max(content_w, label_len)
 
         popup_w = min(int(term_w * self.max_width_ratio), content_w + 6)
-        popup_w = max(popup_w, 30)
+        popup_w = max(popup_w, 40)
 
         # Preferred height: all fields + borders + error line
         inner_h = self._form_container.get_preferred_height(popup_w - 4)
@@ -287,6 +288,12 @@ class FormPopup(Component):
         if isinstance(event, TickEvent):
             return bool(self._form_container and self._form_container.handle_input(event))
 
+        # Bracketed paste — must reach the focused field's editor.
+        if isinstance(event, PasteEvent):
+            if self._form_container:
+                return self._form_container.handle_input(event)
+            return True
+
         # Keyboard
         if isinstance(event, (str, KeyEvent)):
             key = event.key if isinstance(event, KeyEvent) else event
@@ -298,21 +305,20 @@ class FormPopup(Component):
             if key == "\x1b":  # Escape
                 self._do_cancel()
                 return True
-            if key == "\r" or key == "\n":  # Enter — check if a text field is focused
+            if key == "\r" or key == "\n":  # Enter
                 fc = self._form_container.get_focused_field() if self._form_container else None
-                # If a text field is focused and the user presses Enter, move to next field
-                # (not submit).  Shift is not easily detectable in raw mode, so use a
-                # heuristic: if the focused field is NOT a TextField, Enter submits.
                 if fc and isinstance(fc, TextAreaField):
+                    # Multiline fields insert a newline on Enter.
                     return self._form_container.handle_input(event)
-                if fc and isinstance(fc, TextField):
-                    # Move focus to next field instead of submitting
+                if fc is not None and not self._is_last_field(fc):
+                    # Enter advances to the next field; on the last field it submits.
+                    # This gives predictable validation: fill fields, then Enter on
+                    # the final field (or click [Enter] ok) to validate.
                     if self._on_action:
                         self._on_action(Action(Actions.NEXT))
                     self._form_container.focus_next()
                     return True
-                else:
-                    return self._try_submit()
+                return self._try_submit()
             if key == "\x1b[Z":  # Shift+Tab — let FormContainer handle
                 if self._form_container:
                     return self._form_container.handle_input(event)
@@ -350,6 +356,11 @@ class FormPopup(Component):
 
         # Consume all input when visible
         return True
+
+    def _is_last_field(self, field) -> bool:
+        if not self._form_container or not self._form_container.fields:
+            return True
+        return self._form_container.fields[-1] is field
 
     def _handle_field_click(self, event: MouseEvent):
         """Focus the field that was clicked."""
