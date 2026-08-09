@@ -1,0 +1,58 @@
+AI features i would like but need to flesh out a bit
+
+[ ] Better conversation control
+	[ ] Add a /role command to switch the assistant behavior
+	[ ] Allow changing the role only when the current response is finished
+	[ ] Show the active role in the status bar
+	[ ] Export and import the active role with conversations
+
+[ ] Better tool use
+	[ ] Show tool progress while the model is working
+	[ ] Make permission requests more explicit for every tool
+	[ ] Show the complete command before asking for permission
+	[ ] Add a clear explanation when a tool is denied
+	[ ] Make /tools display the active role policy
+
+[ ] Better subagents
+	[ ] Add a /subagents command
+		[ ] list active and finished subagents
+		[ ] open a subagent conversation
+		[ ] close or shutdown a subagent
+	[ ] Make nested subagents inherit safe tool permissions
+	[ ] Show when a subagent is waiting for user input
+
+[ ] Better model and server support
+	[ ] Add Ollama server support
+	[ ] Use token counts returned by the server when available
+		[ ] llamacpp / ollama / openrouter
+	[ ] Support servers that expose several models
+	[ ] Allow switching models without restarting the conversation
+	[ ] Preserve server command behavior while extracting commands
+
+[ ] Better context handling
+	[ ] Make context limits visible in the status bar
+	[ ] Improve automatic compaction feedback
+	[ ] Allow the user to inspect the effective context sent to the model
+	[ ] Add a way to trim or summarize old messages manually
+
+[ ] Better reliability
+	[ ] Do not let one tab's workspace change affect another tab
+	[ ] Prevent stale generation results after changing roles
+	[ ] Make conversation import transactional
+	[ ] Validate saved roles and settings before loading them
+	[ ] Add tests for concurrent generation, permissions, and subagents
+
+BUGFIXES
+
+[ ] Tool permission decisions should use typed results instead of parsing messages
+[ ] Server command errors should always be shown in the chat
+[ ] Permission prompts should never look like the application has frozen
+[ ] Long commands and tool arguments should remain readable in narrow windows
+
+----------------------------
+
+[ ] SKILLS.md Support (!important)
+
+[ ] /model command to change / add models like /permissions
+[ ] /theme command akin to /permissions to change the theme at runtime and create / edit themes
+[ ] support dockerfile / podman for containers

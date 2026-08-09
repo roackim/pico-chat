@@ -8,31 +8,40 @@ I have several features i would like but i need to flesh out a bit
 [ ] Move to REAL tokens counts returned by server
   	[ ] llamacpp / ollama / openrouter
   	
-[ ] not a fan of hardcoded models / servers
-	[ ] what about servers that serves many models ? changing ? (updated for example)
+[ ] Not a fan of hardcoded models / servers
+	[ ] What about servers that serves many models ? changing ? (updated for example)
 
-[ ] What do you think about adding a status bar vim like ?
-	[ ] display window context and other infos like openrouter balance, current model etc
-        [ ] customizable ? 
+[ ] What do you think about adding a status bar vim like ? 
+	[ ] display window context and other infos ?
 	[ ] Should we move the commands to the status bar, instead of message input, like vim ?
 
-[ ] Add a /subagents commands
+[ ] Add a /subagents commands 
 	[ ] creates a tab (like /debug panel)
 	[ ] lists all subagents calls (finished / active)
 		[ ] open the convo
 		[ ] close / shutdown the subagent
         
-[ ] we need better ui for when the model is doing something, sometimes it looks like it is frozen or finished but it is still working
-[x] improve read tool api to be more llm-friendly
+        
+[ ] We need better ui for when the model is doing something, sometimes it looks like it is frozen or finished but it is still working
+[x] Improve read tool api to be more llm-friendly
 
-[ ] when a tool call require user permission (ask) the message should alwayys be BOXED, in purple not single line, to be really visible
-    [ ] should always show the full command while asking for permission so user can read all
-                
+[x] When a tool call require user permission (ask) the message should alwayys be BOXED, in purple not single line, to be really visible
+	[x] Should always show the full command while asking for permission so user can read all
+
 BUGFIXES
+	
+[x] can't paste (ctrl + shift + v) in the server add form
+[x] server add form too narrow (must be wider)
+[x] most popups (except server add) have no horizontal space padding !!!!
+[x] server add popup ENTER doesn't send ??? its not clear how to validate 
 
+[ ] /permissions with [ENTER] ok 
+    -> not smart cause ENTER is used for many other things, we need to rethink a bit 
 
-[ ] focused single line message are invisible
-[ ] when pasting multilines in inputfield the empty lines/space are not cleared
-[ ] move openrouter balance to a modal
+----------------------------
 
+[ ] SKILLS.md Support (!important)
 
+[ ] /model command to change / add models like /permissions
+[ ] /theme command akin to /permissions to change the theme at runtime and create / edit themes
+[ ] support dockerfile / podman for containers
