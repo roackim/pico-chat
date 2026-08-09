@@ -18,18 +18,6 @@ from pico_chat.harness.tool_permissions import (
 )
 
 
-ALL_TOOLS = (
-    "read",
-    "write",
-    "patch",
-    "run_command",
-    "search_web",
-    "search_wiki",
-    "subagent",
-    "wait_for_subagents",
-)
-
-
 @dataclass
 class ToolPolicy:
     """Availability and permission settings for one registered tool."""
@@ -100,7 +88,10 @@ class Role:
         enabled_tools: set[str] | None = None,
     ) -> "Role":
         """Create a role from a legacy permission profile."""
-        enabled = set(ALL_TOOLS) if enabled_tools is None else set(enabled_tools)
+        from pico_chat.harness.tool_wrappers import registered_tool_specs
+
+        tool_specs = registered_tool_specs()
+        enabled = set(tool_specs) if enabled_tools is None else set(enabled_tools)
         policies = {
             "read": ToolPolicy(
                 "read" in enabled,
@@ -135,6 +126,15 @@ class Role:
             "subagent": ToolPolicy("subagent" in enabled, "ask"),
             "wait_for_subagents": ToolPolicy("wait_for_subagents" in enabled, "ask"),
         }
+        for tool_name, spec in tool_specs.items():
+            policies.setdefault(
+                tool_name,
+                ToolPolicy(
+                    tool_name in enabled,
+                    spec.default_permission,
+                    deepcopy(spec.default_settings),
+                ),
+            )
         return cls(profile.name, description, prompt, policies)
 
 
@@ -186,12 +186,19 @@ def _role_to_dict(role: Role) -> dict[str, Any]:
 
 
 def _role_from_dict(name: str, data: dict[str, Any]) -> Role:
+    from pico_chat.harness.tool_wrappers import registered_tool_specs
+
     tools = {}
     for tool_name, values in data.get("tools", {}).items():
         tools[tool_name] = ToolPolicy(
             enabled=bool(values.get("enabled", False)),
             permission=values.get("permission", "deny"),
             settings=dict(values.get("settings", {})),
+        )
+    for tool_name, spec in registered_tool_specs().items():
+        tools.setdefault(
+            tool_name,
+            ToolPolicy(False, spec.default_permission, deepcopy(spec.default_settings)),
         )
     return Role(
         name=name,

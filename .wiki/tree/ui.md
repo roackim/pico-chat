@@ -29,6 +29,7 @@ See [notes/ui.md](../notes/ui.md) for the full architecture overview.
 - Completion-menu input is dispatched directly to the input component; no root-handler compatibility fallback remains
 - Application focus navigation consumes canonical `KeyEvent` metadata while accepting legacy raw strings
 - `ConversationRuntime` owns each tab's agent, message panel, queue, worker, generation task, tool state, permissions, and pause state
+- `ConversationRuntime.switch_role()` is the single role-switch boundary; it rejects changes during an active generation before delegating to the conversation agent
 - Installs chat and debug workspace layouts through `ChatScreen` as Navigator-managed screen instances
 - Delegates runtime chat/debug workspace replacement to `Navigator`; pre-run setup only constructs the screen root
 - Passes active conversation state to `ChatScreen` as an external screen model
@@ -84,10 +85,23 @@ facades for the concrete command groups.
 	completion helpers.
 - `core.py`, `server.py`, `debug.py`, `permissions.py`, `conversation.py`, and
 	`tabs.py` provide focused import surfaces for their command domains.
+- `conversation.py` owns conversation export/import and the parent dispatcher;
+	imports accept legacy history arrays and restore exported roles before replay.
+- `server.py` owns server add/list/use/remove/info commands and their parent
+	dispatcher; the commands delegate configuration changes to `ServerService`.
+- `tabs.py` owns tab new/close/switch/list commands and their parent dispatcher.
+- `debug.py` owns debug panel/context/log commands; `ToolsCommand` remains in
+	`builtins.py` until the tool-inspection slice is extracted.
+- `permissions.py` owns the unified role/profile permissions editor and routes
+	active role changes through `ConversationRuntime.switch_role()`.
+- The permissions role editor routes role saves and active-role deletion through
+	`ConversationRuntime.switch_role()` and reports active-generation rejection
+	inside the chat history instead of escaping the callback.
 - `roles.py` owns the legacy `/roles` inspection and lifecycle command.
 - `registry.py` owns the registry and dispatch helper exports.
-- `builtins.py` retains the remaining concrete implementations during the
-	staged extraction; existing `pico_chat.ui.commands` imports remain valid.
+- `builtins.py` retains core commands, tool inspection, OpenRouter, and workspace
+	commands during the staged extraction; existing
+	`pico_chat.ui.commands` imports remain valid.
 - `Param` dataclass: `name`, `completions` (static list or callable), `path` (filesystem scan), `required`
 - `Command` base class: `name`, `description`, `subcommands`, `params: List[Param]`, `execute(ui, args)`
 - `Command.resolve_command(parts)` — walks subcommand tree, returns `(deepest_cmd, arg_offset)`

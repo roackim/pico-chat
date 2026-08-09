@@ -6,13 +6,25 @@ Adapts the MinimalToolset to the expected harness interface with:
 - execute() method for tool invocation
 """
 from pathlib import Path
+from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Dict
 
 from pico_chat.harness.tools import MinimalToolset, ToolError
 
 
+@dataclass(frozen=True)
+class ToolPolicySpec:
+    """Policy metadata owned by a registered tool wrapper."""
+
+    profile_kind: str = "simple"
+    default_permission: str = "ask"
+    default_settings: dict[str, Any] = field(default_factory=dict)
+
+
 class ToolWrapper:
     """Base wrapper for tools to match harness expected interface"""
+
+    policy_spec = ToolPolicySpec()
     
     def __init__(self, name: str, description: str, parameters: dict):
         self.name = name
@@ -38,6 +50,8 @@ class ToolWrapper:
 
 class ReadTool(ToolWrapper):
     """Read file content"""
+
+    policy_spec = ToolPolicySpec("file", "allow", {"outside_repo": "deny"})
     
     def __init__(self, toolset: MinimalToolset):
         super().__init__(
@@ -102,6 +116,8 @@ class ReadTool(ToolWrapper):
 
 class WriteTool(ToolWrapper):
     """Write file content"""
+
+    policy_spec = ToolPolicySpec("file", "allow", {"outside_repo": "deny"})
     
     def __init__(self, toolset: MinimalToolset):
         super().__init__(
@@ -133,6 +149,8 @@ class WriteTool(ToolWrapper):
 
 class PatchTool(ToolWrapper):
     """Apply replace-block patch"""
+
+    policy_spec = ToolPolicySpec("file", "allow", {"outside_repo": "deny"})
     
     def __init__(self, toolset: MinimalToolset):
         super().__init__(
@@ -176,6 +194,12 @@ class PatchTool(ToolWrapper):
 
 class RunTool(ToolWrapper):
     """Execute a shell command"""
+
+    policy_spec = ToolPolicySpec(
+        "run",
+        "deny",
+        {"others": "deny", "chain_policy": "ask", "use_container": False, "container_network": False},
+    )
     
     def __init__(self, toolset: MinimalToolset):
         super().__init__(
@@ -216,6 +240,8 @@ class _ContextLimitError(Exception):
 
 class SubagentTool(ToolWrapper):
     """Spawn a read-only scaffolding subagent (foreground or background)"""
+
+    policy_spec = ToolPolicySpec("simple", "ask")
 
     def __init__(self, workspace_path: str | Path, depth: int, pending_subagents: list):
         super().__init__(
@@ -304,6 +330,8 @@ class SubagentTool(ToolWrapper):
 class WaitForSubagentsTool(ToolWrapper):
     """Wait for all background subagents and collect results"""
 
+    policy_spec = ToolPolicySpec("simple", "ask")
+
     def __init__(self, pending_subagents: list):
         super().__init__(
             name="wait_for_subagents",
@@ -340,6 +368,8 @@ class WaitForSubagentsTool(ToolWrapper):
 
 class SearchWebTool(ToolWrapper):
     """Search the web using DuckDuckGo"""
+
+    policy_spec = ToolPolicySpec("search", "allow")
     
     def __init__(self, search_tools, max_results: int = 3, search_limit: Optional[int] = None):
         super().__init__(
@@ -387,6 +417,8 @@ class SearchWebTool(ToolWrapper):
 
 class SearchWikiTool(ToolWrapper):
     """Search Wikipedia"""
+
+    policy_spec = ToolPolicySpec("search", "allow")
     
     def __init__(self, search_tools, max_results: int = 3, search_limit: Optional[int] = None):
         super().__init__(
@@ -425,6 +457,20 @@ class SearchWikiTool(ToolWrapper):
             return self.search_tools.search_wiki(query, max_results=self.max_results)
         except ToolError as e:
             return f"[search_wiki] {str(e)}"
+
+
+def registered_tool_specs() -> dict[str, ToolPolicySpec]:
+    """Return policy metadata for every tool the factory can register."""
+    return {
+        "read": ReadTool.policy_spec,
+        "write": WriteTool.policy_spec,
+        "patch": PatchTool.policy_spec,
+        "run_command": RunTool.policy_spec,
+        "search_web": SearchWebTool.policy_spec,
+        "search_wiki": SearchWikiTool.policy_spec,
+        "subagent": SubagentTool.policy_spec,
+        "wait_for_subagents": WaitForSubagentsTool.policy_spec,
+    }
 
 
 def create_toolset(

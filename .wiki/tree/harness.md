@@ -16,7 +16,7 @@ See [notes/architecture.md](../notes/architecture.md), [notes/tools-and-permissi
 - `_stream_llm_response()` — delegates thinking-tag parsing to `ThinkingTagParser`
 - `_execute_tool_calls()` — delegates permission checking to `PermissionGate`
 - `_auto_wait_subagents()` — drains pending background subagents after the main loop ends
-Key state: `AgentState` enum, message history list, active server, tool profile, `_pending_subagents` list, `_abort_subagents_event`.
+Key state: `AgentState` enum, message history list, active server, tool profile, `_pending_subagents` list, `_abort_subagents_event`, and thinking steering state (`_current_reasoning`, `_pending_thinking_prefill`, `_last_detected_thinking_tag`) initialized during construction.
 Subagents: instantiated with `depth > 0`; use the `scaffolder` permissions profile automatically.
 See [notes/subagents.md](../notes/subagents.md) for the full subagent lifecycle.
 
@@ -24,8 +24,12 @@ See [notes/subagents.md](../notes/subagents.md) for the full subagent lifecycle.
 `PermissionGate` — extracted from `Harness`. Encapsulates:
 - File-path inside/outside workspace resolution (deduped from 3 read/write/patch branches)
 - Permission checking against the active `ToolPermissionsProfile`
+- Direct role-owned enforcement for file inside/outside settings and shell run settings when an active `Role` is present; legacy profile enforcement remains the fallback
 - Permission prompt building (`build_prompt()`)
 - Async user-response queue for interactive prompts
+- Retains the active `Role` so availability and simple/search policies are
+	checked from role-owned entries; the converted profile remains for legacy
+	file/run enforcement during migration.
 
 ### `thinking_parser.py`
 `ThinkingTagParser` — extracted from `Harness._stream_llm_response`. Handles two input paths:
@@ -61,6 +65,10 @@ limits with an explicit truncation marker, and source line-number prefixes.
 
 ### `tool_wrappers.py`
 `*ToolWrapper` classes — adapt tool functions to the OpenAI function-calling JSON schema.
+
+- Each wrapper owns `ToolPolicySpec` metadata describing its policy category,
+	default permission, and default settings; `registered_tool_specs()` is the canonical registry view
+	consumed when role policy entries are created.
 - `get_schema()` — returns function schema for the LLM
 - `execute(args)` — parses LLM args and calls the underlying tool
 
@@ -90,6 +98,9 @@ Global `permissions` singleton (defaults to `permissive`).
 `Role` — conversation-owned operating mode combining enabled tools, tool policies,
 and role-specific prompt instructions. Built-in roles include `default`,
 `reviewer`, and `researcher`; saved roles use `~/.config/pico-chat/roles.toml`.
+- Role policy entries are derived from registered tool metadata rather than a
+	hard-coded `ALL_TOOLS` list; newly registered tools receive a disabled policy
+	entry with metadata-owned default settings when loading or constructing a role.
 Saved definitions with a built-in name override that built-in in place, while
 rename and delete operations still reject built-in names.
 `ToolPolicy` describes one tool's availability, default permission, and

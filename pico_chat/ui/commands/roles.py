@@ -50,15 +50,10 @@ class RolesCommand(Command):
                 ui.chat_history_panel.add_message(
                     "No active conversation.", msg_type=SysMsgError())
                 return
-            if runtime.is_generating:
-                ui.chat_history_panel.add_message(
-                    "Role changes apply after the current response finishes.",
-                    msg_type=SysMsgError())
-                return
             try:
                 role = roles.load_role(args[1])
-                runtime.ensure_agent().set_role(role)
-            except (KeyError, OSError, TypeError) as exc:
+                runtime.switch_role(role)
+            except (KeyError, OSError, TypeError, RuntimeError) as exc:
                 ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
                 return
             ui.chat_history_panel.add_message(f"Active role: {role.name}", msg_type=SysMsg())

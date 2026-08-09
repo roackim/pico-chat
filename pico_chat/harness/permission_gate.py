@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 from pico_chat.harness import tool_permissions as _tp_module
-from pico_chat.harness.tool_permissions import ToolPermissionsProfile
+from pico_chat.harness.tool_permissions import RunPermissions, ToolPermissionsProfile
 
 
 class PermissionGate:
@@ -33,11 +33,13 @@ class PermissionGate:
         workspace: str,
         permissions: Optional[ToolPermissionsProfile] = None,
         enabled_tools: Optional[set[str]] = None,
+        role=None,
     ):
         self._workspace = workspace
         self._workspace_resolved = Path(workspace).resolve()
         self._permissions = permissions  # None = use global default
         self._enabled_tools = enabled_tools
+        self._role = role
         self._user_response_queue: asyncio.Queue[str] = asyncio.Queue()
 
     # ------------------------------------------------------------------
@@ -53,10 +55,12 @@ class PermissionGate:
         """Called by the UI when a response to a tool's prompt is ready."""
         self._user_response_queue.put_nowait(text)
 
-    def set_policy(self, permissions: ToolPermissionsProfile, enabled_tools: set[str]) -> None:
+    def set_policy(self, permissions: ToolPermissionsProfile,
+                   enabled_tools: set[str], role=None) -> None:
         """Replace the active role policy for a conversation."""
         self._permissions = permissions
         self._enabled_tools = set(enabled_tools)
+        self._role = role
 
     async def wait_for_user_input(self, prompt: str) -> str:
         """Wait for the user to provide text via the UI."""
@@ -74,11 +78,22 @@ class PermissionGate:
         if self._enabled_tools is not None and tool_name not in self._enabled_tools:
             return "deny"
 
+        if self._role is not None:
+            policy = self._role.policy_for(tool_name)
+            if not policy.enabled:
+                return "deny"
+            if tool_name in ("search_web", "search_wiki", "subagent", "wait_for_subagents"):
+                return policy.permission
+
         perms = self.permissions
 
         if tool_name in ("read", "write", "patch"):
             path = args.get("path", "")
             is_inside = self._is_inside_workspace(path)
+            if self._role is not None:
+                policy = self._role.policy_for(tool_name)
+                setting = "inside_repo" if is_inside else "outside_repo"
+                return policy.settings.get(setting, policy.permission if is_inside else "deny")
             if tool_name == "read":
                 return perms.get_read_permission(is_inside)
             elif tool_name == "write":
@@ -87,7 +102,9 @@ class PermissionGate:
                 return perms.get_patch_permission(is_inside)
 
         elif tool_name == "run_command":
-            return self._check_run_permission(args, perms)
+            if self._role is not None:
+                return self._check_role_run_permission(args)
+            return self._check_run_permission(args, perms.get_run_permission())
 
         elif tool_name in ("search_web", "search_wiki"):
             return perms.get_search_permission()
@@ -129,12 +146,11 @@ class PermissionGate:
         except Exception:
             return False
 
-    def _check_run_permission(self, args: dict, perms: ToolPermissionsProfile) -> str:
+    def _check_run_permission(self, args: dict, run_perms: RunPermissions) -> str:
         """Check shell command permission via SecurityChecker."""
         from pico_chat.harness.security import SecurityChecker
 
         command = args.get("command", "")
-        run_perms = perms.get_run_permission()
         checker = SecurityChecker(run_perms, confirmation_callback=None)
         allowed, message = checker.check_chain(command)
 
@@ -147,3 +163,19 @@ class PermissionGate:
                 return "deny"
             return "ask"
         return "allow"
+
+    def _check_role_run_permission(self, args: dict) -> str:
+        """Check shell commands using the active role's run settings."""
+        from pico_chat.harness.security import SecurityChecker
+        policy = self._role.policy_for("run_command")
+        settings = policy.settings
+        run_permissions = RunPermissions(
+            allow=set(settings.get("allow", ())),
+            ask=set(settings.get("ask", ())),
+            deny=set(settings.get("deny", ())),
+            others=settings.get("others", policy.permission),
+            chain_policy=settings.get("chain_policy", "ask"),
+            use_container=bool(settings.get("use_container", False)),
+            container_network=bool(settings.get("container_network", False)),
+        )
+        return self._check_run_permission(args, run_permissions)

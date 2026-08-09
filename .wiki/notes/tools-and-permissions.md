@@ -13,6 +13,10 @@ The tool system exposes file and shell operations to the LLM agent. Every tool c
 | `ShellTool` | Execute shell commands |
 | `SearchTools` | Web search; DuckDuckGo and Wikipedia |
 
+Registered wrapper policy metadata lives with each `ToolWrapper` class in
+`tool_wrappers.py`; `registered_tool_specs()` is the canonical tool registry
+used to seed role policy entries, including default tool-specific settings.
+
 `ToolError` — exception raised by tool functions on failure.
 
 `read` accepts optional `offset` (zero-based first line) and `limit` (number
@@ -103,8 +107,11 @@ tools before approval prompts or execution.
 Roles are owned by individual `Harness` instances, so different conversations
 can use different roles. `Harness.set_role()` rebuilds the tool map and schemas,
 updates the permission gate, and records a role-transition marker in history.
-The existing `ToolPermissionsProfile` remains the enforcement adapter and the
-global profile remains the default compatibility path for root harnesses.
+`PermissionGate` retains the active role and directly enforces role-owned
+availability, simple/search policies, file inside/outside settings, and shell
+run settings. The existing `ToolPermissionsProfile` remains the compatibility
+fallback when no role is supplied. The global profile remains the default path
+for legacy root harnesses.
 
 The no-argument `/permissions` popup edits this unified role object. It includes
 role metadata and prompt text, tool enablement, current file/run policy controls,

@@ -754,7 +754,7 @@ class TestFormPopup:
         fp = FormPopup()
         results = []
         fp.show("Test", [TextField("Name", value="ok")], results.append)
-        assert any(action.key == "Enter" and action.label == "validate"
+        assert any(action.key == "Enter" and action.label == "ok"
                for action in fp._box.actions)
         assert fp._try_submit()
         assert results == [{"Name": "ok"}]

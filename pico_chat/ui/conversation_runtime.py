@@ -78,3 +78,11 @@ class ConversationRuntime:
             self.current_generation_task.cancel()
             return True
         return False
+
+    def switch_role(self, role: Any) -> Any:
+        """Apply a role when no response is currently being generated."""
+        if self.is_generating:
+            raise RuntimeError("Role changes apply after the current response finishes.")
+        agent = self.ensure_agent()
+        agent.set_role(role)
+        return agent.role

@@ -32,7 +32,9 @@ Subagents always use the **`scaffolder`** permission profile (defined in `tool_p
 
 The parent harness detects `depth > 0` at construction time and sets `self._tool_permissions = scaffolder`. This also means no `confirmation_callback` is wired up — subagents never prompt the user.
 
-`subagent` and `wait_for_subagents` tool calls are **always auto-approved** (`_check_tool_permission` returns `"allow"` unconditionally for these two names).
+`subagent` and `wait_for_subagents` tool calls use the active role's delegation
+policy. The default role asks for approval, while a child harness remains
+isolated under the `scaffolder` role and cannot modify files or run commands.
 
 ---
 

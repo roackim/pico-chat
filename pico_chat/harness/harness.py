@@ -62,6 +62,7 @@ class Harness:
             workspace=self.workspace,
             permissions=tool_permissions,
             enabled_tools=self.role.enabled_tool_names(),
+            role=self.role,
         )
 
         self.tools_map = create_toolset(
@@ -103,6 +104,14 @@ class Harness:
         self.server: LLMServer = create_server(chosen_config)
         self.debug_stream.log("INIT", f"Server initialized: {chosen_config.name} ({chosen_config.type}) at {chosen_config.base_url}")
 
+        # Steering / pause state
+        # Updated live on every Thinking chunk so the UI can snapshot it.
+        self._current_reasoning: str = ""
+        # Set before a generation starts to prefill the assistant thinking block.
+        self._pending_thinking_prefill: Optional[str] = None
+        # Tracks which open tag the last generation actually used.
+        self._last_detected_thinking_tag: Optional[str] = None
+
     def set_role(self, role) -> None:
         """Apply a role to this conversation before its next turn."""
         from pico_chat.harness.roles import Role
@@ -115,6 +124,7 @@ class Harness:
         self._permission_gate.set_policy(
             self._tool_permissions,
             role.enabled_tool_names(),
+            role=role,
         )
         self.tools_map = create_toolset(
             workspace_path=self.workspace,
@@ -134,14 +144,6 @@ class Harness:
                 "system",
                 f"[Role changed from {previous_name} to {role.name}]",
             )
-
-        # Steering / pause state
-        # Updated live on every Thinking chunk so the UI can snapshot it.
-        self._current_reasoning: str = ""
-        # Set before a generation starts to prefill the assistant <thinking> block.
-        self._pending_thinking_prefill: Optional[str] = None
-        # Tracks which open tag the last generation actually used (None = reasoning_content path).
-        self._last_detected_thinking_tag: Optional[str] = None
 
     def switch_workspace(self, new_path: str) -> list[str]:
         """Change the workspace directory and rebuild project context.

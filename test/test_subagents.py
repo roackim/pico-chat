@@ -342,6 +342,19 @@ class TestHarnessSubagentIntegration:
 
         assert h._tool_permissions is tool_permissions.scaffolder
 
+    def test_subagent_role_isolated_from_parent_role(self, tmp_path):
+        """A child harness keeps scaffolder policy even when a parent role is supplied."""
+        from pico_chat.harness.harness import Harness
+        from pico_chat.harness import tool_permissions
+        from pico_chat.harness.roles import Role
+
+        parent_role = Role.from_permission_profile(tool_permissions.permissive)
+        with patch("pico_chat.harness.harness.create_server"):
+            h = Harness(workspace_path=str(tmp_path), depth=1, role=parent_role)
+
+        assert h.role.name == "scaffolder"
+        assert h._tool_permissions is tool_permissions.scaffolder
+
     def test_root_harness_uses_global_permissions(self, tmp_path):
         """A Harness at depth 0 should use None (global permissions)."""
         from pico_chat.harness.harness import Harness

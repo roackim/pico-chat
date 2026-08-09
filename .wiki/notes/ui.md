@@ -488,7 +488,11 @@ Server management commands (`ServerAddCommand`, `ServerUseCommand`, etc.) are th
 
 ### Registered Commands
 
-`help`, `clear`, `compact`, `exit`, `stop`, `resume`, `prefill`, `status`, `server`, `tools`, `debug`, `permissions`, `openrouter`, `cd`, `pwd`
+`help`, `clear`, `compact`, `exit`, `stop`, `resume`, `prefill`, `status`, `server`, `tools`, `debug`, `permissions`, `openrouter`, `cd`, `pwd`, `conversation`
+
+Conversation export writes an object containing the active role name and
+history. Import restores that role before replaying history and still accepts
+legacy JSON history arrays.
 
 ### Structure
 
