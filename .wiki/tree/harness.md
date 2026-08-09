@@ -52,7 +52,7 @@ The UI `commands.py` is now a thin adapter that calls `ServerService` and render
 `AgentState` enum: `UNCONNECTED`, `IDLE`, `THINKING`, `ANSWERING`.
 
 ### `tools.py`
-Tool classes: `MinimalToolset` (read/list), `FileTools` (+ write/patch), `ShellTool` (run), `SearchTools` (search_web/search_wiki).
+Tool classes: `MinimalToolset` (read/list), `FileTools` (+ write/patch), `ShellTool` (run_command), `SearchTools` (search_web/search_wiki).
 `SearchTools` — web search via DuckDuckGo HTML and Wikipedia MediaWiki API. Returns formatted results (title/URL/snippet). Supports time range filtering for DDG.
 Pure functions — no internal state. See [notes/tools-and-permissions.md](../notes/tools-and-permissions.md).
 
@@ -66,7 +66,7 @@ limits with an explicit truncation marker, and source line-number prefixes.
 
 Individual wrappers: `ReadTool`, `WriteTool`, `PatchTool`, `RunTool`, `SearchWebTool`, `SearchWikiTool`, `SubagentTool`, `WaitForSubagentsTool`.
 
-`create_toolset(depth)` — factory that builds the active tool dict. Only registers: `read`, `write`, `patch`, `run`, `search_web`, `search_wiki`, `subagent`, `wait_for_subagents`. (Iteration/memory tools are no longer registered here.)
+`create_toolset(depth)` — factory that builds the active tool dict. Only registers: `read`, `write`, `patch`, `run_command`, `search_web`, `search_wiki`, `subagent`, `wait_for_subagents`. (Iteration/memory tools are no longer registered here.)
 
 Search wrappers:
 - `SearchWebTool` — DuckDuckGo web search with rate limiting
@@ -85,6 +85,16 @@ The main permission gate prompts before starting or waiting for delegated work w
 Predefined profiles: `strict`, `permissive`, `unrestricted`, `locked`, `TESTING`, `scaffolder`.
 Global `permissions` singleton (defaults to `permissive`).
 `get_search_permission()` — returns search operation policy (default: `ALLOW` in permissive/scaffolder profiles).
+
+### `roles.py`
+`Role` — conversation-owned operating mode combining enabled tools, tool policies,
+and role-specific prompt instructions. Built-in roles include `default`,
+`reviewer`, and `researcher`; saved roles use `~/.config/pico-chat/roles.toml`.
+Saved definitions with a built-in name override that built-in in place, while
+rename and delete operations still reject built-in names.
+`ToolPolicy` describes one tool's availability, default permission, and
+tool-specific settings. Roles adapt to the existing `ToolPermissionsProfile`
+while the permission system is migrated.
 
 ### `security.py`
 `SecurityChecker` — evaluates shell commands before execution.

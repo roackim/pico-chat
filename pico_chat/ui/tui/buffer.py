@@ -277,6 +277,7 @@ class SubBuffer:
         self.x = 0  # Blit position (can be updated independently)
         self.y = 0
         self.has_changed = True  # Needs re-rendering
+        self.clip_rect: Optional[tuple[int, int, int, int]] = None
         
         if pico_cfg.config.ui_use_bg_color:
             self.default_bg = (theme.BACKGROUND.r, theme.BACKGROUND.g, theme.BACKGROUND.b)
@@ -288,13 +289,25 @@ class SubBuffer:
     
     def set(self, x: int, y: int, char: str, fg=None, bg=None, bold=False, reverse=False):
         """Set a single cell in the buffer."""
-        if 0 <= x < self.width and 0 <= y < self.height:
+        if 0 <= x < self.width and 0 <= y < self.height and self._is_in_clip(x, y):
             # Convert RGB objects to tuples
             if fg is not None and hasattr(fg, 'r'):
                 fg = (fg.r, fg.g, fg.b)
             if bg is not None and hasattr(bg, 'r'):
                 bg = (bg.r, bg.g, bg.b)
             self.cells[y][x] = Cell(char, fg, bg, bold, reverse)
+
+    def set_clip(self, x: int, y: int, w: int, h: int):
+        self.clip_rect = (x, y, w, h)
+
+    def clear_clip(self):
+        self.clip_rect = None
+
+    def _is_in_clip(self, x: int, y: int) -> bool:
+        if self.clip_rect is None:
+            return True
+        cx, cy, cw, ch = self.clip_rect
+        return cx <= x < cx + cw and cy <= y < cy + ch
     
     def fill(self, x: int, y: int, width: int, height: int, char: str = " ", fg=None, bg=None):
         """Fill a rectangular area with a character."""

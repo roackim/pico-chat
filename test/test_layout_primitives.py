@@ -1,10 +1,33 @@
 from pico_chat.ui.tui.components.text import TextComponent
+from pico_chat.ui.tui.components.layout import EmptyLine, SeparatorLine
 from pico_chat.ui.tui.container import (
     Align, Content, Fill, Fixed, Hsplit, Overlay, Padding, Percent,
     ScrollView, Stack, Vsplit,
 )
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.events import KeyEvent, MouseEvent
+
+
+def test_empty_line_renders_one_blank_row():
+    component = EmptyLine()
+    component.set_layout(1, 1, 5, 2)
+    buffer = Buffer(8, 4)
+
+    component.render(buffer)
+
+    assert component.get_preferred_height(20) == 1
+    assert "".join(cell.char for cell in buffer.cells[1][1:6]) == "     "
+
+
+def test_separator_line_fills_one_row_with_rule_character():
+    component = SeparatorLine("-")
+    component.set_layout(1, 1, 5, 2)
+    buffer = Buffer(8, 4)
+
+    component.render(buffer)
+
+    assert component.get_preferred_height(20) == 1
+    assert "".join(cell.char for cell in buffer.cells[1][1:6]) == "-----"
 
 
 def test_vsplit_allocates_children_before_rendering():

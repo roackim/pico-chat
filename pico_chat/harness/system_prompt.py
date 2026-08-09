@@ -30,7 +30,18 @@ The following is an overview of the project structure.
 {context_tree}
 """
 
-def format_system_prompt(project_context: str = "", model_name: str = "", context_window: int = 0) -> str:
+ROLE_PROMPT_TEMPLATE = """
+Active Role: {role_name}
+{role_prompt}
+"""
+
+def format_system_prompt(
+    project_context: str = "",
+    model_name: str = "",
+    context_window: int = 0,
+    role_name: str = "",
+    role_prompt: str = "",
+) -> str:
     """
     Constructs the full system prompt, optionally including project context.
     
@@ -48,16 +59,30 @@ def format_system_prompt(project_context: str = "", model_name: str = "", contex
             model_name=model_name or "Unknown",
             context_window=context_window or "Unknown"
         )
+
+    if role_name or role_prompt:
+        prompt += ROLE_PROMPT_TEMPLATE.format(
+            role_name=role_name or "default",
+            role_prompt=role_prompt or "Follow the general Pico operating instructions.",
+        )
     
     prompt += CONTEXT_PROMPT_TEMPLATE.format(context_tree=project_context)
         
     return prompt
 
-def get_system_message(project_context: str = "", model_name: str = "", context_window: int = 0) -> Dict[str, str]:
+def get_system_message(
+    project_context: str = "",
+    model_name: str = "",
+    context_window: int = 0,
+    role_name: str = "",
+    role_prompt: str = "",
+) -> Dict[str, str]:
     """
     Returns the system message dictionary formatted for the LLM API.
     """
     return {
         "role": "system",
-        "content": format_system_prompt(project_context, model_name, context_window)
+        "content": format_system_prompt(
+            project_context, model_name, context_window, role_name, role_prompt
+        )
     }

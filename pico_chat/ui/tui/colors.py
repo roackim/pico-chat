@@ -82,6 +82,9 @@ class _theme:
     USER: RGB
     PICO: RGB
     FOCUSED: RGB
+
+    def copy(self) -> "_theme":
+        return _theme(**self.__dict__)
     
     def reset(self) -> str:
         """reset to theme bg + fg colors"""
@@ -100,8 +103,8 @@ class _theme:
             return self.BACKGROUND
         return None
     
-default = _theme(
-    name="default",
+pastel = _theme(
+    name="pastel",
     BACKGROUND  = RGB("#1E1E1E"),   # Dark gray (VS Code dark background)
     DEFAULT     = RGB("#D4D4D4"),   # Light gray (readable text)
     
@@ -134,14 +137,15 @@ terminal = _theme(
 )
 
 THEMES = {
-    "default":  default,
+    "pastel":   pastel,
     "terminal": terminal,
+    "default":  pastel,
 }
 
-theme: _theme = terminal
+theme: _theme = terminal.copy()
 
 
 def set_theme(name: str):
-    """Switch the active theme by name. Unknown names fall back to 'default'."""
-    global theme
-    theme = THEMES.get(name, default)
+    """Switch the active theme by name. Unknown names fall back to terminal."""
+    selected = THEMES.get(name, terminal)
+    theme.__dict__.update(selected.__dict__)

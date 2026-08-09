@@ -129,6 +129,10 @@ Centered overlay popups for commands that benefit from floating display rather t
     path routes input to the popup before normal focus handling
 - Auto-sizing: `max_width_ratio` / `max_height_ratio` control popup dimensions relative to terminal
 - Currently used by: `/help` (command list), `/status` (async with placeholder), `/tools`, `/permissions`, `/debug` help
+- The no-argument `/permissions` editor uses a multiline `TextAreaField` for
+    the role prompt. Role metadata and section headings are unindented; tool
+    controls remain nested beneath their headings, and the `New profile` action
+    is nested under the available-role list.
 
 ## Forms System (`tui/components/form.py`, `form_popup.py`)
 
@@ -143,6 +147,28 @@ adapter, while retaining the legacy compositor overlay path.
 | `ToggleField` | `[x] Label` / `[ ] Label` | `bool` | Space/Enter toggles |
 | `TextField` | `Label: value_cursor` | `str` | Typing, arrow keys, Home/End |
 | `TextAreaField` | Label + multiline content | `str` | Enter inserts newline, arrows navigate |
+
+`TextField` and `TextAreaField` accept an opt-in `highlight_label` flag. The
+unified permissions editor uses it for `Description` and `Role prompt` so
+role metadata remains visually distinct while unfocused.
+
+`BoxInput` wraps long logical lines to its allocated width while retaining the
+original newlines in its value and mapping the cursor onto the wrapped rows.
+
+`ComponentField` lets a non-interactive component participate in a form layout.
+The unified permissions editor uses it for the separator after `Available
+roles` and the blank row before `File policies`.
+
+`FormContainer` clips child rendering to its scrolling viewport, including
+when the form is rendered through a bordered `Box` subbuffer.
+
+The unified permissions editor renders tool names without an `Enable` prefix,
+uses green `[x]` and muted `[ ]` marks, aligns file-policy choices, and groups
+container and network settings under an unindented `Containerization` section.
+
+`FormSection` owns section titles, child indentation, spacing, and choice-column
+alignment. `FormContainer` flattens section children for keyboard focus while
+retaining section geometry for layout and scrolling.
 | `CheckboxListField` | `Label:` + `[ ]`/`[x]` per option | `List[int]` | Up/Down moves cursor, Space/Enter toggles |
 | `RadioListField` | `Label:` + `()`/`(x)` per option | `Optional[int]` | Up/Down moves cursor, Space/Enter selects |
 

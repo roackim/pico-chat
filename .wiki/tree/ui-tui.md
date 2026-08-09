@@ -86,7 +86,10 @@ application-specific state.
 
 ### `colors.py`
 `RGB` — color class with hex parsing and ANSI escape code generation.
-`theme` dict — named color palette used throughout the UI.
+`theme` — stable active color palette used throughout the UI; `terminal` is the
+default theme and `pastel` is the RGB palette. `set_theme()` updates it in place
+so modules that imported it before startup theme selection still observe the
+active palette.
 
 ### `layout_utils.py`
 Text utilities for rendering:

@@ -5,16 +5,34 @@ from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.components.form import (
     FormField, ToggleField, TextField, TextAreaField,
     CheckboxListField, RadioListField, ProfileListField, ProfileList,
-    InlineChoiceField, FormContainer,
+    InlineChoiceField, FormContainer, FormSection, ComponentField,
 )
+from pico_chat.ui.tui.components import Label
 from pico_chat.ui.tui.input_result import InputResult
-from pico_chat.ui.tui.events import MouseEvent
+from pico_chat.ui.tui.events import MouseEvent, TickEvent
 from pico_chat.ui.tui.components.form_popup import FormPopup
+from pico_chat.ui.tui.colors import theme
 
 
 # ── ToggleField ────────────────────────────────────────────────
 
 class TestToggleField:
+    def test_marks_use_green_for_on_and_gray_for_off(self):
+        on = ToggleField("Tool", value=True)
+        off = ToggleField("Tool", value=False)
+        on_buffer = Buffer(20, 1)
+        off_buffer = Buffer(20, 1)
+
+        on.render(on_buffer, 0, 0, 20, 1)
+        off.render(off_buffer, 0, 0, 20, 1)
+
+        success = ((theme.SUCCESS.r, theme.SUCCESS.g, theme.SUCCESS.b)
+                if hasattr(theme.SUCCESS, "r") else theme.SUCCESS)
+        muted = ((theme.MUTED.r, theme.MUTED.g, theme.MUTED.b)
+             if hasattr(theme.MUTED, "r") else theme.MUTED)
+        assert on_buffer.cells[0][17].fg == success
+        assert off_buffer.cells[0][17].fg == muted
+
     def test_default_off(self):
         f = ToggleField("Verbose")
         assert f.get_value() is False
@@ -50,6 +68,12 @@ class TestToggleField:
         assert f.handle_input("x") is False
         assert f.get_value() is False
 
+    def test_mouse_click_toggles(self):
+        f = ToggleField("Verbose")
+        f.x, f.y, f.width, f.height = 0, 0, 40, 1
+        assert f.handle_input(MouseEvent(38, 0, 0, True)) is True
+        assert f.get_value() is True
+
     def test_render(self):
         f = ToggleField("Verbose", value=True)
         buf = Buffer(40, 1)
@@ -74,10 +98,30 @@ class TestToggleField:
         f.render(buf, 0, 0, 40, 1)
         assert buf.cells[0][37].char == "["
         assert buf.cells[0][38].char == " "
+        muted = ((theme.MUTED.r, theme.MUTED.g, theme.MUTED.b)
+             if hasattr(theme.MUTED, "r") else theme.MUTED)
+        assert buf.cells[0][0].fg == muted
 
     def test_preferred_height(self):
         f = ToggleField("Verbose")
         assert f.get_preferred_height(40) == 1
+
+
+class TestInlineChoiceField:
+    def test_selected_deny_is_red(self):
+        field = InlineChoiceField(
+            "Policy",
+            options=["allow", "ask", "deny"],
+            value=2,
+            option_colors={"allow": theme.SUCCESS, "deny": theme.ERROR},
+        )
+        buffer = Buffer(60, 1)
+
+        field.render(buffer, 0, 0, 60, 1)
+
+        error = ((theme.ERROR.r, theme.ERROR.g, theme.ERROR.b)
+             if hasattr(theme.ERROR, "r") else theme.ERROR)
+        assert any(cell.fg == error for cell in buffer.cells[0])
 
 
 # ── TextField ──────────────────────────────────────────────────
@@ -316,7 +360,7 @@ class TestFormContainer:
         c = FormContainer([])
         assert c.get_preferred_height(40) == 0
 
-    def test_focus_next_wraps(self):
+    def test_focus_next_stops_at_last_field(self):
         f1 = TextField("A")
         f2 = TextField("B")
         c = FormContainer([f1, f2])
@@ -325,14 +369,14 @@ class TestFormContainer:
         assert f1.focused is False
         assert f2.focused is True
         c.focus_next()
-        assert f1.focused is True
+        assert f2.focused is True
 
-    def test_focus_prev_wraps(self):
+    def test_focus_prev_stops_at_first_field(self):
         f1 = TextField("A")
         f2 = TextField("B")
         c = FormContainer([f1, f2])
         c.focus_prev()
-        assert f2.focused is True
+        assert f1.focused is True
 
     def test_tab_navigates(self):
         f1 = TextField("A")
@@ -395,6 +439,19 @@ class TestFormContainer:
         assert profiles.handle_input(" ") is True
         assert selected == ["default"]
 
+    def test_composable_profile_list_has_one_focus_marker(self):
+        profiles = ProfileList("Profiles", options=["default"])
+        profiles.focused = True
+        profiles.x, profiles.y = 0, 0
+        profiles.width = 60
+        profiles.height = profiles.get_preferred_height(60)
+        buffer = Buffer(60, profiles.height)
+
+        profiles.render(buffer, profiles.x, profiles.y, profiles.width, profiles.height)
+
+        assert buffer.cells[0][0].char == "P"
+        assert buffer.cells[1][2].char == "▸"
+
     def test_composable_profile_list_moves_past_create_action(self):
         profiles = ProfileList("Profiles", options=["default", "second"])
         following = TextField("Following")
@@ -403,17 +460,25 @@ class TestFormContainer:
         assert container.handle_input("\x1b[B") is True
         assert following.focused is True
 
-    def test_composable_profile_list_wraps_at_vertical_edges(self):
+    def test_composable_profile_list_stops_at_vertical_edges(self):
         profiles = ProfileList("Profiles", options=["default", "second"])
         following = TextField("Following")
         container = FormContainer([profiles, following])
 
         profiles._cursor = 0
         assert container.handle_input("\x1b[A") is True
-        assert following.focused is True
+        assert profiles.focused is True
 
         assert container.handle_input("\x1b[B") is True
         assert profiles.focused is True
+
+    def test_composable_profile_list_preserves_action_on_vertical_move(self):
+        profiles = ProfileList("Profiles", options=["default", "second"])
+        profiles._action_cursor = 2
+
+        assert profiles.handle_input("\x1b[B") is True
+        assert profiles._cursor == 1
+        assert profiles._action_cursor == 2
 
     def test_composable_profile_list_rename_uses_block_cursor(self):
         profiles = ProfileList("Profiles", options=["default"])
@@ -477,6 +542,34 @@ class TestFormContainer:
             c.focus_next()
         assert c._scroll_offset > 0
 
+    def test_section_indents_children_and_aligns_choices(self):
+        first = InlineChoiceField("Read", options=["allow", "deny"], value=0)
+        second = InlineChoiceField("Read outside repo", options=["allow", "deny"], value=1)
+        section = FormSection("File policies:", [first, second])
+        container = FormContainer([section], field_spacing=0)
+        container.set_layout(0, 0, 40, 10)
+        buffer = Buffer(40, 10)
+
+        container.render(buffer)
+
+        assert first.x == 2
+        assert second.x == 2
+        assert first.value_column == second.value_column
+        assert first.value_column == len(second.label) + 4
+
+    def test_section_children_participate_in_focus_order(self):
+        first = ToggleField("First")
+        second = ToggleField("Second")
+        section = FormSection("Tools:", [first, second])
+        outside = TextField("Outside")
+        container = FormContainer([section, outside], field_spacing=0)
+
+        assert container.get_focused_field() is first
+        container.focus_next()
+        assert container.get_focused_field() is second
+        container.focus_next()
+        assert container.get_focused_field() is outside
+
 
 # ── FormPopup ──────────────────────────────────────────────────
 
@@ -495,6 +588,31 @@ class TestFormPopup:
         assert len(results) == 1
         assert results[0]["Name"] == "test"
         assert fp.is_visible is False
+
+    def test_empty_popup_submits_on_enter(self):
+        fp = FormPopup()
+        submitted = []
+        fp.show("Delete role?", [], lambda values: submitted.append(values),
+            submit_label="Delete")
+
+        assert fp._box.actions[0].label == "Delete"
+        assert fp.handle_input("\r") is True
+        assert submitted == [{}]
+        assert fp.is_visible is False
+
+    def test_message_only_popup_ignores_ticks(self):
+        fp = FormPopup()
+        fp.show("Delete role?", [ComponentField(Label("Confirm?"))], lambda _: None)
+
+        assert fp.handle_input(TickEvent(0.0)) is False
+
+    def test_message_only_popup_focuses_actions_with_down(self):
+        fp = FormPopup()
+        fp.show("Delete role?", [ComponentField(Label("Confirm?"))], lambda _: None)
+
+        assert fp.handle_input("\x1b[B") is True
+        assert fp._action_focus_index == 0
+        assert fp._box.focused_action_key == "Enter"
 
     def test_cancel_calls_callback(self):
         fp = FormPopup()
@@ -538,6 +656,33 @@ class TestFormPopup:
         fp.handle_input("a")
         assert fields[0].get_value() == "a"
         assert fp.dirty
+
+    def test_refresh_requests_render_without_input(self):
+        class Compositor:
+            width = 80
+            height = 24
+
+            def add_overlay(self, overlay):
+                pass
+
+            def remove_overlay(self, overlay):
+                pass
+
+            def request_render(self):
+                self.render_requests += 1
+
+            render_requests = 0
+
+        compositor = Compositor()
+        fp = FormPopup(compositor=compositor)
+        fp.show("Test", [TextField("Name", value="before")], lambda _: None)
+        compositor.render_requests = 0
+
+        fp._form_container.all_fields[0].set_value("after")
+        fp.refresh()
+
+        assert fp._form_container.all_fields[0].get_value() == "after"
+        assert compositor.render_requests == 1
 
     def test_reset_restores_model_values(self):
         fp = FormPopup()
@@ -624,6 +769,22 @@ class TestFormPopup:
         assert fp._box.focused_action_key == "Enter"
         assert fp.handle_input("\r") is True
         assert results == [{"Enabled": False}]
+
+    def test_focus_submit_starts_on_enter_action(self):
+        fp = FormPopup(focus_color=theme.ERROR)
+        fp.show("Delete", [ComponentField(Label("Confirm"))], lambda values: None,
+                submit_label="Delete", focus_submit=True)
+
+        assert fp._action_focus_index == 0
+        assert fp._box.focused_action_key == "Enter"
+        assert fp._box.focus_color == theme.ERROR
+
+        fp._box.set_layout(0, 0, 60, 6)
+        buffer = Buffer(60, 6)
+        fp._box.render(buffer)
+        error = ((theme.ERROR.r, theme.ERROR.g, theme.ERROR.b)
+             if hasattr(theme.ERROR, "r") else theme.ERROR)
+        assert any(cell.fg == error and cell.reverse for cell in buffer.cells[-1])
 
     def test_up_from_action_returns_to_last_field(self):
         fp = FormPopup()

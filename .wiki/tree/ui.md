@@ -36,6 +36,7 @@ See [notes/ui.md](../notes/ui.md) for the full architecture overview.
 - Routes incoming `Chunk` objects from the harness to the chat display
 - Dispatches user input to the harness or command handler
 - Manages popup overlay via `show_popup()` / `hide_popup()`; input is routed by registered EventRouter overlays
+- Provides `show_confirmation()` for compact Enter/Esc confirmation modals layered over an existing form
 - Leaves tab mouse hit testing to `EventRouter` and the `TabBar`/`TabView` component path
 
 The application-specific panels and command callbacks remain outside the
@@ -76,8 +77,17 @@ scrollable message component in `ChatScreen`.
 - `handle_edit_action` — expanded in-place editing: edits paused AI messages (thinking prefill), finalized `ThinkingMsg` (edit reasoning as prefill), finalized `PicoMsg` (finds preceding `ThinkingMsg`), and `UserMsg` (edit + wipe subsequent messages)
 - Retry (re-send last user message)
 
-### `commands.py`
-Slash command system with generic parameter schema.
+### `commands/`
+Slash command package with a compatibility-preserving public API and domain
+facades for the concrete command groups.
+- `base.py` owns the generic parameter schema, command contract, and dynamic
+	completion helpers.
+- `core.py`, `server.py`, `debug.py`, `permissions.py`, `conversation.py`, and
+	`tabs.py` provide focused import surfaces for their command domains.
+- `roles.py` owns the legacy `/roles` inspection and lifecycle command.
+- `registry.py` owns the registry and dispatch helper exports.
+- `builtins.py` retains the remaining concrete implementations during the
+	staged extraction; existing `pico_chat.ui.commands` imports remain valid.
 - `Param` dataclass: `name`, `completions` (static list or callable), `path` (filesystem scan), `required`
 - `Command` base class: `name`, `description`, `subcommands`, `params: List[Param]`, `execute(ui, args)`
 - `Command.resolve_command(parts)` — walks subcommand tree, returns `(deepest_cmd, arg_offset)`
@@ -93,11 +103,17 @@ Slash command system with generic parameter schema.
 - `HelpCommand` renders output in a popup overlay via `ui.show_popup()` instead of chat history
 - `StatusCommand` renders in popup (async: shows "Checking..." placeholder, then updates with actual status)
 - `ToolsCommand` renders in popup
-- `PermissionsCommand` renders in popup; the profile-list view preserves zero content padding
+- `PermissionsCommand` renders the unified conversation-role editor in a popup;
+	the editor controls role metadata, prompt, enabled tools, granular policies,
+	and role lifecycle. Role deletion is confirmed in a compact modal and refuses
+	to remove the final remaining role. Legacy permission-profile subcommands
+	remain compatible.
+- `RolesCommand` remains a lightweight compatibility/inspection command while
+	the primary role editor is hosted by `/permissions`.
 - The interactive no-argument permissions editor composes `ProfileList`,
-  `FormSectionTitle`, horizontal policy selectors, and container toggles.
-  Changes are persisted immediately through `ProfileEditorModel`; profile
-  selection is separate from widget focus.
+  `FormSection` groups, horizontal policy selectors, and container toggles.
+  Role changes are bound through `RoleEditorForm`; legacy permission-profile
+  editing remains backed by `ProfileEditorModel`.
 - `DebugCommand` (no args) renders subcommand help in popup
 - See [notes/ui.md](../notes/ui.md) for how to add a new command.
 
@@ -106,6 +122,17 @@ Slash command system with generic parameter schema.
 interactive permissions editor. It isolates the active draft, applies profile
 selection immediately, and exposes create, rename, duplicate, remove, and
 update operations without requiring a rendered form.
+
+### `role_editor_model.py`
+`RoleEditorModel` — UI-independent lifecycle and draft boundary for the unified
+conversation-role editor hosted by `/permissions`. Handles built-in duplication,
+saved-role selection, in-place persistence, and editable role drafts.
+
+### `role_editor_form.py`
+`RoleEditorForm` — declarative field and binding boundary for the unified role
+editor. Builds sectioned fields, synchronizes selected roles into the widgets,
+and applies edited tool, file-policy, and container settings through
+`RoleEditorModel`.
 
 ### Shell Commands (`$` prefix)
 - `$ <command>` — Execute shell command directly (not visible to LLM)

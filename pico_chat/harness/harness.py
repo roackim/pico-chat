@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 COMPACTION_MARKER_PREFIX = "[COMPACTION_SUMMARY]"
 
 class Harness:
-    def __init__(self, workspace_path: str | None = None, depth: int = 0):
+    def __init__(self, workspace_path: str | None = None, depth: int = 0, role=None):
         self.debug_stream = get_debug_stream()
         self.state = AgentState.IDLE
         self.history = []
@@ -43,14 +43,25 @@ class Harness:
         self.workspace = workspace_path or os.getcwd()
 
         # Subagents use scaffolder (read-only) permissions
+        from pico_chat.harness.roles import Role, default_role
         from pico_chat.harness.tool_permissions import scaffolder
-        tool_permissions = scaffolder if depth > 0 else None
+        requested_role = role
+        if depth > 0:
+            role = Role.from_permission_profile(scaffolder, enabled_tools={
+                "read", "search_web", "search_wiki", "subagent", "wait_for_subagents",
+            })
+            role.name = "scaffolder"
+        self.role = role or default_role()
+        tool_permissions = scaffolder if depth > 0 else (
+            self.role.to_permission_profile() if requested_role is not None else None
+        )
         self._tool_permissions = tool_permissions  # used by PermissionGate
 
         # Permission gate owns the user-response queue and path resolution
         self._permission_gate = PermissionGate(
             workspace=self.workspace,
             permissions=tool_permissions,
+            enabled_tools=self.role.enabled_tool_names(),
         )
 
         self.tools_map = create_toolset(
@@ -73,6 +84,10 @@ class Harness:
         self.debug_stream.log("CONTEXT", "Project context built")
         
         # Calculate schemas once and log
+        self.tools_map = {
+            name: tool for name, tool in self.tools_map.items()
+            if name in self.role.enabled_tool_names()
+        }
         self.tool_schemas = [tool.get_schema() for tool in self.tools_map.values()] if self.tools_map else None
         self.debug_stream.log("TOOL_SCHEMAS", self.tool_schemas)
 
@@ -87,6 +102,38 @@ class Harness:
 
         self.server: LLMServer = create_server(chosen_config)
         self.debug_stream.log("INIT", f"Server initialized: {chosen_config.name} ({chosen_config.type}) at {chosen_config.base_url}")
+
+    def set_role(self, role) -> None:
+        """Apply a role to this conversation before its next turn."""
+        from pico_chat.harness.roles import Role
+
+        if not isinstance(role, Role):
+            raise TypeError("role must be a Role")
+        previous_name = getattr(self, "role", role).name
+        self.role = role
+        self._tool_permissions = role.to_permission_profile()
+        self._permission_gate.set_policy(
+            self._tool_permissions,
+            role.enabled_tool_names(),
+        )
+        self.tools_map = create_toolset(
+            workspace_path=self.workspace,
+            confirmation_callback=None if self.depth > 0 else self._request_user_confirmation,
+            permissions=self._tool_permissions,
+            depth=self.depth,
+            pending_subagents=self._pending_subagents,
+        )
+        self.tools_map = {
+            name: tool for name, tool in self.tools_map.items()
+            if name in role.enabled_tool_names()
+        }
+        self.tool_schemas = [tool.get_schema() for tool in self.tools_map.values()] if self.tools_map else None
+        self.debug_stream.log("ROLE", {"name": role.name, "tools": sorted(role.enabled_tool_names())})
+        if previous_name != role.name:
+            self._add_message_to_history(
+                "system",
+                f"[Role changed from {previous_name} to {role.name}]",
+            )
 
         # Steering / pause state
         # Updated live on every Thinking chunk so the UI can snapshot it.
@@ -171,7 +218,7 @@ class Harness:
         if ref == "@":
             # Get last run() output
             for name, result in reversed(self.tool_output_history):
-                if name == "run":
+                if name in ("run", "run_command"):
                     return result
             return None
         
@@ -361,7 +408,9 @@ class Harness:
         system_msg = get_system_message(
             project_context=self.project_context,
             model_name=model_name,
-            context_window=context_window_str
+            context_window=context_window_str,
+            role_name=getattr(getattr(self, "role", None), "name", ""),
+            role_prompt=getattr(getattr(self, "role", None), "prompt", ""),
         )
 
         summarize_user = {
@@ -451,7 +500,9 @@ class Harness:
         system_msg = get_system_message(
             project_context=self.project_context,
             model_name=model_name,
-            context_window=context_window_str
+            context_window=context_window_str,
+            role_name=getattr(getattr(self, "role", None), "name", ""),
+            role_prompt=getattr(getattr(self, "role", None), "prompt", ""),
         )
         
         messages = [system_msg]
@@ -484,7 +535,9 @@ class Harness:
         system_msg = get_system_message(
             project_context=self.project_context,
             model_name=model_name,
-            context_window=context_window_str
+            context_window=context_window_str,
+            role_name=getattr(getattr(self, "role", None), "name", ""),
+            role_prompt=getattr(getattr(self, "role", None), "prompt", ""),
         )
         
         messages = [system_msg]
@@ -786,10 +839,13 @@ class Harness:
             
             try:
                 # Execute the tool
-                if tool_name not in self.tools_map:
+                lookup_name = "run_command" if tool_name == "run" else tool_name
+                if lookup_name not in self.tools_map and tool_name == "run":
+                    lookup_name = "run"
+                if lookup_name not in self.tools_map:
                     raise Exception(f"Tool '{tool_name}' not found")
                 
-                func = self.tools_map[tool_name]
+                func = self.tools_map[lookup_name]
                 
                 # Execute normally (sync or async)
                 if inspect.iscoroutinefunction(func.execute):

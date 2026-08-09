@@ -9,7 +9,7 @@ from pico_chat import pico_cfg
 from pico_chat.ui.tui.colors import theme
 
 class Box(Component):
-    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None, parent_msg=None, compact_when_unfocused: bool = False, padding: int = 0, padding_y: Optional[int] = None, focus_in_padding: bool = False):
+    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None, parent_msg=None, compact_when_unfocused: bool = False, padding: int = 0, padding_y: Optional[int] = None, focus_in_padding: bool = False, focus_color=None):
         super().__init__(id)
         self.child = child
         self.child.parent = self
@@ -17,6 +17,7 @@ class Box(Component):
         self.title = title
         self.bg = bg
         self.fg = fg
+        self.focus_color = focus_color
         self.focused = focused
         self.actions = actions or []
         self.focused_action_key = None
@@ -57,7 +58,8 @@ class Box(Component):
         size_changed = old_size != (width, height)
 
         if self.focus_in_padding and hasattr(self.child, "fields"):
-            for field in self.child.fields:
+            fields = getattr(self.child, "all_fields", self.child.fields)
+            for field in fields:
                 field.suppress_focus_marker = True
 
         # In compact mode when unfocused, no borders - child gets full size
@@ -198,7 +200,7 @@ class Box(Component):
             return
         
         if self.focused:
-            fg = theme.FOCUSED
+            fg = self.focus_color or theme.FOCUSED
         
         @dataclass(frozen=True)
         class BorderStyle:
@@ -309,7 +311,7 @@ class Box(Component):
                             for fx in range(region_start, region_end):
                                 self.subbuffer.set(fx, self.height - 1,
                                                    self.subbuffer.cells[self.height - 1][fx].char,
-                                                   reverse=True)
+                                                   fg=fg, bg=bg, reverse=True)
                         x_offset += len(formatted) + 1  # +1 for the space separator
                 
                 # Draw one more border char on the right before the corner
@@ -383,10 +385,10 @@ class Box(Component):
                 self.subbuffer.fill(local_x, local_y, width, height, char, fg, bg)
             
             def set_clip(self, x, y, w, h):
-                pass  # Not implemented for SubBuffer
+                self.subbuffer.set_clip(x - self.x_offset, y - self.y_offset, w, h)
             
             def clear_clip(self):
-                pass  # Not implemented for SubBuffer
+                self.subbuffer.clear_clip()
         
         class SubBufferCellsProxy:
             """Proxy for cell access that translates absolute coordinates to SubBuffer-local."""

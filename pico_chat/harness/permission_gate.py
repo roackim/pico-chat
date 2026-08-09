@@ -32,10 +32,12 @@ class PermissionGate:
         self,
         workspace: str,
         permissions: Optional[ToolPermissionsProfile] = None,
+        enabled_tools: Optional[set[str]] = None,
     ):
         self._workspace = workspace
         self._workspace_resolved = Path(workspace).resolve()
         self._permissions = permissions  # None = use global default
+        self._enabled_tools = enabled_tools
         self._user_response_queue: asyncio.Queue[str] = asyncio.Queue()
 
     # ------------------------------------------------------------------
@@ -51,6 +53,11 @@ class PermissionGate:
         """Called by the UI when a response to a tool's prompt is ready."""
         self._user_response_queue.put_nowait(text)
 
+    def set_policy(self, permissions: ToolPermissionsProfile, enabled_tools: set[str]) -> None:
+        """Replace the active role policy for a conversation."""
+        self._permissions = permissions
+        self._enabled_tools = set(enabled_tools)
+
     async def wait_for_user_input(self, prompt: str) -> str:
         """Wait for the user to provide text via the UI."""
         return await self._user_response_queue.get()
@@ -63,6 +70,10 @@ class PermissionGate:
             ``"ask"`` — need user permission
             ``"deny"`` — auto-deny
         """
+        tool_name = "run_command" if tool_name == "run" else tool_name
+        if self._enabled_tools is not None and tool_name not in self._enabled_tools:
+            return "deny"
+
         perms = self.permissions
 
         if tool_name in ("read", "write", "patch"):
@@ -75,7 +86,7 @@ class PermissionGate:
             else:
                 return perms.get_patch_permission(is_inside)
 
-        elif tool_name == "run":
+        elif tool_name == "run_command":
             return self._check_run_permission(args, perms)
 
         elif tool_name in ("search_web", "search_wiki"):
@@ -97,7 +108,7 @@ class PermissionGate:
             return f"Allow writing to file: {args.get('path', 'unknown')}?"
         elif tool_name == "patch":
             return f"Allow patching file: {args.get('path', 'unknown')}?"
-        elif tool_name == "run":
+        elif tool_name in ("run", "run_command"):
             command = args.get("command", "unknown")
             return f"Allow running command: {command}?"
         return f"Allow {tool_name}?"

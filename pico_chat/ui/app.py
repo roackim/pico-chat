@@ -14,7 +14,9 @@ import openai
 
 from pico_chat.ui.tui.compositor import Compositor
 from pico_chat.ui.tui.events import KeyEvent, MouseEvent
-from pico_chat.ui.tui.components import TextComponent, Box, InputComponent
+from pico_chat.ui.tui.components import (
+    TextComponent, Box, InputComponent, ComponentField, Label,
+)
 from pico_chat.ui.tui.components.debug_panel import DebugLogPanel
 from pico_chat.ui.tui.components.popup import Popup, PopupScreen
 from pico_chat.ui.tui.components.form_popup import FormPopup
@@ -123,6 +125,12 @@ class chatTUI(ChatActionHandlers):
         self.show_debug = False
         self.popup = Popup()
         self.form_popup = FormPopup()
+        self.confirmation_popup = FormPopup(
+            frame_color=theme.ERROR,
+            focus_color=theme.ERROR,
+            padding=1,
+            min_height=3,
+        )
         self.log_handler = setup_tui_logging(self.debug_panel)
         self.editing_prefill_for_resume = False
         self.tab_bar = TabBar(id="tabs")
@@ -764,6 +772,21 @@ class chatTUI(ChatActionHandlers):
         if self.modal_host is not None:
             self.form_popup.set_modal_host(self.modal_host)
         self.form_popup.show(title, fields, on_submit, on_cancel, on_new_profile=on_new_profile, field_spacing=field_spacing)
+
+    def show_confirmation(self, title: str, on_confirm, on_cancel=None):
+        """Show a compact Enter/Esc confirmation modal over the current popup."""
+        self.confirmation_popup.set_compositor(self.compositor)
+        self.confirmation_popup.show(
+            title,
+            [ComponentField(Label(
+                "Enter to delete, Esc to cancel.",
+                wrap=True,
+            ))],
+            lambda _values: on_confirm(), on_cancel,
+            field_spacing=0,
+            submit_label="Delete",
+            focus_submit=True,
+        )
 
 
     def on_user_submit(self, text: str):

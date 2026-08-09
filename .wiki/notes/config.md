@@ -53,7 +53,7 @@ The `ui_` prefix is applied automatically: a TOML key `theme` under `[ui]` maps 
 - `config.subagent_max_depth`, `config.subagent_timeout`, `config.subagent_max_context`, `config.subagent_server` — subagent limits (see [subagents.md](./subagents.md))
 
 **UI:**
-- `config.ui_theme` — `"default"` or `"terminal"`
+- `config.ui_theme` — `"terminal"` (default) or `"pastel"`; legacy `"default"` maps to `"pastel"`
 - `config.ui_use_bg_color` — use theme background color (false = terminal default)
 - `config.ui_box_style` — border style: `"square"`, `"double"`, `"rounded"`, `"ascii"`
 - `config.ui_max_input_height`, `config.ui_debug_console_height`

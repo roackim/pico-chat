@@ -1,5 +1,6 @@
 from pico_chat.ui.tui.components.base import Component
 from pico_chat.ui.tui.components.text import Label, TextComponent
+from pico_chat.ui.tui.components.layout import EmptyLine, SeparatorLine
 from pico_chat.ui.tui.components.box import Box
 from pico_chat.ui.tui.components.button import Button
 from pico_chat.ui.tui.components.choice import Checkbox, RadioGroup
@@ -12,7 +13,7 @@ from pico_chat.ui.tui.components.markdown import MarkdownComponent
 from pico_chat.ui.tui.components.form import (
     FormField, FormContainer, ToggleField, TextField, TextAreaField,
     CheckboxListField, RadioListField, ProfileListField, ProfileList, ProfileRow,
-    InlineChoiceField, FormActionField,
+    InlineChoiceField, FormActionField, ComponentField, FormSection,
     HorizontalSelector, ButtonField,
 )
 from pico_chat.ui.tui.components.form_popup import FormPopup, FormPopupScreen
@@ -26,6 +27,7 @@ __all__ = [
     'Component',
     'TextComponent',
     'Label',
+    'EmptyLine', 'SeparatorLine',
     'Box',
     'Button',
     'Checkbox', 'RadioGroup',
@@ -38,6 +40,8 @@ __all__ = [
     'MarkdownComponent',
     'FormField', 'FormContainer',
     'ToggleField', 'TextField', 'TextAreaField',
+    'ComponentField',
+    'FormSection',
     'CheckboxListField', 'RadioListField',
     'ProfileList', 'ProfileRow',
     'FormPopup', 'FormPopupScreen',

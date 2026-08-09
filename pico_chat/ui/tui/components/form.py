@@ -117,6 +117,116 @@ class FormSectionTitle(FormField):
         return False
 
 
+class ComponentField(FormField):
+    """Expose a non-interactive component as one row in a form."""
+
+    focusable = False
+
+    def __init__(self, component: Component):
+        super().__init__("")
+        self.component = component
+        component.parent = self
+
+    def get_value(self) -> None:
+        return None
+
+    def set_value(self, value) -> None:
+        return None
+
+    def render(self, buffer: Buffer, x: int, y: int, width: int, height: int):
+        self.component.set_layout(x, y, width, height)
+        self.component.render(buffer)
+
+    def get_preferred_height(self, width: int) -> int:
+        return self.component.get_preferred_height(width) if hasattr(self.component, "get_preferred_height") else 1
+
+    def handle_input(self, event: Any) -> bool:
+        return False
+
+
+class FormSection:
+    """A titled group of form fields with shared layout rules."""
+
+    focusable = False
+
+    def __init__(self, title: str, fields: List[FormField], *,
+                 content_indent: int = 2, field_spacing: int = 0,
+                 spacing_before: int = 0):
+        self.title = title
+        self.fields = fields
+        self.content_indent = content_indent
+        self.field_spacing = field_spacing
+        self.spacing_before = spacing_before
+        self.parent = None
+        for field in fields:
+            field.parent = self
+
+    def focusable_fields(self) -> list[FormField]:
+        return [field for field in self.fields if getattr(field, "focusable", True)]
+
+    def get_preferred_height(self, width: int) -> int:
+        content_width = max(1, width - self.content_indent)
+        height = self.spacing_before + 1
+        for index, field in enumerate(self.fields):
+            if index:
+                height += self.field_spacing
+            height += field.get_preferred_height(content_width)
+        return height
+
+    def _align_choices(self, width: int) -> None:
+        choice_fields = [field for field in self.fields
+                         if isinstance(field, InlineChoiceField)]
+        if not choice_fields:
+            return
+        value_column = max(len(field.label) + 4 for field in choice_fields)
+        for field in choice_fields:
+            field.value_column = value_column
+
+    def render(self, buffer: Buffer, x: int, y: int, width: int, height: int):
+        content_width = max(1, width - self.content_indent)
+        self._align_choices(content_width)
+        cursor_y = y + self.spacing_before
+        self._write(buffer, x, cursor_y, self.title,
+                    fg=_label_color(), max_width=width)
+        cursor_y += 1
+        for index, field in enumerate(self.fields):
+            if index:
+                cursor_y += self.field_spacing
+            field_height = field.get_preferred_height(content_width)
+            if cursor_y >= y + height:
+                break
+            field.x = x + self.content_indent
+            field.y = cursor_y
+            field.width = content_width
+            field.height = field_height
+            field.render(buffer, field.x, cursor_y, content_width,
+                         min(field_height, y + height - cursor_y))
+            cursor_y += field_height
+
+    def field_at(self, local_y: int, width: int) -> Optional[FormField]:
+        cursor_y = self.spacing_before + 1
+        content_width = max(1, width - self.content_indent)
+        for index, field in enumerate(self.fields):
+            if index:
+                cursor_y += self.field_spacing
+            field_height = field.get_preferred_height(content_width)
+            if cursor_y <= local_y < cursor_y + field_height:
+                field.y = self.y + cursor_y
+                field.height = field_height
+                field.width = content_width
+                field.x = self.x + self.content_indent
+                return field
+            cursor_y += field_height
+        return None
+
+    @staticmethod
+    def _write(buffer: Buffer, x: int, y: int, text: str, fg=None,
+               max_width: int = 0):
+        if max_width > 0:
+            buffer.write_str(x, y, text, fg=fg or theme.DEFAULT,
+                             max_width=max_width)
+
+
 # ────────────────────────────────────────────────────────────────
 # Toggle field  —  ▸ [x] Label  /    [ ] Label
 # ────────────────────────────────────────────────────────────────
@@ -146,18 +256,24 @@ class ToggleField(FormField):
 
     def render(self, buffer: Buffer, x: int, y: int, width: int, height: int):
         mark = "[x]" if self._value else "[ ]"
-        lc = _label_color() if self.focused else theme.DEFAULT
+        lc = (theme.MUTED if not self._value else
+              (_label_color() if self.focused else theme.DEFAULT))
         m = self.focus_marker()
         self._write(buffer, x, y, m, fg=theme.DEFAULT, max_width=width)
         self._write(buffer, x + len(m), y, self.label, fg=lc,
                     max_width=max(0, width - len(m) - 4))
         self._write(buffer, x + max(len(m), width - 3), y, mark,
-                    fg=theme.FOCUSED if self.focused else theme.DEFAULT,
+                    fg=(theme.SUCCESS if self._value else theme.MUTED),
                     max_width=min(3, width))
 
     def handle_input(self, event: Any) -> bool:
         key = event.key if isinstance(event, KeyEvent) else event
         if isinstance(event, (str, KeyEvent)) and key in (" ", "\r", "\n"):
+            self.toggle()
+            return True
+        if (isinstance(event, MouseEvent) and event.pressed and event.button == 0
+                and self.x <= event.x < self.x + self.width
+                and self.y <= event.y < self.y + self.height):
             self.toggle()
             return True
         return False
@@ -171,6 +287,7 @@ class TextField(FormField):
     """Single-line text input. Reuses TextBuffer / CursorRenderer patterns."""
 
     def __init__(self, label: str, *, value: str = "", placeholder: str = "", **kw):
+        self.highlight_label = kw.pop("highlight_label", False)
         model = kw.pop("model", None) or TextFieldModel(
             value, required=kw.get("required", False))
         super().__init__(label, model=model, **kw)
@@ -202,7 +319,7 @@ class TextField(FormField):
     def render(self, buffer: Buffer, x: int, y: int, width: int, height: int):
         m = self.focus_marker()
         label_str = f"{self.label}: "
-        lc = _label_color() if self.focused else theme.DEFAULT
+        lc = _label_color() if (self.focused or self.highlight_label) else theme.DEFAULT
 
         # Focus marker (white/default)
         self._write(buffer, x, y, m, fg=theme.DEFAULT, max_width=width)
@@ -234,6 +351,7 @@ class TextAreaField(FormField):
 
     def __init__(self, label: str, *, value: str = "", placeholder: str = "",
                  min_lines: int = 3, **kw):
+        self.highlight_label = kw.pop("highlight_label", False)
         model = kw.pop("model", None) or TextFieldModel(
             value, required=kw.get("required", False))
         super().__init__(label, model=model, **kw)
@@ -279,7 +397,7 @@ class TextAreaField(FormField):
 
     def render(self, buffer: Buffer, x: int, y: int, width: int, height: int):
         m = self.focus_marker()
-        lc = _label_color() if self.focused else theme.DEFAULT
+        lc = _label_color() if (self.focused or self.highlight_label) else theme.DEFAULT
 
         self._write(buffer, x, y, f"{m}{self.label}:", fg=lc, max_width=width)
 
@@ -742,11 +860,13 @@ class ProfileList(FormField):
         self._rebuild_rows()
 
     def get_preferred_height(self, width: int) -> int:
-        # Label + rows + New profile + one visual separator before Settings.
-        return 1 + len(self._rows) + 2
+        # Label + rows + New profile.
+        return 1 + len(self._rows) + 1
 
     def render(self, buffer: Buffer, x: int, y: int, width: int, height: int):
-        self._write(buffer, x, y, f"{self.focus_marker()}{self.label}:",
+        # The focused profile row owns the marker; keeping one off the heading
+        # prevents the list label and every row from shifting independently.
+        self._write(buffer, x, y, f"{self.label}:",
                     fg=_label_color(),
                     max_width=width)
         for index, row in enumerate(self._rows):
@@ -772,7 +892,7 @@ class ProfileList(FormField):
         create_y = y + len(self._rows) + 1
         if create_y < y + height:
             self._create.focused = self.focused and self._cursor == len(self._rows)
-            self._create.set_layout(x, create_y,
+            self._create.set_layout(x + 2, create_y,
                                     min(width, self._create.get_preferred_width()), 1)
             self._create.render(buffer)
 
@@ -805,13 +925,11 @@ class ProfileList(FormField):
             if key == "\x1b[A":
                 if self._cursor > 0:
                     self._cursor -= 1
-                    self._action_cursor = 0
                     return InputResult(True, redraw=True)
                 return InputResult(True, focus="previous")
             if key == "\x1b[B":
                 if self._cursor < last:
                     self._cursor += 1
-                    self._action_cursor = 0
                     return InputResult(True, redraw=True)
                 return InputResult(True, focus="next")
             if key in ("\x1b[D", "h") and self._cursor < last:
@@ -847,6 +965,7 @@ class InlineChoiceField(FormField):
         self.options = options
         self._selected = int(value)
         self._on_change = kw.pop("on_change", None)
+        self._option_colors = kw.pop("option_colors", {})
         super().__init__(label, model=kw.pop("model", None) or FieldModel(self._selected), **kw)
 
     def get_value(self) -> str:
@@ -870,8 +989,12 @@ class InlineChoiceField(FormField):
         for index, option in enumerate(self.options):
             part = f"[{option}]" if index == self._selected else f" {option} "
             part = part.center(9)
+            option_color = (
+                self._option_colors.get(option, theme.FOCUSED)
+                if index == self._selected else theme.MUTED
+            )
             self._write(buffer, cursor_x, y, part,
-                        fg=theme.FOCUSED if index == self._selected else theme.MUTED,
+                        fg=option_color,
                         max_width=max(0, width - (cursor_x - x)))
             cursor_x += len(part)
 
@@ -960,16 +1083,33 @@ ButtonField = FormActionField
 class FormContainer(Component):
     """Manages vertical layout, focus, and input routing for a list of fields."""
 
-    def __init__(self, fields: List[FormField], id: Optional[str] = None, field_spacing: int = 1):
+    def __init__(self, fields: List[Any], id: Optional[str] = None, field_spacing: int = 1):
         super().__init__(id)
         self.fields = fields
         self.field_spacing = field_spacing
         for field in self.fields:
             field.parent = self
-        self._focus_scope = FocusScope(self.fields)
+        self._focus_fields = self._flatten_focus_fields()
+        self._focus_scope = FocusScope(self._focus_fields, trap=False)
         self._scroll_offset: int = 0
         self._field_heights: List[int] = []
         self._field_offsets: List[int] = []
+
+    def _flatten_focus_fields(self) -> list[FormField]:
+        focus_fields = []
+        for field in self.fields:
+            if isinstance(field, FormSection):
+                focus_fields.extend(field.focusable_fields())
+            elif getattr(field, "focusable", True):
+                focus_fields.append(field)
+        return focus_fields
+
+    @property
+    def all_fields(self) -> list[FormField]:
+        result = []
+        for field in self.fields:
+            result.extend(field.fields if isinstance(field, FormSection) else [field])
+        return result
 
     @property
     def _focus_index(self) -> int:
@@ -980,8 +1120,14 @@ class FormContainer(Component):
         return self._focus_scope
 
     def _set_focus(self, index: int):
-        self._focus_scope.manager.focus(max(0, min(index, len(self.fields) - 1)))
+        self._focus_scope.manager.focus(max(0, min(index, len(self._focus_fields) - 1)))
         self.mark_changed()
+
+    def focus_field(self, field: FormField) -> bool:
+        if field not in self._focus_fields:
+            return False
+        self._set_focus(self._focus_fields.index(field))
+        return True
 
     def focus_next(self):
         if self.fields:
@@ -996,8 +1142,8 @@ class FormContainer(Component):
         self._ensure_focus_visible()
 
     def get_focused_field(self) -> Optional[FormField]:
-        if 0 <= self._focus_index < len(self.fields):
-            return self.fields[self._focus_index]
+        if 0 <= self._focus_index < len(self._focus_fields):
+            return self._focus_fields[self._focus_index]
         return None
 
     def activate_focused(self) -> bool:
@@ -1015,7 +1161,7 @@ class FormContainer(Component):
         return any(field.dirty for field in self.fields)
 
     def reset(self):
-        for field in self.fields:
+        for field in self._focus_fields:
             field.reset()
         self.mark_changed()
 
@@ -1043,10 +1189,13 @@ class FormContainer(Component):
         self._ensure_focus_visible()
 
     def _ensure_focus_visible(self):
-        if not self._field_offsets or not self.fields:
+        if not self._field_offsets or not self._focus_fields:
             return
-        fy = self._field_offsets[self._focus_index]
-        fh = self._field_heights[self._focus_index]
+        focused = self._focus_fields[self._focus_index]
+        field_position = self._field_position(focused)
+        if field_position is None:
+            return
+        fy, fh = field_position
         if fy + fh > self._scroll_offset + self.height:
             self._scroll_offset = fy + fh - self.height
         if fy < self._scroll_offset:
@@ -1060,25 +1209,64 @@ class FormContainer(Component):
         # render at stale positions.
         self._compute_layout()
         self._ensure_focus_visible()
-        for i, field in enumerate(self.fields):
-            fy = self._field_offsets[i] - self._scroll_offset
-            fh = self._field_heights[i]
-            if fy + fh <= 0 or fy >= self.height:
+        buffer.set_clip(self.x, self.y, self.width, self.height)
+        try:
+            for i, field in enumerate(self.fields):
+                fy = self._field_offsets[i] - self._scroll_offset
+                fh = self._field_heights[i]
+                if fy + fh <= 0 or fy >= self.height:
+                    continue
+                clipped_h = min(fh, self.height - fy)
+                if clipped_h <= 0:
+                    continue
+                if isinstance(field, FormSection):
+                    field.x = self.x
+                    field.y = self.y + fy
+                    field.render(buffer, self.x, self.y + fy, self.width, clipped_h)
+                else:
+                    indent = getattr(field, "indent", 0)
+                    field.x = self.x + indent
+                    field.y = self.y + fy
+                    field.width = max(1, self.width - indent)
+                    field.height = fh
+                    field.render(buffer, field.x, self.y + fy, field.width, clipped_h)
+        finally:
+            buffer.clear_clip()
+
+    def _field_position(self, target: FormField):
+        for index, item in enumerate(self.fields):
+            item_y = self._field_offsets[index]
+            if isinstance(item, FormSection):
+                cursor_y = item.spacing_before + 1
+                content_width = max(1, self.width - item.content_indent)
+                for child_index, child in enumerate(item.fields):
+                    if child_index:
+                        cursor_y += item.field_spacing
+                    child_height = child.get_preferred_height(content_width)
+                    if child is target:
+                        return item_y + cursor_y, child_height
+                    cursor_y += child_height
+            elif item is target:
+                return item_y, self._field_heights[index]
+        return None
+
+    def field_at(self, local_y: int) -> Optional[FormField]:
+        for index, item in enumerate(self.fields):
+            item_y = self._field_offsets[index] - self._scroll_offset
+            item_height = self._field_heights[index]
+            if not (item_y <= local_y < item_y + item_height):
                 continue
-            clipped_h = min(fh, self.height - fy)
-            if clipped_h <= 0:
-                continue
-            indent = getattr(field, "indent", 0)
-            field.x = self.x + indent
-            field.y = self.y + fy
-            field.width = max(1, self.width - indent)
-            field.height = fh
-            field.render(buffer, field.x, self.y + fy, field.width, clipped_h)
+            if isinstance(item, FormSection):
+                item.x = self.x
+                item.y = self.y + item_y
+                return item.field_at(local_y - item_y, self.width)
+            return item
+        return None
 
     def handle_input(self, event: Any) -> bool:
-        if not self.fields:
+        if not self.fields or not self._focus_fields:
             return False
-        field = self.fields[self._focus_index]
+        field = self._focus_fields[self._focus_index]
 
         if isinstance(event, (str, KeyEvent)):
             key = event.key if isinstance(event, KeyEvent) else event

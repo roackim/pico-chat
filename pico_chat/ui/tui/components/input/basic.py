@@ -8,6 +8,7 @@ from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.colors import theme
 from pico_chat.ui.tui.components.base import Component
 from pico_chat.ui.tui.events import KeyEvent, PasteEvent, TickEvent
+from pico_chat.ui.tui.layout_utils import display_width, wrap_text
 
 
 class _CursorBlink:
@@ -175,6 +176,26 @@ class BoxInput(Component):
     def _lines(self):
         return self.value.split("\n") if self.value else [""]
 
+    def _wrapped_lines(self):
+        wrapped = []
+        for line in self._lines():
+            rendered = wrap_text(line, self.width, first_line_padding=False)
+            wrapped.extend(rendered.split("\n") if rendered else [""])
+        return wrapped or [""]
+
+    def _visual_cursor(self):
+        lines = self._lines()
+        visual_row = 0
+        for row, line in enumerate(lines):
+            if row == self.cursor_row:
+                prefix = line[:self.cursor_col]
+                wrapped_prefix = wrap_text(prefix, self.width, first_line_padding=False)
+                prefix_lines = wrapped_prefix.split("\n") if wrapped_prefix else [""]
+                return visual_row + len(prefix_lines) - 1, display_width(prefix_lines[-1])
+            rendered = wrap_text(line, self.width, first_line_padding=False)
+            visual_row += len(rendered.split("\n")) if rendered else 1
+        return max(0, visual_row - 1), 0
+
     def _flat_cursor(self) -> int:
         return sum(len(line) + 1 for line in self._lines()[:self.cursor_row]) + self.cursor_col
 
@@ -196,7 +217,7 @@ class BoxInput(Component):
         # multiline paste leaves empty lines or removes content: rendering
         # only the new lines cannot erase cells from the previous frame.
         buffer.fill(self.x, self.y, self.width, self.height, " ", bg=theme.get_bg())
-        lines = self._lines()
+        lines = self._wrapped_lines()
         for row, line in enumerate(lines):
             if row >= self.height:
                 break
@@ -206,8 +227,7 @@ class BoxInput(Component):
         if self.focused:
             self._blink.tick()
             if self._blink.visible:
-                row = min(self.cursor_row, len(lines) - 1)
-                col = min(self.cursor_col, len(lines[row]))
+                row, col = self._visual_cursor()
                 if self.y + row < self.y + self.height and self.x + col < self.x + self.width:
                     char = lines[row][col] if col < len(lines[row]) else " "
                     buffer.set(self.x + col, self.y + row, char, reverse=True)

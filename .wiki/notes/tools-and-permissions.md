@@ -10,7 +10,7 @@ The tool system exposes file and shell operations to the LLM agent. Every tool c
 |-------|-----------|
 | `MinimalToolset` | Base; read file, list directory |
 | `FileTools` | Extends minimal; write file, patch file |
-| `ShellTool` | Run shell command |
+| `ShellTool` | Execute shell commands |
 | `SearchTools` | Web search; DuckDuckGo and Wikipedia |
 
 `ToolError` — exception raised by tool functions on failure.
@@ -32,7 +32,11 @@ Each tool class has a corresponding `*ToolWrapper` that adapts it to the OpenAI 
 
 Individual wrappers: `ReadTool`, `WriteTool`, `PatchTool`, `RunTool`, `SearchWebTool`, `SearchWikiTool`, `SubagentTool`, `WaitForSubagentsTool`.
 
-`create_toolset(depth)` — factory that builds the active tool dict. Only registers: `read`, `write`, `patch`, `run`, `search_web`, `search_wiki`, `subagent`, `wait_for_subagents`. (Iteration/memory tools are no longer registered.)
+`create_toolset(depth)` — factory that builds the active tool dict. Only registers: `read`, `write`, `patch`, `run_command`, `search_web`, `search_wiki`, `subagent`, `wait_for_subagents`. (Iteration/memory tools are no longer registered.)
+
+`run_command` is the LLM-facing name for shell execution. The shorter `run`
+name remains accepted as a legacy call alias, but is not advertised in tool
+schemas. The underlying executor remains `ShellTool`.
 
 This adapter layer keeps `tools.py` decoupled from any specific LLM API format.
 
@@ -87,6 +91,25 @@ commands.
 Dangerous pattern detection can upgrade `ALLOW` → `ASK`. It never downgrades `DENY`.
 
 See [notes/security.md](./security.md) for the security layer details.
+
+## Conversation roles
+
+`Role` (`harness/roles.py`) is the higher-level operating model for a
+conversation. It combines enabled tools, each tool's permission policy and
+settings, and optional role prompt instructions. The active role filters the
+tool schemas advertised to the model and the `PermissionGate` denies disabled
+tools before approval prompts or execution.
+
+Roles are owned by individual `Harness` instances, so different conversations
+can use different roles. `Harness.set_role()` rebuilds the tool map and schemas,
+updates the permission gate, and records a role-transition marker in history.
+The existing `ToolPermissionsProfile` remains the enforcement adapter and the
+global profile remains the default compatibility path for root harnesses.
+
+The no-argument `/permissions` popup edits this unified role object. It includes
+role metadata and prompt text, tool enablement, current file/run policy controls,
+and saved-role lifecycle actions. The command-line permission-profile
+subcommands remain as compatibility operations during migration.
 
 ## Iteration Tools (`iteration_tools.py`)
 

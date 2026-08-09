@@ -13,129 +13,11 @@ from pico_chat import pico_cfg
 
 import logging
 
-# ---------------------------------------------------------------------------
-# Dynamic completion helpers (read from pico_cfg at call-time, always fresh)
-# ---------------------------------------------------------------------------
+from .base import ChatUIProtocol, Command, Param, server_name_completions
+from .roles import RolesCommand
 
-def _server_name_completions() -> List[str]:
-    """Return current server names from config (always fresh)."""
-    return list(pico_cfg.config.servers.keys())
+_server_name_completions = server_name_completions
 
-
-# Type for completion sources: a static list of strings, or a callable returning strings.
-CompletionSource = Union[List[str], Callable[[], List[str]]]
-
-
-@dataclass
-class Param:
-    """Defines a single command parameter for hints and autocomplete."""
-    name: str                                          # Display name in hint (e.g. "NAME")
-    completions: Optional[CompletionSource] = None     # Static list or callable
-    path: bool = False                                 # If True, completions scans filesystem dirs
-    required: bool = False                             # True → "NAME", False → "[NAME]"
-
-
-class ChatUIProtocol(Protocol):
-    agent: Any
-    chat_history_panel: Any
-    input_panel: Any
-    compositor: Any
-    
-    def show_popup(self, title: str, content: str, content_padding: int = 1) -> None: ...
-    def hide_popup(self) -> None: ...
-    def show_form_popup(self, title: str, fields: list, on_submit, on_cancel=None, on_new_profile=None, field_spacing=1) -> None: ...
-    def show_confirmation(self, title: str, on_confirm, on_cancel=None) -> None: ...
-
-class Command:
-    def __init__(self, name: str, description: str,
-                 subcommands: Optional[Dict[str, 'Command']] = None,
-                 params: Optional[List[Param]] = None):
-        self.name = name
-        self.description = description
-        self.subcommands = subcommands or {}
-        self.params = params or []
-
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        raise NotImplementedError
-    
-    def has_subcommands(self) -> bool:
-        return len(self.subcommands) > 0
-
-    def resolve_command(self, parts: List[str]) -> tuple['Command', int]:
-        """Walk the subcommand tree to find the deepest command and remaining arg index.
-
-        Returns (command, arg_offset) where arg_offset is the index into `parts`
-        where the command's own arguments begin.
-
-        Example: parts = ["server", "add", "foo"]
-          → (ServerAddCommand, 2)  because parts[2:] are ServerAddCommand's args
-        """
-        cmd = self
-        offset = 0
-        while cmd.has_subcommands() and offset < len(parts):
-            sub_name = parts[offset]
-            if sub_name in cmd.subcommands:
-                cmd = cmd.subcommands[sub_name]
-                offset += 1
-            else:
-                break
-        return cmd, offset
-
-    def get_completions(self, arg_index: int) -> List[str]:
-        """Resolve completions for the argument at the given index.
-
-        For commands with subcommands, the first arg (arg_index 0) is the
-        subcommand name.  Subsequent args are resolved from the subcommand's
-        own params list.
-        """
-        # If this command has subcommands, arg 0 = subcommand name
-        if self.has_subcommands():
-            if arg_index == 0:
-                return sorted(self.subcommands.keys())
-            # Caller must resolve subcommand and shift index
-            return []
-
-        # Leaf command — resolve from params
-        if arg_index < 0 or arg_index >= len(self.params):
-            return []
-
-        p = self.params[arg_index]
-        if p.path:
-            return self._scan_dirs(p.completions)
-
-        if p.completions is None:
-            return []
-        if callable(p.completions):
-            return p.completions()
-        return list(p.completions)
-
-    @staticmethod
-    def _scan_dirs(workspace: Any = None) -> List[str]:
-        """Scan directories for path completion.
-
-        Args:
-            workspace: If provided (str or callable), scan this directory
-                       instead of the current working directory.
-        """
-        base = None
-        if workspace is not None:
-            base = workspace() if callable(workspace) else workspace
-
-        try:
-            entries = []
-            target = base or '.'
-            with os.scandir(target) as it:
-                for entry in sorted(it, key=lambda e: e.name.lower()):
-                    if entry.name.startswith('.'):
-                        continue
-                    try:
-                        if entry.is_dir(follow_symlinks=True):
-                            entries.append(entry.name + '/')
-                    except OSError:
-                        pass
-            return entries
-        except OSError:
-            return []
 
 class HelpCommand(Command):
     def __init__(self):
@@ -143,13 +25,11 @@ class HelpCommand(Command):
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         help_lines = []
-        
         for cmd in sorted(COMMANDS.values(), key=lambda x: x.name):
-            if cmd.name.startswith("_"):
-                continue
-            help_lines.append(f"/{cmd.name.ljust(8)} {cmd.description}")
-        
+            if not cmd.name.startswith("_"):
+                help_lines.append(f"/{cmd.name.ljust(8)} {cmd.description}")
         ui.show_popup("help", "\n".join(help_lines))
+
 
 class ClearCommand(Command):
     def __init__(self):
@@ -157,9 +37,10 @@ class ClearCommand(Command):
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         ui.chat_history_panel.clear()
-        if hasattr(ui.agent, 'clear_history'):
+        if hasattr(ui.agent, "clear_history"):
             ui.agent.clear_history()
         ui.chat_history_panel.add_message("Conversation cleared.", msg_type=SysMsg())
+
 
 class CompactCommand(Command):
     def __init__(self):
@@ -167,55 +48,36 @@ class CompactCommand(Command):
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         if args:
-            ui.chat_history_panel.add_message(
-                "Usage: /compact",
-                msg_type=SysMsgError()
-            )
+            ui.chat_history_panel.add_message("Usage: /compact", msg_type=SysMsgError())
             return
-
-        if not hasattr(ui.agent, 'compact_history'):
+        if not hasattr(ui.agent, "compact_history"):
             ui.chat_history_panel.add_message(
-                "Compaction is not supported by this agent.",
-                msg_type=SysMsgError()
-            )
+                "Compaction is not supported by this agent.", msg_type=SysMsgError())
             return
 
         placeholder = ui.chat_history_panel.add_message(
-            "Compacting history...",
-            msg_type=SysMsg(),
-            title="compact",
-        )
-
+            "Compacting history...", msg_type=SysMsg(), title="compact")
         try:
             result = await ui.agent.compact_history()
-
             if not result.get("ok"):
                 compact_msg = ui.chat_history_panel.new_message(
                     result.get("message", "Compaction skipped."),
-                    msg_type=SysMsg(),
-                    title="compact",
-                )
+                    msg_type=SysMsg(), title="compact")
                 ui.chat_history_panel.replace_message(placeholder, compact_msg)
                 return
-
             compact_msg = ui.chat_history_panel.new_message(
                 (
                     f"Compaction complete: {result['compacted_messages']} messages summarized\n"
                     f"Inserted marker: {result['message_id']}\n"
                     f"Summary size: {result['summary_chars']:,} chars"
                 ),
-                msg_type=SysMsg(),
-                title="compact",
-            )
+                msg_type=SysMsg(), title="compact")
             ui.chat_history_panel.replace_message(placeholder, compact_msg)
-
-        except Exception as e:
+        except Exception as exc:
             error_msg = ui.chat_history_panel.new_message(
-                f"Compaction failed: {e}",
-                msg_type=SysMsgError(),
-                title="compact",
-            )
+                f"Compaction failed: {exc}", msg_type=SysMsgError(), title="compact")
             ui.chat_history_panel.replace_message(placeholder, error_msg)
+
 
 class ExitCommand(Command):
     def __init__(self):
@@ -1194,91 +1056,6 @@ class PermissionsCommand(Command):
 
         ui.show_form_popup("Permissions", fields, lambda _values: save_role(), field_spacing=0)
 
-
-class RolesCommand(Command):
-    def __init__(self):
-        super().__init__("roles", "Select and inspect conversation roles")
-
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        from pico_chat.harness import roles
-
-        if not args or args[0].lower() == "list":
-            runtime = ui._active_runtime() if hasattr(ui, "_active_runtime") else None
-            active = getattr(getattr(runtime, "agent", None), "role", None)
-            active_name = active.name if active else "default"
-            lines = [f"active: {active_name}"]
-            for name in roles.list_roles():
-                role = roles.load_role(name)
-                lines.append(f"{name.ljust(14)} {role.description}")
-            ui.show_popup("roles", "\n".join(lines), content_padding=0)
-            return
-
-        action = args[0].lower()
-        if action == "show" and len(args) == 2:
-            try:
-                role = roles.load_role(args[1])
-            except (KeyError, OSError, TypeError) as exc:
-                ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
-                return
-            enabled = ", ".join(sorted(role.enabled_tool_names())) or "none"
-            content = (
-                f"name: {role.name}\n"
-                f"description: {role.description or 'none'}\n"
-                f"tools: {enabled}\n\n"
-                f"{role.prompt or 'No role-specific prompt.'}"
-            )
-            ui.show_popup(f"role: {role.name}", content)
-            return
-
-        if action == "use" and len(args) == 2:
-            runtime = ui._active_runtime() if hasattr(ui, "_active_runtime") else None
-            if runtime is None:
-                ui.chat_history_panel.add_message("No active conversation.", msg_type=SysMsgError())
-                return
-            if runtime.is_generating:
-                ui.chat_history_panel.add_message(
-                    "Role changes apply after the current response finishes.", msg_type=SysMsgError())
-                return
-            try:
-                role = roles.load_role(args[1])
-                runtime.ensure_agent().set_role(role)
-            except (KeyError, OSError, TypeError) as exc:
-                ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
-                return
-            ui.chat_history_panel.add_message(f"Active role: {role.name}", msg_type=SysMsg())
-            return
-
-        if action == "duplicate" and len(args) in {2, 3}:
-            try:
-                copy = roles.duplicate_role(args[1], args[2] if len(args) == 3 else None)
-            except (KeyError, OSError, ValueError, TypeError) as exc:
-                ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
-                return
-            ui.chat_history_panel.add_message(f"Duplicated role: {copy.name}", msg_type=SysMsg())
-            return
-
-        if action == "rename" and len(args) == 3:
-            try:
-                roles.rename_role(args[1], args[2])
-            except (KeyError, OSError, ValueError, TypeError) as exc:
-                ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
-                return
-            ui.chat_history_panel.add_message(
-                f"Renamed role: {args[1]} -> {args[2]}", msg_type=SysMsg())
-            return
-
-        if action in {"delete", "remove"} and len(args) == 2:
-            try:
-                roles.delete_role(args[1])
-            except (KeyError, OSError, ValueError, TypeError) as exc:
-                ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
-                return
-            ui.chat_history_panel.add_message(f"Deleted role: {args[1]}", msg_type=SysMsg())
-            return
-
-        ui.chat_history_panel.add_message(
-            "Usage: /roles [list|show NAME|use NAME|duplicate NAME [NEW_NAME]|rename OLD NEW|delete NAME]",
-            msg_type=SysMsgError())
 
 class OpenRouterBalanceCommand(Command):
     def __init__(self):

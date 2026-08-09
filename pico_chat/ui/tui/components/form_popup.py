@@ -24,7 +24,8 @@ from typing import Any, Callable, Dict, List, Optional
 from pico_chat.ui.tui.components.base import Component
 from pico_chat.ui.tui.components.box import Box
 from pico_chat.ui.tui.components.form import (
-    FormContainer, FormField, TextField, TextAreaField, RadioListField, ProfileListField,
+    FormContainer, FormField, TextField, TextAreaField, RadioListField,
+    ProfileListField, ProfileList,
 )
 from pico_chat.ui.tui.actions import Action, Actions
 from pico_chat.ui.tui.events import KeyEvent, TickEvent, PasteEvent
@@ -71,10 +72,16 @@ class FormPopup(Component):
 
     def __init__(self, compositor: Optional[Any] = None, id: Optional[str] = None,
                  max_width_ratio: float = 0.72, max_height_ratio: float = 0.7,
-                 modal_host: Optional[ModalHost] = None):
+                 modal_host: Optional[ModalHost] = None, frame_color=None,
+                 padding: int = 1, focus_color=None, min_height: int = 6):
         super().__init__(id)
         self.max_width_ratio = max_width_ratio
         self.max_height_ratio = max_height_ratio
+        self.frame_color = frame_color or theme.PERMISSION
+        self.padding = padding
+        self.focus_color = focus_color
+        self.min_height = min_height
+        self._submit_label = "ok"
 
         self.is_visible = False
         self._form_container: Optional[FormContainer] = None
@@ -142,7 +149,8 @@ class FormPopup(Component):
              on_cancel: Optional[Callable[[], None]] = None,
              on_action: Optional[Callable[[Action], None]] = None,
              on_new_profile: Optional[Callable[[], None]] = None,
-             field_spacing: int = 1):
+             field_spacing: int = 1, submit_label: str = "ok",
+             focus_submit: bool = False):
         """Display the form popup.
 
         Args:
@@ -156,6 +164,7 @@ class FormPopup(Component):
         self._on_cancel = on_cancel
         self._on_action = on_action
         self._on_new_profile = on_new_profile
+        self._submit_label = submit_label
         self._error_msg = None
         self._action_focus_index = None
         self._set_action_focus(None)
@@ -165,14 +174,16 @@ class FormPopup(Component):
         self._box = Box(
             self._form_container,
             title=title,
-            fg=theme.PERMISSION,
+            fg=self.frame_color,
             focused=True,
-            actions=([_NEW_PROFILE_ACTION, _VALIDATE_ACTION, _CANCEL_ACTION]
-                     if on_new_profile else [_VALIDATE_ACTION, _CANCEL_ACTION]),
-            padding=1,
+            actions=self._form_actions(),
+            padding=self.padding,
             focus_in_padding=True,
+            focus_color=self.focus_color,
         )
         self._form_container.focus_scope.enter()
+        if focus_submit:
+            self._focus_primary_action()
 
         self.is_visible = True
         self._center_and_layout()
@@ -213,6 +224,14 @@ class FormPopup(Component):
             self._center_and_layout()
             self.mark_changed()
 
+    def refresh(self) -> None:
+        """Relayout and repaint after external field or option changes."""
+        if self.is_visible:
+            self._center_and_layout()
+            self.mark_changed()
+            if self.compositor:
+                self.compositor.request_render()
+
     # ── layout ─────────────────────────────────────────────────
 
     def _center_and_layout(self):
@@ -226,8 +245,8 @@ class FormPopup(Component):
         # Give text fields room to breathe; the form must be wide enough to
         # comfortably type server names/URLs into.
         content_w = 56  # generous default so the form isn't cramped
-        if self._form_container.fields:
-            for f in self._form_container.fields:
+        if self._form_container.all_fields:
+            for f in self._form_container.all_fields:
                 label_len = len(f.label) + 4
                 if isinstance(f, TextField):
                     label_len += 34  # space for the input value
@@ -241,9 +260,9 @@ class FormPopup(Component):
         error_h = 1 if self._error_msg else 0
         popup_h = min(
             int(term_h * self.max_height_ratio),
-            inner_h + 2 + 2 * self._box.padding + error_h + 2,
+            inner_h + 2 + 2 * self._box.padding_y + error_h + 2,
         )
-        popup_h = max(popup_h, 6)
+        popup_h = max(popup_h, self.min_height)
 
         self.x = max(0, (term_w - popup_w) // 2)
         self.y = max(0, (term_h - popup_h) // 2)
@@ -261,7 +280,7 @@ class FormPopup(Component):
             return False
 
         # Validate required fields
-        for f in self._form_container.fields:
+        for f in self._form_container.all_fields:
             if f.model is not None and not f.validate():
                 if f.model.error == "This field is required":
                     self._error_msg = f"'{f.label}' is required"
@@ -278,7 +297,8 @@ class FormPopup(Component):
                     self.mark_changed()
                     return False
 
-        values = {f.label: f.get_value() for f in self._form_container.fields}
+        values = {f.label: f.get_value() for f in self._form_container.all_fields
+              if f.label}
         self.hide()
         if self._on_action:
             self._on_action(Action(Actions.SUBMIT, values))
@@ -303,8 +323,10 @@ class FormPopup(Component):
         return True
 
     def _form_actions(self) -> list[_FormAction]:
-        return ([_NEW_PROFILE_ACTION, _VALIDATE_ACTION, _CANCEL_ACTION]
-                if self._on_new_profile else [_VALIDATE_ACTION, _CANCEL_ACTION])
+        submit_action = _FormAction(_VALIDATE_ACTION.key, self._submit_label)
+        return ([submit_action, _CANCEL_ACTION]
+            if not self._on_new_profile else
+            [_NEW_PROFILE_ACTION, submit_action, _CANCEL_ACTION])
 
     def _set_action_focus(self, index: Optional[int]) -> None:
         self._action_focus_index = index
@@ -374,7 +396,7 @@ class FormPopup(Component):
                 if key == "\x1b[A":
                     self._set_action_focus(None)
                     if self._form_container:
-                        self._form_container._set_focus(len(self._form_container.fields) - 1)
+                        self._form_container._set_focus(len(self._form_container._focus_fields) - 1)
                     return True
                 if key in ("\x1b[D", "h"):
                     self._set_action_focus((self._action_focus_index - 1) % len(actions))
@@ -385,10 +407,13 @@ class FormPopup(Component):
                 return True
             if key == "\x1b[B" and self._form_container:
                 focused = self._form_container.get_focused_field()
-                if focused is self._form_container.fields[-1]:
+                if self._is_last_field(focused):
                     return self._focus_primary_action()
             if key in ("\r", "\n"):
                 if self._form_container:
+                    if not self._form_container._focus_fields:
+                        self._try_submit()
+                        return True
                     self._form_container.handle_input(event)
                 return True
             if key == "\x1b[Z":  # Shift+Tab — let FormContainer handle
@@ -445,35 +470,31 @@ class FormPopup(Component):
         return True
 
     def _is_last_field(self, field) -> bool:
-        if not self._form_container or not self._form_container.fields:
+        if not self._form_container or not self._form_container._focus_fields:
             return True
-        return self._form_container.fields[-1] is field
+        return self._form_container._focus_fields[-1] is field
 
     def _handle_field_click(self, event: MouseEvent):
         """Focus the field that was clicked."""
         if not self._form_container:
             return
         container = self._form_container
-        for i, field in enumerate(container.fields):
-            fy = container._field_offsets[i] - container._scroll_offset
-            fh = container._field_heights[i]
-            field_y = self._box.y + 1 + self._box.padding_y + fy
-            field_bottom = field_y + fh
-            if field_y <= event.y < field_bottom:
-                container._set_focus(i)
-                # ProfileListField owns row buttons and must receive the click
-                # itself. Generic radio handling would otherwise select the
-                # row before its rename/duplicate/remove hit testing runs.
-                if isinstance(field, ProfileListField):
-                    field.handle_input(event)
-                elif isinstance(field, RadioListField):
-                    option_index = event.y - field_y - 1
-                    if 0 <= option_index < len(field.options):
-                        field.set_value(option_index)
-                else:
-                    field.handle_input(event)
-                container._ensure_focus_visible()
-                return
+        content_y = self._box.y + 1 + self._box.padding_y
+        field = container.field_at(event.y - content_y)
+        if field is None:
+            return
+        container.focus_field(field)
+        # ProfileListField owns row buttons and must receive the click itself.
+        # Generic radio handling would otherwise select the row first.
+        if isinstance(field, (ProfileListField, ProfileList)):
+            field.handle_input(event)
+        elif isinstance(field, RadioListField):
+            option_index = event.y - field.y - 1
+            if 0 <= option_index < len(field.options):
+                field.set_value(option_index)
+        else:
+            field.handle_input(event)
+        container._ensure_focus_visible()
 
     # ── rendering ──────────────────────────────────────────────
 

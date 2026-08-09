@@ -175,11 +175,11 @@ class PatchTool(ToolWrapper):
 
 
 class RunTool(ToolWrapper):
-    """Execute shell command"""
+    """Execute a shell command"""
     
     def __init__(self, toolset: MinimalToolset):
         super().__init__(
-            name="run",
+            name="run_command",
             description=(
                 "Execute a shell command in the workspace. "
                 "Supports pipes (|), command chaining (&&, ||, ;). "
@@ -455,7 +455,7 @@ def create_toolset(
         "read": ReadTool(toolset),
         "write": WriteTool(toolset),
         "patch": PatchTool(toolset),
-        "run": RunTool(toolset),
+        "run_command": RunTool(toolset),
     }
     
     # Search tools with depth-based configuration

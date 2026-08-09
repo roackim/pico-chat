@@ -35,6 +35,21 @@ def test_box_input_handles_multiline_cursor_and_rendering():
     assert buffer.cells[2][1].char == "t"
 
 
+def test_box_input_wraps_long_lines_and_renders_cursor():
+    field = BoxInput("hello world")
+    field.set_layout(1, 1, 6, 2)
+    field.set_focused(True)
+    field.cursor_row = 0
+    field.cursor_col = len(field.value)
+
+    buffer = Buffer(8, 4)
+    field.render(buffer)
+
+    assert "".join(cell.char for cell in buffer.cells[1][1:7]) == "hello "
+    assert "".join(cell.char for cell in buffer.cells[2][1:7]) == "world "
+    assert buffer.cells[2][6].reverse
+
+
 def test_box_input_supports_home_end_and_delete():
     field = BoxInput("abc\ndef")
     field.cursor_row = 0
