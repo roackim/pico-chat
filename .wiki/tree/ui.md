@@ -92,8 +92,11 @@ facades for the concrete command groups.
 - `tabs.py` owns tab new/close/switch/list commands and their parent dispatcher.
 - `debug.py` owns debug panel/context/log commands; `ToolsCommand` remains in
 	`builtins.py` until the tool-inspection slice is extracted.
-- `permissions.py` owns the unified role/profile permissions editor and routes
-	active role changes through `ConversationRuntime.switch_role()`.
+- `permissions.py` owns the unified role/profile permissions editor and applies
+	role selection and edits through `ConversationRuntime.switch_role()`; before
+	the first tab exists, it applies changes to the initial agent used to create
+	the first conversation runtime. Role changes emit a muted system notice in
+	the conversation, replacing the immediately previous role notice.
 - The permissions role editor routes role saves and active-role deletion through
 	`ConversationRuntime.switch_role()` and reports active-generation rejection
 	inside the chat history instead of escaping the callback.

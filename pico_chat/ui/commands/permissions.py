@@ -232,9 +232,13 @@ class PermissionsCommand(Command):
     async def _execute_role_editor(self, ui: ChatUIProtocol):
         from pico_chat.ui.role_editor_form import RoleEditorForm
         from pico_chat.ui.role_editor_model import RoleEditorModel
+        from pico_chat.ui.conversation_runtime import _show_role_change
 
         runtime = ui._active_runtime() if hasattr(ui, "_active_runtime") else None
-        active_role = getattr(getattr(runtime, "agent", None), "role", None)
+        agent = getattr(runtime, "agent", None) if runtime is not None else getattr(ui, "agent", None)
+        if agent is None and runtime is not None:
+            agent = runtime.ensure_agent()
+        active_role = getattr(agent, "role", None)
         editor = RoleEditorModel(active_role.name if active_role else "default")
         role_form = RoleEditorForm(editor)
         fields = role_form.fields
@@ -254,6 +258,10 @@ class PermissionsCommand(Command):
                 except RuntimeError as exc:
                     ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
                     return
+            elif agent is not None:
+                previous_name = getattr(getattr(agent, "role", None), "name", "default")
+                agent.set_role(updated)
+                _show_role_change(ui.chat_history_panel, previous_name, updated.name)
             if updated.name not in role_options:
                 role_options.append(updated.name)
                 field("available_roles").options = role_options
@@ -261,8 +269,17 @@ class PermissionsCommand(Command):
 
         def select_role(name: str):
             try:
-                sync_fields(editor.select(name))
+                selected = editor.select(name)
+                if runtime is not None:
+                    runtime.switch_role(selected)
+                elif agent is not None:
+                    previous_name = getattr(getattr(agent, "role", None), "name", "default")
+                    agent.set_role(selected)
+                    _show_role_change(ui.chat_history_panel, previous_name, selected.name)
+                sync_fields(selected)
             except (KeyError, OSError, TypeError) as exc:
+                ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
+            except RuntimeError as exc:
                 ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
 
         def create_role():
@@ -311,13 +328,18 @@ class PermissionsCommand(Command):
         def remove_role_now(name: str):
             try:
                 replacement = editor.remove(name)
-                active_runtime_role = getattr(getattr(runtime, "agent", None), "role", None)
+                active_runtime_role = getattr(agent, "role", None)
                 if active_runtime_role is not None and active_runtime_role.name == name:
-                    try:
-                        runtime.switch_role(replacement)
-                    except RuntimeError as exc:
-                        ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
-                        return
+                    if runtime is not None:
+                        try:
+                            runtime.switch_role(replacement)
+                        except RuntimeError as exc:
+                            ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
+                            return
+                    elif agent is not None:
+                        previous_name = getattr(getattr(agent, "role", None), "name", "default")
+                        agent.set_role(replacement)
+                        _show_role_change(ui.chat_history_panel, previous_name, replacement.name)
                 role_options.remove(name)
                 field("available_roles").options = role_options
                 field("available_roles").set_value(role_options.index(replacement.name))

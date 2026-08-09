@@ -2,6 +2,7 @@ import pytest
 
 from pico_chat.harness.roles import Role
 from pico_chat.ui.conversation_runtime import ConversationRuntime
+from pico_chat.ui.tui.msg_types import SysMsg
 
 
 class FakeAgent:
@@ -29,6 +30,26 @@ def test_switch_role_delegates_to_conversation_agent():
 
     assert result is role
     assert agent.role is role
+
+
+def test_switch_role_adds_muted_notice_to_conversation():
+    runtime = ConversationRuntime(agent=FakeAgent())
+
+    runtime.switch_role(Role("reviewer"))
+
+    assert len(runtime.messages) == 1
+    assert runtime.messages[0].base_text == "Role changed: initial -> reviewer"
+    assert isinstance(runtime.messages[0].type, SysMsg)
+
+
+def test_consecutive_role_changes_replace_the_previous_notice():
+    runtime = ConversationRuntime(agent=FakeAgent())
+
+    runtime.switch_role(Role("reviewer"))
+    runtime.switch_role(Role("researcher"))
+
+    assert len(runtime.messages) == 1
+    assert runtime.messages[0].base_text == "Role changed: reviewer -> researcher"
 
 
 def test_switch_role_rejects_active_generation():

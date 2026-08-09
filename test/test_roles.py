@@ -14,6 +14,46 @@ from pico_chat.harness.roles import (
 )
 import pico_chat.harness.roles as roles_module
 from pico_chat.ui.role_editor_model import RoleEditorModel
+from pico_chat.ui.commands.permissions import PermissionsCommand
+
+
+class _RoleEditorAgent:
+    def __init__(self):
+        self.role = Role("default")
+
+    def set_role(self, role):
+        self.role = role
+
+
+class _RoleEditorRuntime:
+    def __init__(self):
+        self.agent = _RoleEditorAgent()
+
+    def switch_role(self, role):
+        self.agent.set_role(role)
+        return role
+
+
+class _RoleEditorUI:
+    def __init__(self):
+        self.runtime = _RoleEditorRuntime()
+        self.chat_history_panel = type("Panel", (), {"add_message": lambda *_args, **_kwargs: None})()
+        self.fields = None
+
+    def _active_runtime(self):
+        return self.runtime
+
+    @property
+    def agent(self):
+        return self.runtime.agent
+
+    def show_form_popup(self, _title, fields, _on_submit, **_kwargs):
+        self.fields = fields
+
+
+class _RoleEditorUIWithoutRuntime(_RoleEditorUI):
+    def _active_runtime(self):
+        return None
 
 
 def test_reviewer_role_combines_tools_permissions_and_prompt():
@@ -24,6 +64,26 @@ def test_reviewer_role_combines_tools_permissions_and_prompt():
     }
     assert reviewer.prompt
     assert reviewer.to_permission_profile().write.inside_repo == "deny"
+
+
+def test_permissions_role_selection_applies_to_active_conversation():
+    ui = _RoleEditorUI()
+
+    import asyncio
+    asyncio.run(PermissionsCommand().execute(ui, []))
+    ui.fields[0]._on_select("reviewer")
+
+    assert ui.runtime.agent.role.name == "reviewer"
+
+
+def test_permissions_role_selection_applies_before_first_conversation_tab():
+    ui = _RoleEditorUIWithoutRuntime()
+
+    import asyncio
+    asyncio.run(PermissionsCommand().execute(ui, []))
+    ui.fields[0]._on_select("reviewer")
+
+    assert ui.agent.role.name == "reviewer"
 
 
 def test_disabled_tool_is_denied_before_permission_prompt():

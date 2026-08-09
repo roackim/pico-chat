@@ -44,6 +44,29 @@ def test_delegation_tools_require_approval():
     assert gate.check("wait_for_subagents", {}) == "ask"
 
 
+def test_role_change_history_replaces_consecutive_notices():
+    harness = Harness.__new__(Harness)
+    harness.history = []
+
+    harness._record_role_change("default", "reviewer")
+    harness._record_role_change("reviewer", "researcher")
+
+    assert len(harness.history) == 1
+    assert harness.history[0]["content"] == "[Role changed from reviewer to researcher]"
+
+
+def test_role_change_history_preserves_notice_after_other_messages():
+    harness = Harness.__new__(Harness)
+    harness.history = []
+
+    harness._record_role_change("default", "reviewer")
+    harness._add_message_to_history("user", "hello")
+    harness._record_role_change("reviewer", "researcher")
+
+    assert len(harness.history) == 3
+    assert harness.history[-1]["content"] == "[Role changed from reviewer to researcher]"
+
+
 # Shared test helpers (from conftest)
 from conftest import NoopDebugStream, StubReadTool, run_harness_tool_call
 

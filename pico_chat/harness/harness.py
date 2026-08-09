@@ -139,11 +139,22 @@ class Harness:
         }
         self.tool_schemas = [tool.get_schema() for tool in self.tools_map.values()] if self.tools_map else None
         self.debug_stream.log("ROLE", {"name": role.name, "tools": sorted(role.enabled_tool_names())})
-        if previous_name != role.name:
-            self._add_message_to_history(
-                "system",
-                f"[Role changed from {previous_name} to {role.name}]",
-            )
+        self._record_role_change(previous_name, role.name)
+
+    def _record_role_change(self, previous_name: str, role_name: str) -> None:
+        """Record a role change without stacking consecutive role notices."""
+        if previous_name == role_name:
+            return
+
+        content = f"[Role changed from {previous_name} to {role_name}]"
+        if (
+            self.history
+            and self.history[-1].get("role") == "system"
+            and str(self.history[-1].get("content", "")).startswith("[Role changed from ")
+        ):
+            self.history[-1]["content"] = content
+            return
+        self._add_message_to_history("system", content)
 
     def switch_workspace(self, new_path: str) -> list[str]:
         """Change the workspace directory and rebuild project context.

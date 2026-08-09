@@ -152,20 +152,24 @@ def default_role() -> Role:
 
 
 def builtin_roles() -> dict[str, Role]:
+    reviewer = Role.from_permission_profile(
+        deepcopy(tool_permissions.scaffolder),
+        description="Read-only code review",
+        prompt="Review code carefully. Do not modify files. Prioritize defects, regressions, and missing tests.",
+        enabled_tools={"read", "search_web", "search_wiki", "subagent", "wait_for_subagents"},
+    )
+    reviewer.name = "reviewer"
+    researcher = Role.from_permission_profile(
+        deepcopy(tool_permissions.strict),
+        description="Research and summarize without making changes",
+        prompt="Investigate the request, gather evidence, and report precise findings without modifying files.",
+        enabled_tools={"read", "search_web", "search_wiki"},
+    )
+    researcher.name = "researcher"
     return {
         "default": default_role(),
-        "reviewer": Role.from_permission_profile(
-            deepcopy(tool_permissions.scaffolder),
-            description="Read-only code review",
-            prompt="Review code carefully. Do not modify files. Prioritize defects, regressions, and missing tests.",
-            enabled_tools={"read", "search_web", "search_wiki", "subagent", "wait_for_subagents"},
-        ),
-        "researcher": Role.from_permission_profile(
-            deepcopy(tool_permissions.strict),
-            description="Research and summarize without making changes",
-            prompt="Investigate the request, gather evidence, and report precise findings without modifying files.",
-            enabled_tools={"read", "search_web", "search_wiki"},
-        ),
+        "reviewer": reviewer,
+        "researcher": researcher,
     }
 
 

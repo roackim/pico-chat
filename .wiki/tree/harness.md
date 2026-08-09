@@ -98,6 +98,8 @@ Global `permissions` singleton (defaults to `permissive`).
 `Role` — conversation-owned operating mode combining enabled tools, tool policies,
 and role-specific prompt instructions. Built-in roles include `default`,
 `reviewer`, and `researcher`; saved roles use `~/.config/pico-chat/roles.toml`.
+- Consecutive role changes are represented by one system history notice; a new
+	role notice replaces the previous one until another conversation message is added.
 - Role policy entries are derived from registered tool metadata rather than a
 	hard-coded `ALL_TOOLS` list; newly registered tools receive a disabled policy
 	entry with metadata-owned default settings when loading or constructing a role.
