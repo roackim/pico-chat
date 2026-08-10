@@ -77,7 +77,7 @@ class Config:
         self.ui_metrics_show_speed: bool = True
         self.ui_metrics_show_ttft: bool = False
         self.ui_metrics_refresh_interval: float = 0.1  # Seconds between metric updates
-        self.ui_status_bar_fields: list[str] = ["endpoint_model", "context", "role"]
+        self.ui_status_bar_fields: list[str] = ["endpoint_model", "role", "context"]
         
         self.target_fps: int = 60
         

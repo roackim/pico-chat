@@ -205,6 +205,24 @@ class chatTUI(ChatActionHandlers):
             "model": model,
             "workspace": getattr(agent, "workspace", ""),
         })
+        self.status_bar.set_field_colors({
+            "context": self._context_color(context_used, context_max),
+        })
+
+    @staticmethod
+    def _context_color(used: int | None, maximum: int | None) -> Any:
+        """Color the context field by how full the window is.
+
+        green < 33%, orange < 66%, red >= 66%.
+        """
+        if not used or not maximum or maximum <= 0:
+            return theme.DEFAULT
+        ratio = used / maximum
+        if ratio < 0.33:
+            return theme.SUCCESS
+        if ratio < 0.66:
+            return theme.WARNING
+        return theme.ERROR
 
     @property
     def agent(self):

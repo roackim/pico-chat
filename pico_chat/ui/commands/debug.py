@@ -52,6 +52,29 @@ class DebugGetContextCommand(Command):
             ui.chat_history_panel.add_message(f"Failed to get context: {exc}", msg_type=SysMsgError())
 
 
+class DebugSystemPromptCommand(Command):
+    def __init__(self):
+        super().__init__("system_prompt", "Show the system prompt currently in use")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        agent = getattr(ui, "agent", None)
+        if agent is None or not hasattr(agent, "get_system_prompt"):
+            ui.chat_history_panel.add_message(
+                "System prompt not available.", msg_type=SysMsgError())
+            return
+        try:
+            prompt = await agent.get_system_prompt()
+        except Exception as exc:
+            logging.getLogger("tui").error("Error getting system prompt: %s", exc, exc_info=True)
+            ui.chat_history_panel.add_message(
+                f"Failed to get system prompt: {exc}", msg_type=SysMsgError())
+            return
+        role = getattr(getattr(agent, "role", None), "name", "default")
+        ui.chat_history_panel.add_message(
+            f"System prompt (role: {role})\n{'-' * 80}\n{prompt}",
+            msg_type=SysMsg(), title="system prompt")
+
+
 class DebugLogCommand(Command):
     def __init__(self):
         super().__init__("log", "Show recent log messages (default: 50, max: 200)")
@@ -77,7 +100,7 @@ class DebugCommand(Command):
     def __init__(self):
         super().__init__("debug", "Debug utilities", subcommands={
             "panel": DebugPanelCommand(), "get_context": DebugGetContextCommand(),
-            "log": DebugLogCommand(),
+            "log": DebugLogCommand(), "system_prompt": DebugSystemPromptCommand(),
         })
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
@@ -95,5 +118,5 @@ from .builtins import ToolsCommand
 
 __all__ = [
     "ToolsCommand", "DebugCommand", "DebugPanelCommand",
-    "DebugGetContextCommand", "DebugLogCommand",
+    "DebugGetContextCommand", "DebugLogCommand", "DebugSystemPromptCommand",
 ]

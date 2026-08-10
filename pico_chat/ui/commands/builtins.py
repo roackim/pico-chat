@@ -43,6 +43,8 @@ class ClearCommand(Command):
         if hasattr(ui.agent, "clear_history"):
             ui.agent.clear_history()
         ui.chat_history_panel.add_message("Conversation cleared.", msg_type=SysMsg())
+        if hasattr(ui, "refresh_status_bar"):
+            ui.refresh_status_bar()
 
 
 class CompactCommand(Command):

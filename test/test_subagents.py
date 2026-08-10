@@ -342,6 +342,111 @@ class TestHarnessSubagentIntegration:
 
         assert h._tool_permissions is tool_permissions.scaffolder
 
+    def test_clear_history_resets_provider_usage(self, tmp_path):
+        """/clear must drop the accumulated provider usage so the status bar
+        no longer shows the previous conversation's context."""
+        from pico_chat.harness.harness import Harness
+        from pico_chat.harness.usage import TokenUsage
+
+        with patch("pico_chat.harness.harness.create_server"):
+            h = Harness(workspace_path=str(tmp_path), depth=0)
+
+        h._last_usage = TokenUsage(prompt_tokens=12000, completion_tokens=500)
+        h.history = [{"role": "user", "content": "hello"}]
+
+        h.clear_history()
+
+        assert h.history == []
+        assert h._last_usage is None
+
+    def test_last_usage_preserved_during_generation(self, tmp_path):
+        """The provider-reported usage must not be reset at the start of a
+        generation, otherwise the status bar flickers between the authoritative
+        count and the (lower) heuristic estimate."""
+        import asyncio
+        from types import SimpleNamespace
+
+        from pico_chat.harness.harness import Harness
+        from pico_chat.harness.usage import TokenUsage
+
+        with patch("pico_chat.harness.harness.create_server"):
+            h = Harness(workspace_path=str(tmp_path), depth=0)
+
+        h._last_usage = TokenUsage(prompt_tokens=12000, completion_tokens=500)
+
+        # A usage-bearing chunk arrives mid-generation (empty choices, like the
+        # final OpenAI/Ollama usage chunk). _last_usage must be updated, not
+        # wiped to None first.
+        usage_chunk = SimpleNamespace(choices=[], usage={"prompt_tokens": 13000, "completion_tokens": 600})
+        server = h.server
+
+        async def fake_completion(messages, tools=None, stream=True):
+            yield usage_chunk
+
+        server.create_completion = fake_completion
+
+        async def run():
+            async for _ in h._stream_llm_response([{"role": "user", "content": "hi"}]):
+                pass
+
+        asyncio.run(run())
+
+        assert h._last_usage is not None
+        assert h._last_usage.prompt_tokens == 13000
+
+    def test_get_system_prompt_includes_role(self, tmp_path):
+        """get_system_prompt must reflect the active role's name and prompt."""
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        from pico_chat.harness.harness import Harness
+        from pico_chat.harness.roles import Role
+
+        with patch("pico_chat.harness.harness.create_server"):
+            h = Harness(workspace_path=str(tmp_path), depth=0)
+
+        h.server.get_model_name = AsyncMock(return_value="test-model")
+        h.server.get_context_window = AsyncMock(return_value=32768)
+
+        h.set_role(Role("reviewer", prompt="You are a strict code reviewer."))
+        prompt = asyncio.run(h.get_system_prompt())
+
+        assert "Active Role: reviewer" in prompt
+        assert "You are a strict code reviewer." in prompt
+
+    def test_context_usage_starts_at_zero_before_any_message(self, tmp_path):
+        """With no history the context estimate must be 0, not the system
+        prompt size (the system prompt is only sent with the first message)."""
+        from pico_chat.harness.harness import Harness
+
+        with patch("pico_chat.harness.harness.create_server"):
+            h = Harness(workspace_path=str(tmp_path), depth=0)
+
+        h.server._cached_context_window = 32768
+        used, maximum, percentage = h.estimate_context_usage()
+
+        assert used == 0
+        assert percentage == 0.0
+        assert maximum > 0
+
+    def test_context_usage_includes_role_prompt(self, tmp_path):
+        """A role with a prompt must increase the estimated context, since the
+        role prompt is part of the system prompt sent on the next turn."""
+        from pico_chat.harness.harness import Harness
+        from pico_chat.harness.roles import Role
+
+        with patch("pico_chat.harness.harness.create_server"):
+            h = Harness(workspace_path=str(tmp_path), depth=0)
+
+        h.server._cached_context_window = 32768
+        h.history = [{"role": "user", "content": "hello"}]
+        base_used, _, _ = h.estimate_context_usage()
+
+        h.set_role(Role("reviewer", prompt="You are a strict code reviewer."))
+        role_used, _, _ = h.estimate_context_usage()
+
+        assert role_used > base_used
+
     def test_subagent_role_isolated_from_parent_role(self, tmp_path):
         """A child harness keeps scaffolder policy even when a parent role is supplied."""
         from pico_chat.harness.harness import Harness

@@ -45,13 +45,16 @@ order come from `pico_cfg.config.ui_status_bar_fields`; the default is:
 
 ```toml
 [ui]
-status_bar_fields = ["endpoint_model", "context", "role"]
+status_bar_fields = ["endpoint_model", "role", "context"]
 ```
 
-The default display is `endpoint:model  ctx 12.4k/32k  role default`.
+The default display is `endpoint:model  role default  ctx 12.4k/32k`.
 Available values include `endpoint_model`, `endpoint`, `model`, `context`,
 `role`, `state`, and `workspace`. Provider-reported prompt usage replaces the
 context estimate after a response supplies authoritative usage data.
+
+The `context` field is colorized by how full the context window is:
+green below 33%, orange/amber below 66%, and red at or above 66%.
 
 ## Library Contracts
 

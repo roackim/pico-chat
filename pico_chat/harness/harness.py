@@ -316,6 +316,9 @@ class Harness:
     def clear_history(self):
         """Clear the conversation history for the agent."""
         self.history = []
+        # Drop the provider-reported usage so the status bar no longer shows
+        # the previous conversation's accumulated context after /clear.
+        self._last_usage = None
         self.debug_stream.log("CLEAR", "Conversation history cleared")
     
     def delete_messages_after_id(self, message_id: str, inclusive: bool = True) -> bool:
@@ -372,9 +375,16 @@ class Harness:
         
         effective_history = self._get_effective_history()
         
+        # Before any message the context is empty: start at 0. The system
+        # prompt is only sent alongside the first user message, so it is not
+        # counted until there is history to send.
+        if not effective_history:
+            max_tokens = self.server._cached_context_window or 32768
+            return 0, max_tokens, 0.0
+        
         # Check if the first message is a compaction marker
         compacted_tokens = 0
-        if effective_history and self._is_compaction_message(effective_history[0]):
+        if self._is_compaction_message(effective_history[0]):
             # Extract original token count from compaction marker if available
             content = effective_history[0].get("content", "")
             import re
@@ -391,9 +401,11 @@ class Harness:
             marker_tokens = estimate_messages_tokens([effective_history[0]])
             current_tokens = current_tokens - marker_tokens + compacted_tokens
         
-        # Add system prompt estimation (system message is added during _build_messages)
-        # Rough estimate: project context + base system prompt
-        system_estimate = estimate_tokens(self.project_context) + 500
+        # Add system prompt estimation (system message is added during _build_messages).
+        # Include the active role's prompt so a role change (which swaps the
+        # system prompt) is reflected in the estimate.
+        role_prompt = getattr(getattr(self, "role", None), "prompt", "") or ""
+        system_estimate = estimate_tokens(self.project_context) + estimate_tokens(role_prompt) + 500
         
         current_tokens += system_estimate
         
@@ -568,6 +580,28 @@ class Harness:
         messages.extend(self._get_effective_history())
         return messages
 
+    async def get_system_prompt(self) -> str:
+        """Return the exact system prompt that would be sent on the next turn.
+
+        Includes the active role's name and prompt, so switching roles is
+        reflected here.
+        """
+        model_name = await self.server.get_model_name()
+        context_window = await self.server.get_context_window()
+        if isinstance(context_window, int):
+            context_window_str = f"{context_window // 1024}k"
+        else:
+            context_window_str = str(context_window)
+
+        system_msg = get_system_message(
+            project_context=self.project_context,
+            model_name=model_name,
+            context_window=context_window_str,
+            role_name=getattr(getattr(self, "role", None), "name", ""),
+            role_prompt=getattr(getattr(self, "role", None), "prompt", ""),
+        )
+        return system_msg.get("content", "")
+
     async def _stream_llm_response(self, messages: List[Dict[str, Any]]) -> AsyncGenerator[chunks.Chunk, None]:
         """Stream LLM response and collect content/tool calls.
 
@@ -588,7 +622,9 @@ class Harness:
         metrics = MetricsState()
         parser = ThinkingTagParser()
         tool_calls_buffer: Dict[int, Dict[str, Any]] = {}
-        self._last_usage = None
+        # Keep the previous provider-reported usage until a new one arrives.
+        # Resetting here made the status bar flicker between the authoritative
+        # count and the (lower) heuristic estimate during generation.
 
         # Reset live reasoning accumulator for this generation
         self._current_reasoning = ""

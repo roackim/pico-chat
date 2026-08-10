@@ -66,7 +66,7 @@ model-aware context cache. Existing `[servers]` configs remain supported;
 - `config.ui_msg_h_padding`, `config.ui_msg_v_margin`
 - `config.ui_cursor_frequency`, `config.ui_cursor_pulse_delay`
 - `config.ui_show_metrics`, `config.ui_metrics_show_speed`, etc.
-- `config.ui_status_bar_fields` — ordered status-bar fields; default is `['endpoint_model', 'context', 'role']`
+- `config.ui_status_bar_fields` — ordered status-bar fields; default is `['endpoint_model', 'role', 'context']`
 
 **Markdown styles:**
 - `config.markdown_styles` — dict of per-element style dicts (`fg`/`bg`/`bold`/`reverse`) loaded from the `[markdown_styles]` TOML section. Elements: `header1`–`header6`, `bold`, `italic`, `code`, `code_block`, `quote`, `list`, `hr`, `table`, `link`, `paragraph`. See [ui.md](./ui.md#markdown-rendering).

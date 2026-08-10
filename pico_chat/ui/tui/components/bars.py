@@ -39,6 +39,12 @@ class StatusBar(Component):
         self.fields = list(fields) if fields is not None else None
         self.separator = separator
         self.values: dict[str, str] = {}
+        self.field_colors: dict[str, Any] = {}
+
+    def set_field_colors(self, colors: dict[str, Any]):
+        """Set per-field foreground colors (field name -> RGB/ANSIColor)."""
+        self.field_colors = dict(colors)
+        self.mark_changed()
 
     def get_preferred_height(self, width: int) -> int:
         return 1
@@ -71,14 +77,31 @@ class StatusBar(Component):
         if self.width <= 0 or self.height <= 0:
             return
         buffer.fill(self.x, self.y, self.width, 1, " ", bg=self.style.bg)
-        left = self.left[:max(0, self.width - self.style.padding * 2)]
         right = self.right[:max(0, self.width - self.style.padding * 2)]
-        buffer.write_str(self.x + self.style.padding, self.y, left,
-                         fg=self.style.fg, bg=self.style.bg, max_width=self.width)
         if right:
             right_x = self.x + max(self.style.padding, self.width - self.style.padding - len(right))
             buffer.write_str(right_x, self.y, right, fg=self.style.fg,
                              bg=self.style.bg, max_width=self.width - (right_x - self.x))
+
+        # Render each configured field with its own color (falling back to the
+        # shared style fg). This lets the app colorize e.g. the context field
+        # based on how full the context window is.
+        if self.fields is not None:
+            x = self.x + self.style.padding
+            for field in self.fields:
+                text = self.values.get(field)
+                if not text:
+                    continue
+                fg = self.field_colors.get(field, self.style.fg)
+                buffer.write_str(x, self.y, text, fg=fg, bg=self.style.bg,
+                                 max_width=max(0, self.x + self.width - x))
+                x += len(text) + len(self.separator)
+                if x >= self.x + self.width:
+                    break
+        else:
+            left = self.left[:max(0, self.width - self.style.padding * 2)]
+            buffer.write_str(self.x + self.style.padding, self.y, left,
+                             fg=self.style.fg, bg=self.style.bg, max_width=self.width)
 
 
 @dataclass(frozen=True)
