@@ -9,6 +9,7 @@ I have several features i would like but i need to flesh out a bit
   	[ ] llamacpp / ollama / openrouter
   	
 [ ] Not a fan of hardcoded models / servers
+    [ ] its kinda conflating model = server, but a server can serve many models, which can also change over time
 	[ ] What about servers that serves many models ? changing ? (updated for example)
 
 [ ] What do you think about adding a status bar vim like ? 

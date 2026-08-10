@@ -7,7 +7,7 @@
 ## Requirements
 
 - Python ≥ 3.10
-- A running LLM server: [llama.cpp](https://github.com/ggerganov/llama.cpp) locally, or an [OpenRouter](https://openrouter.ai) API key for cloud models
+- A running LLM endpoint: [llama.cpp](https://github.com/ggerganov/llama.cpp), [Ollama](https://ollama.com) locally, or an [OpenRouter](https://openrouter.ai) API key for cloud models
 
 ---
 
@@ -61,6 +61,7 @@ Server configurations are saved to `~/.config/pico-chat/config.toml` and persist
 | `/help` | List all available commands |
 | `/status` | Show server, model, context usage, and memory |
 | `/server` | Manage server configurations (see below) |
+| `/model` | Discover or select a model on the active endpoint |
 | `/tools` | Show available agent tools and their permission levels |
 | `/permissions` | Show full permission configuration |
 | `/compact` | Summarize conversation history to free context space |
@@ -68,7 +69,7 @@ Server configurations are saved to `~/.config/pico-chat/config.toml` and persist
 | `/stop` | Stop the current generation |
 | `/set` | Set runtime parameters (e.g. `/set fps 60`) |
 | `/get` | Get current runtime parameters |
-| `/debug` | Debug utilities (toggle panel, copy context/memory) |
+| `/debug` | Debug utilities (toggle panel, copy context, show system prompt) |
 | `/exit` | Quit the application |
 
 ### Server Management
@@ -79,6 +80,8 @@ Server configurations are saved to `~/.config/pico-chat/config.toml` and persist
 /server list
 /server use <name>
 /server remove <name>
+/model list
+/model use <model>
 ```
 
 Examples:
