@@ -6,17 +6,39 @@ with support for model selection, context windows, and server-specific settings.
 
 Server configs are loaded from pico_cfg (which loads from ~/.config/pico-chat/config.toml)
 """
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, field
+from typing import Any, Literal
 import os
 
 
-ServerType = Literal["llamacpp", "openrouter", "openai"]
+ServerType = Literal["llamacpp", "ollama", "openrouter", "openai"]
+
+
+@dataclass(frozen=True)
+class ModelInfo:
+    """Metadata for one model exposed by an endpoint."""
+
+    id: str
+    context_window: int | None = None
+    owned_by: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class LLMTarget:
+    """The selected model at an endpoint."""
+
+    endpoint: str
+    model: str
 
 
 @dataclass
 class LLMServerConfig:
-    """Configuration for an LLM server."""
+    """Connection configuration for an LLM endpoint.
+
+    ``model`` is a legacy/default selection. Runtime model selection is
+    owned by the server instance so one endpoint can serve many models.
+    """
     name: str
     type: ServerType
     base_url: str
@@ -29,6 +51,11 @@ class LLMServerConfig:
     retry_attempts: int = 3  # Retry attempts for transient errors
     retry_delay: float = 2.0  # Initial retry delay in seconds
     provider: str | None = None  # OpenRouter: routing preference (e.g., "Anthropic", "DeepInfra")
+
+    @property
+    def target(self) -> LLMTarget | None:
+        """Return the selected endpoint/model pair when a model is known."""
+        return LLMTarget(self.name, self.model) if self.model else None
 
 
 # Default fallback server (used if no config file exists)
@@ -78,7 +105,10 @@ def get_server_config() -> LLMServerConfig:
     server_dict = pico_cfg.config.get_active_server_config()
     if server_dict is None:
         return _DEFAULT_SERVER
-    return _parse_server_dict(pico_cfg.config.active_server, server_dict)
+    config = _parse_server_dict(pico_cfg.config.active_server, server_dict)
+    if pico_cfg.config.active_model is not None:
+        config.model = pico_cfg.config.active_model
+    return config
 
 
 def get_server_config_by_name(name: str) -> LLMServerConfig | None:

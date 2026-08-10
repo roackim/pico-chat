@@ -19,6 +19,35 @@ def test_status_bar_renders_left_and_right_text_with_padding():
     assert rendered.endswith("100% ")
 
 
+def test_status_bar_renders_configured_fields_in_order():
+    status = StatusBar(fields=["endpoint_model", "context", "role"])
+    status.set_layout(0, 0, 60, 1)
+    status.set_values({
+        "role": "role default",
+        "context": "ctx 12.4k/32k",
+        "endpoint_model": "ollama:qwen3:8b",
+    })
+    buffer = Buffer(60, 1)
+
+    status.render(buffer)
+
+    assert row_text(buffer).strip().startswith(
+        "ollama:qwen3:8b  ctx 12.4k/32k  role default"
+    )
+
+
+def test_status_bar_can_change_field_order_without_replacing_values():
+    status = StatusBar(fields=["endpoint_model", "role"])
+    status.set_layout(0, 0, 40, 1)
+    status.set_values({"endpoint_model": "local:model", "role": "role reviewer"})
+    status.set_fields(["role", "endpoint_model"])
+    buffer = Buffer(40, 1)
+
+    status.render(buffer)
+
+    assert row_text(buffer).strip().startswith("role reviewer  local:model")
+
+
 def test_action_bar_activates_by_key_and_mouse():
     activated = []
     bar = ActionBar([

@@ -16,7 +16,7 @@ class ServerAddCommand(Command):
     def __init__(self):
         super().__init__("add", "Add a named LLM server configuration", params=[
             Param("NAME", required=True),
-            Param("TYPE", completions=["openrouter", "llamacpp"], required=True),
+            Param("TYPE", completions=["openrouter", "llamacpp", "ollama"], required=True),
             Param("MODEL_OR_URL", required=True),
             Param("PROVIDER"),
         ])
@@ -38,7 +38,7 @@ class ServerAddCommand(Command):
 
         fields = [
             TextField("Name", required=True, placeholder="my-server"),
-            RadioListField("Type", options=["openrouter", "llamacpp"], value=0, required=True),
+            RadioListField("Type", options=["openrouter", "llamacpp", "ollama"], value=0, required=True),
             TextField("Model or URL", required=True, placeholder="anthropic/claude-3.5-sonnet"),
             TextField("Provider", placeholder="(optional, OpenRouter only)"),
         ]
@@ -64,6 +64,10 @@ class ServerAddCommand(Command):
             result = await service.add_openrouter(name, model_url, provider)
         elif server_type == "llamacpp":
             result = await service.add_llamacpp(name, model_url)
+        elif server_type == "ollama":
+            # The optional fourth argument is the initial model. Models can
+            # also be discovered and selected later with /model.
+            result = await service.add_ollama(name, model_url, provider)
         else:
             ui.chat_history_panel.add_message(
                 f"Unknown server type: {server_type}", msg_type=SysMsgError(), title="server")
@@ -108,6 +112,8 @@ class ServerUseCommand(Command):
             return
         try:
             ui.agent.switch_server(result.new_config)
+            if hasattr(ui, "refresh_status_bar"):
+                ui.refresh_status_bar()
             ui.chat_history_panel.add_message(result.message, msg_type=SysMsg())
         except Exception as exc:
             ui.chat_history_panel.add_message(f"Error switching server: {exc}", msg_type=SysMsgError())
@@ -129,6 +135,8 @@ class ServerRemoveCommand(Command):
             return
         if result.new_config is not None:
             ui.agent.switch_server(result.new_config)
+            if hasattr(ui, "refresh_status_bar"):
+                ui.refresh_status_bar()
         ui.chat_history_panel.add_message(result.message, msg_type=SysMsg())
 
 

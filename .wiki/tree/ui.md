@@ -23,13 +23,11 @@ See [notes/ui.md](../notes/ui.md) for the full architecture overview.
 - Application startup also launches one app-level command worker; slash commands
 	are consumed independently of per-conversation generation workers
 - Popup and form input are routed by registered EventRouter overlays rather than duplicated in `handle_global_input`
-- Permission-request messages remain boxed and purple even when they are not focused; long run commands are preserved for wrapping in the message box
 - History/input mouse focus is selected through the reusable `FocusScope.focus_at()` API
 - Application focus adapters delegate layout geometry to their wrapped components for mouse hit testing
 - Completion-menu input is dispatched directly to the input component; no root-handler compatibility fallback remains
 - Application focus navigation consumes canonical `KeyEvent` metadata while accepting legacy raw strings
 - `ConversationRuntime` owns each tab's agent, message panel, queue, worker, generation task, tool state, permissions, and pause state
-- `ConversationRuntime.switch_role()` is the single role-switch boundary; it rejects changes during an active generation before delegating to the conversation agent
 - Installs chat and debug workspace layouts through `ChatScreen` as Navigator-managed screen instances
 - Delegates runtime chat/debug workspace replacement to `Navigator`; pre-run setup only constructs the screen root
 - Passes active conversation state to `ChatScreen` as an external screen model
@@ -37,7 +35,6 @@ See [notes/ui.md](../notes/ui.md) for the full architecture overview.
 - Routes incoming `Chunk` objects from the harness to the chat display
 - Dispatches user input to the harness or command handler
 - Manages popup overlay via `show_popup()` / `hide_popup()`; input is routed by registered EventRouter overlays
-- Provides `show_confirmation()` for compact Enter/Esc confirmation modals layered over an existing form
 - Leaves tab mouse hit testing to `EventRouter` and the `TabBar`/`TabView` component path
 
 The application-specific panels and command callbacks remain outside the
@@ -78,33 +75,8 @@ scrollable message component in `ChatScreen`.
 - `handle_edit_action` — expanded in-place editing: edits paused AI messages (thinking prefill), finalized `ThinkingMsg` (edit reasoning as prefill), finalized `PicoMsg` (finds preceding `ThinkingMsg`), and `UserMsg` (edit + wipe subsequent messages)
 - Retry (re-send last user message)
 
-### `commands/`
-Slash command package with a compatibility-preserving public API and domain
-facades for the concrete command groups.
-- `base.py` owns the generic parameter schema, command contract, and dynamic
-	completion helpers.
-- `core.py`, `server.py`, `debug.py`, `permissions.py`, `conversation.py`, and
-	`tabs.py` provide focused import surfaces for their command domains.
-- `conversation.py` owns conversation export/import and the parent dispatcher;
-	imports accept legacy history arrays and restore exported roles before replay.
-- `server.py` owns server add/list/use/remove/info commands and their parent
-	dispatcher; the commands delegate configuration changes to `ServerService`.
-- `tabs.py` owns tab new/close/switch/list commands and their parent dispatcher.
-- `debug.py` owns debug panel/context/log commands; `ToolsCommand` remains in
-	`builtins.py` until the tool-inspection slice is extracted.
-- `permissions.py` owns the unified role/profile permissions editor and applies
-	role selection and edits through `ConversationRuntime.switch_role()`; before
-	the first tab exists, it applies changes to the initial agent used to create
-	the first conversation runtime. Role changes emit a muted system notice in
-	the conversation, replacing the immediately previous role notice.
-- The permissions role editor routes role saves and active-role deletion through
-	`ConversationRuntime.switch_role()` and reports active-generation rejection
-	inside the chat history instead of escaping the callback.
-- `roles.py` owns the legacy `/roles` inspection and lifecycle command.
-- `registry.py` owns the registry and dispatch helper exports.
-- `builtins.py` retains core commands, tool inspection, OpenRouter, and workspace
-	commands during the staged extraction; existing
-	`pico_chat.ui.commands` imports remain valid.
+### `commands.py`
+Slash command system with generic parameter schema.
 - `Param` dataclass: `name`, `completions` (static list or callable), `path` (filesystem scan), `required`
 - `Command` base class: `name`, `description`, `subcommands`, `params: List[Param]`, `execute(ui, args)`
 - `Command.resolve_command(parts)` — walks subcommand tree, returns `(deepest_cmd, arg_offset)`
@@ -119,18 +91,13 @@ facades for the concrete command groups.
 - `CdCommand` uses `Param("DIR", path=True)` for filesystem completion
 - `HelpCommand` renders output in a popup overlay via `ui.show_popup()` instead of chat history
 - `StatusCommand` renders in popup (async: shows "Checking..." placeholder, then updates with actual status)
+- `ModelCommand` provides `/model list` discovery and `/model use <model>` selection on the active endpoint
 - `ToolsCommand` renders in popup
-- `PermissionsCommand` renders the unified conversation-role editor in a popup;
-	the editor controls role metadata, prompt, enabled tools, granular policies,
-	and role lifecycle. Role deletion is confirmed in a compact modal and refuses
-	to remove the final remaining role. Legacy permission-profile subcommands
-	remain compatible.
-- `RolesCommand` remains a lightweight compatibility/inspection command while
-	the primary role editor is hosted by `/permissions`.
+- `PermissionsCommand` renders in popup
 - The interactive no-argument permissions editor composes `ProfileList`,
-  `FormSection` groups, horizontal policy selectors, and container toggles.
-  Role changes are bound through `RoleEditorForm`; legacy permission-profile
-  editing remains backed by `ProfileEditorModel`.
+  `FormSectionTitle`, horizontal policy selectors, and container toggles.
+  Changes are persisted immediately through `ProfileEditorModel`; profile
+  selection is separate from widget focus.
 - `DebugCommand` (no args) renders subcommand help in popup
 - See [notes/ui.md](../notes/ui.md) for how to add a new command.
 
@@ -139,17 +106,6 @@ facades for the concrete command groups.
 interactive permissions editor. It isolates the active draft, applies profile
 selection immediately, and exposes create, rename, duplicate, remove, and
 update operations without requiring a rendered form.
-
-### `role_editor_model.py`
-`RoleEditorModel` — UI-independent lifecycle and draft boundary for the unified
-conversation-role editor hosted by `/permissions`. Handles built-in duplication,
-saved-role selection, in-place persistence, and editable role drafts.
-
-### `role_editor_form.py`
-`RoleEditorForm` — declarative field and binding boundary for the unified role
-editor. Builds sectioned fields, synchronizes selected roles into the widgets,
-and applies edited tool, file-policy, and container settings through
-`RoleEditorModel`.
 
 ### Shell Commands (`$` prefix)
 - `$ <command>` — Execute shell command directly (not visible to LLM)

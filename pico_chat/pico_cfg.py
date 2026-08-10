@@ -48,6 +48,9 @@ class Config:
         # LLM settings
         self.servers: Dict[str, Dict[str, Any]] = {}
         self.active_server: str = "llamacpp_default"
+        # Model selection is separate from the endpoint definition. The
+        # legacy per-server ``model`` key remains a default for compatibility.
+        self.active_model: Optional[str] = None
 
         
         # UI settings
@@ -74,6 +77,7 @@ class Config:
         self.ui_metrics_show_speed: bool = True
         self.ui_metrics_show_ttft: bool = False
         self.ui_metrics_refresh_interval: float = 0.1  # Seconds between metric updates
+        self.ui_status_bar_fields: list[str] = ["endpoint_model", "context", "role"]
         
         self.target_fps: int = 60
         
@@ -116,12 +120,20 @@ class Config:
             data = toml.load(path)
             
             # Load server configurations
-            if "servers" in data:
+            # ``servers`` is the legacy spelling. ``endpoints`` is preferred
+            # but both normalize to the same runtime mapping.
+            if "endpoints" in data:
+                self.servers = data["endpoints"]
+            elif "servers" in data:
                 self.servers = data["servers"]
             
             # Load active server
             if "settings" in data and "active_server" in data["settings"]:
                 self.active_server = data["settings"]["active_server"]
+            if "settings" in data and "active_endpoint" in data["settings"]:
+                self.active_server = data["settings"]["active_endpoint"]
+            if "settings" in data and "active_model" in data["settings"]:
+                self.active_model = data["settings"]["active_model"]
             
             # Load UI settings
             if "ui" in data:
@@ -148,6 +160,7 @@ class Config:
                 settings = data["settings"]
                 for key in ["max_file_size", "max_search_results",
                            "command_timeout", "target_fps", "context_format",
+                           "active_model",
                            "debug_log_enabled",
                            "preserve_reasoning_traces",
                            "subagent_max_depth", "subagent_server",
@@ -179,15 +192,17 @@ class Config:
             data = {"servers": {}, "settings": {}}
         
         # Update server config
-        if "servers" not in data:
-            data["servers"] = {}
-        data["servers"][name] = server_config
+        endpoint_table = "endpoints" if "endpoints" in data else "servers"
+        if endpoint_table not in data:
+            data[endpoint_table] = {}
+        data[endpoint_table][name] = server_config
         
         # Update active server if requested
         if set_active:
             if "settings" not in data:
                 data["settings"] = {}
             data["settings"]["active_server"] = name
+            data["settings"]["active_endpoint"] = name
         
         # Save back to file
         with open(config_path, "w") as f:
@@ -197,6 +212,21 @@ class Config:
         self.servers[name] = server_config
         if set_active:
             self.active_server = name
+
+    def save_active_model(self, model: Optional[str]) -> None:
+        """Persist the selected model independently from endpoint definitions."""
+        config_path = get_config_path()
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        data = toml.load(config_path) if config_path.exists() else {"servers": {}, "settings": {}}
+        data.setdefault("settings", {})
+        if model:
+            data["settings"]["active_model"] = model
+            self.active_model = model
+        else:
+            data["settings"].pop("active_model", None)
+            self.active_model = None
+        with open(config_path, "w") as f:
+            toml.dump(data, f)
 
     def get_active_server_config(self) -> Optional[Dict[str, Any]]:
         """Get the configuration for the currently active server."""

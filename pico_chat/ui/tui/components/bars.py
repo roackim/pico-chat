@@ -22,14 +22,23 @@ class BarStyle:
 
 
 class StatusBar(Component):
-    """One-line status display with left and right aligned text."""
+    """One-line status display with configurable field order.
+
+    Passing ``fields`` changes the bar from legacy left/right text mode to a
+    value-map mode. This keeps the component reusable while allowing the app's
+    ``ui.status_bar_fields`` setting to choose both visibility and order.
+    """
 
     def __init__(self, left: str = "", right: str = "", *, style: Optional[BarStyle] = None,
+                 fields: Optional[Sequence[str]] = None, separator: str = "  ",
                  id: Optional[str] = None):
         super().__init__(id)
         self.left = left
         self.right = right
         self.style = style or BarStyle.default()
+        self.fields = list(fields) if fields is not None else None
+        self.separator = separator
+        self.values: dict[str, str] = {}
 
     def get_preferred_height(self, width: int) -> int:
         return 1
@@ -38,6 +47,24 @@ class StatusBar(Component):
         self.left = left
         if right is not None:
             self.right = right
+        self.fields = None
+        self.mark_changed()
+
+    def set_fields(self, fields: Sequence[str]):
+        """Set visible field names without changing their values."""
+        self.fields = list(fields)
+        self.left = self.separator.join(
+            self.values[field] for field in self.fields if self.values.get(field)
+        )
+        self.mark_changed()
+
+    def set_values(self, values: dict[str, Any]):
+        """Update named values used by the configured field order."""
+        self.values = {key: str(value) for key, value in values.items()}
+        if self.fields is not None:
+            self.left = self.separator.join(
+                self.values[field] for field in self.fields if self.values.get(field)
+            )
         self.mark_changed()
 
     def render(self, buffer: Buffer):

@@ -22,6 +22,7 @@ from pico_chat.ui.tui.components.popup import Popup, PopupScreen
 from pico_chat.ui.tui.components.form_popup import FormPopup
 from pico_chat.ui.tui.components.tab_bar import TabBar
 from pico_chat.ui.tui.components.tab_view import TabView
+from pico_chat.ui.tui.components.bars import StatusBar
 from pico_chat.ui.chat_history_panel import ChatHistoryPanel
 from pico_chat.ui.chat_message import Message
 from pico_chat.ui.commands import handle_command, get_command_list, get_subcommand_list
@@ -134,6 +135,7 @@ class chatTUI(ChatActionHandlers):
         self.log_handler = setup_tui_logging(self.debug_panel)
         self.editing_prefill_for_resume = False
         self.tab_bar = TabBar(id="tabs")
+        self.status_bar = StatusBar(fields=pico_cfg.config.ui_status_bar_fields, id="status")
         self.tab_view = TabView(tab_bar=self.tab_bar)
         self._tabs = []
         self._active_tab_index = 0
@@ -156,6 +158,53 @@ class chatTUI(ChatActionHandlers):
         if not self._tabs or self._active_tab_index >= len(self._tabs):
             return None
         return self._tabs[self._active_tab_index]
+
+    @staticmethod
+    def _format_status_tokens(value: int | None) -> str:
+        if value is None:
+            return "?"
+        if value < 1000:
+            return str(value)
+        # Use binary-sized exact values for common context limits (32k for
+        # 32768), while keeping the compact decimal style for live usage.
+        if value % 1024 == 0:
+            return f"{value // 1024}k"
+        return f"{value / 1000:.1f}k"
+
+    def refresh_status_bar(self) -> None:
+        """Refresh local status fields without performing network I/O."""
+        runtime = self._active_runtime()
+        agent = runtime.agent if runtime and getattr(runtime, "agent", None) else self._initial_agent
+        server = getattr(agent, "server", None)
+        if server is None:
+            return
+
+        config = server.config
+        model = getattr(server, "selected_model", None) or config.model or "?"
+        role = getattr(getattr(agent, "role", None), "name", "default")
+        state = getattr(getattr(agent, "state", None), "name", "IDLE").lower()
+
+        usage = getattr(agent, "_last_usage", None)
+        context_used = getattr(usage, "prompt_tokens", None)
+        context_max = getattr(server, "_cached_context_window", None)
+        if context_max is None:
+            context_max = config.max_context or 32768
+        if context_used is None:
+            try:
+                context_used, estimated_max, _ = agent.estimate_context_usage()
+                context_max = estimated_max or context_max
+            except Exception:
+                context_used = 0
+
+        self.status_bar.set_values({
+            "endpoint_model": f"{config.name}:{model}",
+            "context": f"ctx {self._format_status_tokens(context_used)}/{self._format_status_tokens(context_max)}",
+            "role": f"role {role}",
+            "state": state,
+            "endpoint": config.name,
+            "model": model,
+            "workspace": getattr(agent, "workspace", ""),
+        })
 
     @property
     def agent(self):
@@ -266,6 +315,8 @@ class chatTUI(ChatActionHandlers):
 
         chat = self.chat_history_panel if runtime is self._active_runtime() else runtime.chat_history_panel
         agent = runtime.ensure_agent()
+        if runtime is self._active_runtime():
+            self.refresh_status_bar()
         current_msg = chat.add_message("Sending request...", msg_type=SysMsg())
         current_msg_type = SysMsg
         current_harness_ids = []
@@ -528,6 +579,8 @@ class chatTUI(ChatActionHandlers):
                             ttft_ms=chunk.ttft_ms,
                             duration_ms=chunk.duration_ms
                         )
+                    if runtime is self._active_runtime():
+                        self.refresh_status_bar()
 
                 # Ensure we scroll to bottom if needed
                 if chat.auto_scroll:
@@ -697,6 +750,7 @@ class chatTUI(ChatActionHandlers):
             children[1],
             self._focus_scope,
             self._tabs[self._active_tab_index] if self._tabs else None,
+            self.status_bar,
         )
         self._chat_workspace = screen.workspace
         self.root = screen.root
@@ -711,6 +765,7 @@ class chatTUI(ChatActionHandlers):
             self.input_box,
             self._focus_scope,
             model,
+            self.status_bar,
         )
         self._chat_workspace = screen.workspace
         self.root = screen.root
@@ -1010,6 +1065,7 @@ class chatTUI(ChatActionHandlers):
         self._active_tab_index = index
         self._bind_runtime_panel(tab)
         self.tab_view.activate(index)
+        self.refresh_status_bar()
     
     def _on_tab_select(self, index: int):
         """Handle tab click — switch to that tab."""
@@ -1243,6 +1299,7 @@ class chatTUI(ChatActionHandlers):
             self.input_box,
             self._focus_scope,
             self._tabs[self._active_tab_index] if self._tabs else None,
+            self.status_bar,
         )
         self._chat_workspace = chat_screen.workspace
         self.root = chat_screen.root  # Store root for global handler
@@ -1266,6 +1323,7 @@ class chatTUI(ChatActionHandlers):
         
         # Set initial focus states
         self._update_focus_states()
+        self.refresh_status_bar()
         
         # Start background server status check (non-blocking)
         async def background_startup_check():
@@ -1278,6 +1336,7 @@ class chatTUI(ChatActionHandlers):
             
             # Get actual status (may take time if server is unreachable)
             status = await self.agent.get_status()
+            self.refresh_status_bar()
             
             # Replace placeholder with actual status
             status_msg = self.chat_history_panel.new_message(

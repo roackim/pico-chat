@@ -76,6 +76,11 @@ class GenerationMetrics(Chunk):
     tokens_per_second: float
     ttft_ms: Optional[float] = None  # Time to first token
     duration_ms: Optional[float] = None  # Total duration
+    prompt_tokens: Optional[int] = None  # Provider-reported prompt usage
+    completion_tokens: Optional[int] = None  # Provider-reported completion usage
+    total_tokens: Optional[int] = None  # Provider-reported total usage
+    reasoning_tokens: Optional[int] = None
+    estimated: bool = True
 
 
 @dataclass

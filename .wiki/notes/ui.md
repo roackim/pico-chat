@@ -38,6 +38,21 @@ is mounted directly into the active chat workspace, so switching tabs does not
 copy messages through a shared panel. Slash commands use one application-level
 worker and remain responsive while conversation generation is running.
 
+## Status Bar
+
+The chat workspace includes a one-line `StatusBar`. Its visible fields and
+order come from `pico_cfg.config.ui_status_bar_fields`; the default is:
+
+```toml
+[ui]
+status_bar_fields = ["endpoint_model", "context", "role"]
+```
+
+The default display is `endpoint:model  ctx 12.4k/32k  role default`.
+Available values include `endpoint_model`, `endpoint`, `model`, `context`,
+`role`, `state`, and `workspace`. Provider-reported prompt usage replaces the
+context estimate after a response supplies authoritative usage data.
+
 ## Library Contracts
 
 ### Widget Lifecycle and Ownership
@@ -129,10 +144,6 @@ Centered overlay popups for commands that benefit from floating display rather t
     path routes input to the popup before normal focus handling
 - Auto-sizing: `max_width_ratio` / `max_height_ratio` control popup dimensions relative to terminal
 - Currently used by: `/help` (command list), `/status` (async with placeholder), `/tools`, `/permissions`, `/debug` help
-- The no-argument `/permissions` editor uses a multiline `TextAreaField` for
-    the role prompt. Role metadata and section headings are unindented; tool
-    controls remain nested beneath their headings, and the `New profile` action
-    is nested under the available-role list.
 
 ## Forms System (`tui/components/form.py`, `form_popup.py`)
 
@@ -147,28 +158,6 @@ adapter, while retaining the legacy compositor overlay path.
 | `ToggleField` | `[x] Label` / `[ ] Label` | `bool` | Space/Enter toggles |
 | `TextField` | `Label: value_cursor` | `str` | Typing, arrow keys, Home/End |
 | `TextAreaField` | Label + multiline content | `str` | Enter inserts newline, arrows navigate |
-
-`TextField` and `TextAreaField` accept an opt-in `highlight_label` flag. The
-unified permissions editor uses it for `Description` and `Role prompt` so
-role metadata remains visually distinct while unfocused.
-
-`BoxInput` wraps long logical lines to its allocated width while retaining the
-original newlines in its value and mapping the cursor onto the wrapped rows.
-
-`ComponentField` lets a non-interactive component participate in a form layout.
-The unified permissions editor uses it for the separator after `Available
-roles` and the blank row before `File policies`.
-
-`FormContainer` clips child rendering to its scrolling viewport, including
-when the form is rendered through a bordered `Box` subbuffer.
-
-The unified permissions editor renders tool names without an `Enable` prefix,
-uses green `[x]` and muted `[ ]` marks, aligns file-policy choices, and groups
-container and network settings under an unindented `Containerization` section.
-
-`FormSection` owns section titles, child indentation, spacing, and choice-column
-alignment. `FormContainer` flattens section children for keyboard focus while
-retaining section geometry for layout and scrolling.
 | `CheckboxListField` | `Label:` + `[ ]`/`[x]` per option | `List[int]` | Up/Down moves cursor, Space/Enter toggles |
 | `RadioListField` | `Label:` + `()`/`(x)` per option | `Optional[int]` | Up/Down moves cursor, Space/Enter selects |
 
@@ -290,14 +279,10 @@ Test the model without rendering, then test the component and popup paths:
 Modal overlay wrapping a `FormContainer` inside a `Box`:
 - `show(title, fields, on_submit, on_cancel)` — displays form, registers with compositor
 - `hide()` — dismisses, unregisters from compositor
-- **Action bar**: `[Enter] validate` / `[Esc] cancel` in bottom border; Down from the final field focuses the primary action
+- **Action bar**: `[Enter] ok` / `[Esc] cancel` in bottom border
 - **Validation**: required and custom model validation block submit with an error message
 - **Lifecycle**: `dirty` reports changed model values; `reset()` restores initial values, and cancel resets before dismissing
-- **Enter behavior**: routed to the focused field like Space; it never performs a generic submit or focus advance
-- **Focused actions**: Enter/Space activates the focused bottom action; Up returns to the final field and Left/Right moves between actions
-- **Navigation**: vertical arrows cycle through fields at the form boundaries
-- **Profile selection**: selecting a profile applies its complete draft immediately; validation saves edits to that selected profile
-- **Profile rename**: the inline name editor uses a reverse-video block cursor
+- **Enter behavior**: on `TextField` moves to next field; on other fields submits
 - **Mouse**: clickable OK/Cancel buttons, click-to-focus fields
 - Callback receives `Dict[str, Any]` mapping field labels to values
 
@@ -488,11 +473,7 @@ Server management commands (`ServerAddCommand`, `ServerUseCommand`, etc.) are th
 
 ### Registered Commands
 
-`help`, `clear`, `compact`, `exit`, `stop`, `resume`, `prefill`, `status`, `server`, `tools`, `debug`, `permissions`, `openrouter`, `cd`, `pwd`, `conversation`
-
-Conversation export writes an object containing the active role name and
-history. Import restores that role before replaying history and still accepts
-legacy JSON history arrays.
+`help`, `clear`, `compact`, `exit`, `stop`, `resume`, `prefill`, `status`, `server`, `tools`, `debug`, `permissions`, `openrouter`, `cd`, `pwd`
 
 ### Structure
 

@@ -46,11 +46,17 @@ See [notes/subagents.md](../notes/subagents.md) for the full subagent lifecycle.
 The UI `commands.py` is now a thin adapter that calls `ServerService` and renders the results.
 
 ### `llm_server.py`
-`LLMServer` abstract base. Concrete implementations: `LlamaServer` (llama.cpp HTTP), `OpenRouterServer` (cloud API).
+`LLMServer` abstract base. Concrete implementations: `LlamaCppServer` (llama.cpp HTTP), `OllamaServer` (Ollama discovery plus OpenAI-compatible chat), `OpenRouterServer` (cloud API), and `OpenAIServer`.
 - `stream_chat(messages)` — yields `Chunk` objects from the LLM stream
+- `list_models()` — discovers models exposed by an endpoint
+- `set_model(model_name)` — changes the selected model without replacing the endpoint
 
 ### `llm_server_config.py`
-`LLMServerConfig` — dataclass for server metadata: name, type, URL, model, context window size.
+`LLMServerConfig` — dataclass for endpoint metadata: name, type, URL, credentials, and legacy/default model selection. `ModelInfo` and `LLMTarget` represent discovered model metadata and an endpoint/model pair.
+
+### `usage.py`
+`TokenUsage` and normalization helpers convert OpenAI-compatible and Ollama
+usage counters into provider-neutral prompt/completion/total token data.
 
 ### `llm_status.py`
 `AgentState` enum: `UNCONNECTED`, `IDLE`, `THINKING`, `ANSWERING`.

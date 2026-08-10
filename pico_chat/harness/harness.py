@@ -13,9 +13,10 @@ from pico_chat.harness.context_builder import build_harness_context, is_git_repo
 from pico_chat.harness.system_prompt import get_system_message
 from pico_chat.harness import chunks
 from pico_chat.harness.llm_server import create_server, LLMServer
-from pico_chat.harness.llm_server_config import server_config
+from pico_chat.harness.llm_server_config import get_server_config
 from pico_chat.harness.permission_gate import PermissionGate
 from pico_chat.harness.thinking_parser import ThinkingTagParser, MetricsState
+from pico_chat.harness.usage import TokenUsage, usage_from_response
 
 # Import the minimal toolset
 from pico_chat.harness.tool_wrappers import create_toolset
@@ -95,13 +96,16 @@ class Harness:
         # Select LLM server: subagents use subagent_server if configured
         from pico_chat import pico_cfg
         from pico_chat.harness.llm_server_config import get_server_config_by_name
-        chosen_config = server_config
+        # Resolve the endpoint at construction time. A module-level config
+        # snapshot would make newly opened tabs use stale server settings.
+        chosen_config = get_server_config()
         if depth > 0 and pico_cfg.config.subagent_server:
             sub_cfg = get_server_config_by_name(pico_cfg.config.subagent_server)
             if sub_cfg:
                 chosen_config = sub_cfg
 
         self.server: LLMServer = create_server(chosen_config)
+        self._last_usage: Optional[TokenUsage] = None
         self.debug_stream.log("INIT", f"Server initialized: {chosen_config.name} ({chosen_config.type}) at {chosen_config.base_url}")
 
         # Steering / pause state
@@ -194,8 +198,15 @@ class Harness:
         
         # Create new server instance
         self.server = create_server(new_config)
+        self._last_usage = None
         self.debug_stream.log("SWITCH", f"Server switched to: {new_config.name} ({new_config.type}) at {new_config.base_url}")
         logger.info(f"Switched to server: {new_config.name} ({new_config.type})")
+
+    def switch_model(self, model_name: str) -> None:
+        """Select another model on the current endpoint."""
+        self.server.set_model(model_name)
+        self._last_usage = None
+        logger.info("Switched to model %s on endpoint %s", model_name, self.server.config.name)
 
     def _is_compaction_message(self, msg: Dict[str, Any]) -> bool:
         """Return True if message is a compaction marker message."""
@@ -577,6 +588,7 @@ class Harness:
         metrics = MetricsState()
         parser = ThinkingTagParser()
         tool_calls_buffer: Dict[int, Dict[str, Any]] = {}
+        self._last_usage = None
 
         # Reset live reasoning accumulator for this generation
         self._current_reasoning = ""
@@ -587,6 +599,11 @@ class Harness:
         empty_chunks = 0
         async for chunk in self.server.create_completion(messages, tools=self.tool_schemas, stream=True):
             chunk_count += 1
+
+            usage = usage_from_response(chunk)
+            if usage is not None:
+                metrics.set_usage(usage)
+                self._last_usage = usage
 
             if not chunk.choices:
                 empty_chunks += 1
@@ -953,6 +970,16 @@ class Harness:
                 status["context_used"] = current_tokens
                 status["context_max"] = max_tokens
                 status["context_percentage"] = percentage
+                if self._last_usage and self._last_usage.prompt_tokens is not None:
+                    status["context_used"] = self._last_usage.prompt_tokens
+                    status["context_percentage"] = (
+                        self._last_usage.prompt_tokens / max_tokens * 100
+                        if max_tokens > 0 else 0
+                    )
+                status["context_exact"] = bool(
+                    self._last_usage and self._last_usage.prompt_tokens is not None
+                )
+                status["usage"] = self._last_usage
             except Exception as e:
                 logger.warning(f"Failed to estimate context usage: {e}")
         

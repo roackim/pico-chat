@@ -15,6 +15,7 @@ import logging
 
 from .base import ChatUIProtocol, Command, Param, server_name_completions
 from .roles import RolesCommand
+from .models import ModelCommand
 
 logger = logging.getLogger(__name__)
 
@@ -369,6 +370,7 @@ COMMANDS: Dict[str, Command] = {
     "prefill":     PrefillCommand(),
     "status":      StatusCommand(),
     "server":      ServerCommand(),
+    "model":       ModelCommand(),
     "tools":       ToolsCommand(),
     "debug":       DebugCommand(),
     "permissions": PermissionsCommand(),

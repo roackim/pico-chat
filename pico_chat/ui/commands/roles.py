@@ -57,6 +57,8 @@ class RolesCommand(Command):
                 ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
                 return
             ui.chat_history_panel.add_message(f"Active role: {role.name}", msg_type=SysMsg())
+            if hasattr(ui, "refresh_status_bar"):
+                ui.refresh_status_bar()
             return
 
         if action == "duplicate" and len(args) in {2, 3}:

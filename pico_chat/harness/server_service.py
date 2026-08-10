@@ -248,6 +248,89 @@ class ServerService:
             context_window=context_window,
         )
 
+    async def add_ollama(
+        self,
+        server_name: str,
+        url: str,
+        model: Optional[str] = None,
+    ) -> ServerAddResult:
+        """Add an Ollama endpoint, optionally with a default model."""
+        if not url.startswith("http"):
+            url = f"http://{url}"
+        base_url = url.rstrip("/")
+        if base_url.endswith("/v1"):
+            base_url = base_url[:-3]
+
+        test_config = LLMServerConfig(
+            name=server_name,
+            type="ollama",
+            base_url=f"{base_url}/v1",
+            api_key="ollama",
+            model=model or None,
+            max_context=None,
+            timeout=5.0,
+            retry_attempts=1,
+            retry_delay=1.0,
+        )
+
+        from pico_chat.harness.llm_server import create_server
+        test_server = create_server(test_config)
+        if not await test_server.check_connection():
+            return ServerAddResult(
+                ok=False,
+                message=(
+                    f"Failed to connect to Ollama at {base_url}\n"
+                    "Ensure Ollama is running and the URL is correct."
+                ),
+            )
+
+        models = await test_server.list_models()
+        selected = model or (models[0].id if models else None)
+        server_config: Dict[str, Any] = {
+            "type": "ollama",
+            "base_url": f"{base_url}/v1",
+            "api_key": "ollama",
+            "timeout": 30.0,
+            "retry_attempts": 3,
+            "retry_delay": 2.0,
+        }
+        if selected:
+            server_config["model"] = selected
+
+        from pico_chat import pico_cfg
+        pico_cfg.config.save_server(server_name, server_config, set_active=False)
+        model_text = selected or "none discovered"
+        return ServerAddResult(
+            ok=True,
+            message=(
+                f"Added server '{server_name}'\n"
+                "Type: Ollama\n"
+                f"URL: {base_url}\n"
+                f"Model: {model_text}\n\n"
+                f"Use '/server use {server_name}' to activate"
+            ),
+            server_name=server_name,
+            server_type="ollama",
+            model=selected,
+            url=f"{base_url}/v1",
+        )
+
+    async def list_models(self, endpoint_name: Optional[str] = None):
+        """Discover models from an endpoint without changing active state."""
+        from pico_chat import pico_cfg
+        from pico_chat.harness.llm_server import create_server
+        from pico_chat.harness.llm_server_config import get_server_config, get_server_config_by_name
+
+        config = get_server_config_by_name(endpoint_name) if endpoint_name else get_server_config()
+        if config is None:
+            raise ValueError(f"Endpoint '{endpoint_name}' not found")
+        return await create_server(config).list_models()
+
+    def select_model(self, model: str) -> None:
+        """Persist an active model independently of the endpoint definition."""
+        from pico_chat import pico_cfg
+        pico_cfg.config.save_active_model(model)
+
     # --- List / Info ---
 
     def list_servers(self) -> List[Tuple[str, str, bool]]:
@@ -299,6 +382,8 @@ class ServerService:
         # Update active server in TOML
         self._set_active_server_in_toml(server_name)
         pico_cfg.config.active_server = server_name
+        pico_cfg.config.active_model = pico_cfg.config.servers[server_name].get("model")
+        pico_cfg.config.save_active_model(pico_cfg.config.active_model)
 
         new_config = get_server_config_by_name(server_name)
         if new_config is None:
