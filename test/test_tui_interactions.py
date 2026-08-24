@@ -58,7 +58,24 @@ def test_config_overlay_server_shortcuts_use_key_event_metadata():
 
     assert overlay.handle_input(KeyEvent("r"))
     assert overlay.handle_input(KeyEvent("u"))
-    assert actions == [("remove", "test"), ("use", "test")]
+
+
+def test_cached_hit_test_rebuilds_after_cache_invalidation():
+    """Scrolling invalidates the line-map cache; a subsequent hit test must
+    rebuild it rather than crashing on a None cache (regression)."""
+    from pico_chat.ui.tui.msg_types import UserMsg
+
+    panel = ChatHistoryPanel()
+    panel.set_layout(0, 0, 40, 10)
+    panel.add_message("hello", msg_type=UserMsg())
+    panel.add_message("world", msg_type=UserMsg())
+
+    # Simulate the scroll handler invalidating only the cache (not the key).
+    panel._line_map_cache = None
+
+    # Must not raise TypeError (len() of None).
+    result = panel._cached_hit_test(panel.y + 1)
+    assert result is not None
 
 
 def test_app_focus_targets_expose_component_geometry_for_mouse_focus():

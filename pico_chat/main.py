@@ -26,7 +26,13 @@ def main():
     set_theme(pico_cfg.config.ui_theme)
 
     tui = chatTUI(harness)
-    asyncio.run(tui.run())
+    try:
+        asyncio.run(tui.run())
+    except BaseExceptionGroup as group:
+        # asyncio.TaskGroup wraps failures in an ExceptionGroup whose box-drawing
+        # traceback format is noisy. Unwrap to the first real exception so the
+        # terminal shows a clean, standard traceback.
+        raise group.exceptions[0] from None
     return 0
 
 

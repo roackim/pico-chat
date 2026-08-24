@@ -55,6 +55,9 @@ class ChatActionHandlers:
             else:
                 # Strip ANSI escape codes for clean clipboard content
                 text_to_copy = strip_ansi(message.base_text)
+                # Ensure a trailing newline so pasting keeps the line break.
+                if text_to_copy and not text_to_copy.endswith("\n"):
+                    text_to_copy += "\n"
             
             # Try to copy to clipboard using various methods
             

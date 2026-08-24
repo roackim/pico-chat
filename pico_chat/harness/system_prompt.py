@@ -31,6 +31,25 @@ Model used: {model_name}
 Context window: {context_window} max tokens
 """
 
+
+import datetime
+import platform
+import os
+import shutil
+                                                                                      
+def get_context_string() -> str:
+    now = datetime.datetime.now()
+    tz = now.astimezone().tzname()
+    os_info = f"{platform.system()} {platform.release()}"
+    shell = os.environ.get("SHELL") or shutil.which("bash") or "unknown"
+    return (
+        ""
+        f"Date: {now.strftime('%Y-%m-%d')}\n"
+        f"Time: {now.strftime('%H:%M:%S')} {tz}\n"
+        f"OS: {os_info}\n"
+        f"Shell: {os.path.basename(shell)}"
+    )
+
 # NOTE: disabled project's context tree because it can be very long and is not very usefull
 # CONTEXT_PROMPT_TEMPLATE = """
 # Project Context:
@@ -76,6 +95,8 @@ def format_system_prompt(
     
     # disabled project's context tree
     # prompt += CONTEXT_PROMPT_TEMPLATE.format(context_tree=project_context)
+    
+    prompt += get_context_string()
         
     return prompt
 

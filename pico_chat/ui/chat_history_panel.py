@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Optional, Any
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.components import TextComponent
-from pico_chat.ui.tui.events import MouseEvent
+from pico_chat.ui.tui.events import MouseEvent, TickEvent
 
 from pico_chat import pico_cfg
 from pico_chat.ui.tui.colors import theme, RGB
@@ -108,12 +108,20 @@ class ChatHistoryPanel(TextComponent):
         """
         # Clear previous focus
         if self.focused_message_index is not None and self.focused_message_index < len(self.messages):
-            self.messages[self.focused_message_index].set_focused(False)
+            prev = self.messages[self.focused_message_index]
+            prev.set_focused(False)
+            # Collapsible messages (thinking) fold back when unfocused.
+            if hasattr(prev, "set_collapsed") and getattr(prev, "collapsible", False):
+                prev.set_collapsed(True)
         
         # Set new focus
         self.focused_message_index = index
         if self.focused_message_index is not None and self.focused_message_index < len(self.messages):
-            self.messages[self.focused_message_index].set_focused(True)
+            current = self.messages[self.focused_message_index]
+            current.set_focused(True)
+            # Collapsible messages (thinking) expand when focused.
+            if hasattr(current, "set_collapsed") and getattr(current, "collapsible", False):
+                current.set_collapsed(False)
             # Disable auto-scroll when focusing a message, UNLESS it's the last message
             # (we want to follow the last message's content as it updates)
             if self.focused_message_index < len(self.messages) - 1:
@@ -185,7 +193,10 @@ class ChatHistoryPanel(TextComponent):
                 # Middle lines: full line
                 parts.append(self._extract_line_text(line, 0, None))
         
-        text = "\n".join(parts)
+        # Each selected line ends with a newline so pasting elsewhere keeps
+        # the line breaks (the terminal's rendered rows are display-wrapped,
+        # so without trailing newlines the copy collapses into one blob).
+        text = "".join(part + "\n" for part in parts)
         return text if text else None
 
     def _extract_line_text(self, line, start_col: int, end_col: Optional[int]) -> str:
@@ -291,6 +302,21 @@ class ChatHistoryPanel(TextComponent):
         if not actions:
             return None
         
+        # Thread mode: actions render at box.x + 2 on the last row.
+        if getattr(box, "thread_mode", False):
+            actions_x_start = box.x + 2
+            local_x = event_x - actions_x_start
+            if local_x < 0:
+                return None
+            x_offset = 0
+            for action in actions:
+                formatted = action.format()
+                region_end = x_offset + len(formatted)
+                if x_offset <= local_x < region_end:
+                    return action
+                x_offset = region_end + 1  # +1 for space separator
+            return None
+        
         # Replicate the layout from Box._render_to_subbuffer:
         # available_width = box.width - 3
         # bottom_str = " metrics_str " + "│" + " actions_str "  (or just actions)
@@ -352,7 +378,7 @@ class ChatHistoryPanel(TextComponent):
             anchor = self.anchored_start_y
         cache_key = (self.auto_scroll, anchor, len(self.messages))
         
-        if self._line_map_cache_key != cache_key:
+        if self._line_map_cache_key != cache_key or self._line_map_cache is None:
             self._line_map_cache = self._build_line_map()
             self._line_map_cache_key = cache_key
         
@@ -380,7 +406,9 @@ class ChatHistoryPanel(TextComponent):
         """
         panel_x = screen_x - self.x
         box_x = panel_x - msg.left_margin
-        content_x = box_x - 1  # subtract left border
+        # Thread mode: content starts after the 2-col gutter; boxed mode: after
+        # the 1-col left border.
+        content_x = box_x - (2 if getattr(box, "thread_mode", False) else 1)
         
         md_component = getattr(box, 'child', box)
         left_pad = getattr(md_component, 'left_pad', 0)
@@ -886,6 +914,13 @@ class ChatHistoryPanel(TextComponent):
 
     def handle_input(self, event: Any) -> bool:
         """Handle mouse wheel for scrolling and keyboard navigation."""
+        # Animate the spinner on any in-progress collapsible message.
+        if isinstance(event, TickEvent):
+            for msg in self.messages:
+                if getattr(msg, "collapsible", False) and not getattr(msg, "finalized", True):
+                    msg.advance_spinner()
+            return False
+
         # --- In-place inline editor takes priority over all other input ---
         if isinstance(event, str) and self.has_keyboard_focus and self._inline_editing_msg is not None:
             editor = self._inline_editing_msg.box.inline_editor
@@ -1034,6 +1069,7 @@ class ChatHistoryPanel(TextComponent):
                     self.auto_scroll = False # Scrolling up disables auto-scroll
                     # Invalidate cache on scroll
                     self._line_map_cache = None
+                    self._line_map_cache_key = None
                     self._request_repaint()
                     return True
                     
@@ -1060,6 +1096,7 @@ class ChatHistoryPanel(TextComponent):
                         self.anchored_start_y = None
                     # Invalidate cache on scroll
                     self._line_map_cache = None
+                    self._line_map_cache_key = None
                     self._request_repaint()
                     return True
                     

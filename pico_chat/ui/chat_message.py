@@ -8,6 +8,7 @@ from pico_chat.ui.tui.components.markdown import MarkdownComponent
 from pico_chat.ui.tui.layout_utils import wrap_text
 from pico_chat.ui.tui.msg_types import MsgType, MsgAction
 from pico_chat.ui.tui import msg_types
+from pico_chat.ui.tui.components.box import SPINNER_FRAMES
 
 
 class Message:
@@ -81,6 +82,12 @@ class Message:
 
         self.finalized = False  # Whether this message is finalized
         
+        # Collapsed state: when True, render a single summary line instead of
+        # the full content (used for thinking messages that fold by default).
+        self.collapsed = False        # Whether this message type folds by default and expands on focus.
+        self.collapsible = isinstance(msg_type, msg_types.ThinkingMsg)        # Animated spinner frame index (advances on TickEvent while streaming).
+        self.spinner_frame = 0
+        
         # Tool-specific metadata
         self.tool_name: Optional[str] = None
         self.tool_args: Optional[str] = None
@@ -104,10 +111,20 @@ class Message:
         # Action click flash feedback (set by ChatHistoryPanel, read by Box)
         self._flash_action_key: Optional[str] = None
         
+        # Thread mode: borderless chat-thread rendering with a role gutter.
+        # The gutter symbol and color come from the message type.
+        thread_gutter = getattr(self.type, "gutter", "▸")
+        thread_gutter_color = getattr(self.type, "gutter_color", None)
+        if thread_gutter_color is None:
+            thread_gutter_color = frame_color
+
         self.box = Box(
             self.component,
             parent_msg=self,
-            compact_when_unfocused=(isinstance(msg_type, (msg_types.ToolCallMsg, msg_types.AskPermissionMsg)))  # Tool calls and permission requests use compact mode
+            compact_when_unfocused=(isinstance(msg_type, (msg_types.ToolCallMsg, msg_types.AskPermissionMsg))),  # Tool calls and permission requests use compact mode
+            thread_mode=True,
+            gutter=thread_gutter,
+            gutter_color=thread_gutter_color,
         )
     
     def finalize(self):
@@ -182,6 +199,27 @@ class Message:
         if self.box.focused != focused:
             self.layout_revision += 1
         self.box.set_focused(focused)
+
+    def set_collapsed(self, collapsed: bool):
+        """Fold/unfold this message to a single summary line.
+
+        Used for thinking messages: collapsed by default, expanded on focus.
+        """
+        if self.collapsed != collapsed:
+            self.collapsed = collapsed
+            self.layout_revision += 1
+            self.box.mark_changed()
+
+    def advance_spinner(self):
+        """Advance the animated spinner frame (called on TickEvent)."""
+        self.spinner_frame = (self.spinner_frame + 1) % len(SPINNER_FRAMES)
+        self.box.mark_changed()
+
+    def _collapsed_text(self) -> str:
+        """Return the single-line summary shown when collapsed."""
+        if isinstance(self.type, msg_types.ThinkingMsg):
+            return "thinking"
+        return self.type.title or self.type.name
     
     def _format_line_wrap(self) -> str:
         """Format the message text with smart word wrapping and padding.

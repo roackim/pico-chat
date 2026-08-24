@@ -32,18 +32,23 @@ class MsgType:
     frame_color: str = "DEFAULT"
     content_color: Optional[str] = None
     actions: List[MsgAction] = []
+    # Thread-mode gutter symbol and color (None = use frame_color).
+    gutter: str = "▸"
+    gutter_color: Optional[str] = None
 
 class UserMsg(MsgType):
     name = "user"
     title = "user"
     actions = [MsgAction.COPY, MsgAction.EDIT, MsgAction.DELETE, MsgAction.STEER]
     frame_color = "USER"
+    gutter = "▸"
 
 class PicoMsg(MsgType):
     name = "pico"
     title = "pico"
     actions = [MsgAction.COPY, MsgAction.EDIT, MsgAction.RETRY, MsgAction.DELETE, MsgAction.STOP, MsgAction.PAUSE, MsgAction.RESUME]
     frame_color = "PICO"
+    gutter = "▸"
 
 class SysMsg(MsgType):
     name = "system"
@@ -51,6 +56,7 @@ class SysMsg(MsgType):
     frame_color = "MUTED"
     content_color = "MUTED"
     actions = [MsgAction.COPY, MsgAction.DELETE]
+    gutter = "·"
 
 class SysMsgError(SysMsg):
     name = "error"
@@ -58,12 +64,14 @@ class SysMsgError(SysMsg):
     frame_color = "ERROR"
     content_color = "ERROR"
     actions = [MsgAction.COPY, MsgAction.EDIT, MsgAction.DELETE]
+    gutter = "✗"
 
 class SysMsgWarning(SysMsg):
     name = "warning"
     title = "warning"
     frame_color = "WARNING"
     content_color = "WARNING"
+    gutter = "!"
 
 class ThinkingMsg(PicoMsg):
     name = "thinking"
@@ -71,6 +79,7 @@ class ThinkingMsg(PicoMsg):
     frame_color = "MUTED"
     content_color = "MUTED"
     actions = [MsgAction.COPY, MsgAction.EDIT, MsgAction.RETRY, MsgAction.DELETE, MsgAction.STOP, MsgAction.PAUSE, MsgAction.RESUME]
+    gutter = "…"
 
 class ToolCallMsg(MsgType):
     name = "tool"
@@ -78,6 +87,7 @@ class ToolCallMsg(MsgType):
     frame_color = "WARNING"
     content_color = None
     actions = [MsgAction.OUTPUT, MsgAction.COPY, MsgAction.DELETE]
+    gutter = "⚙"
 
 
 class ToolDraftMsg(MsgType):
@@ -86,6 +96,7 @@ class ToolDraftMsg(MsgType):
     frame_color = "MUTED"
     content_color = "MUTED"
     actions = []
+    gutter = "⚙"
 
 class AskPermissionMsg(MsgType):
     name = "permission"
@@ -93,3 +104,4 @@ class AskPermissionMsg(MsgType):
     frame_color = "PERMISSION"
     content_color = None
     actions = [MsgAction.ALLOW, MsgAction.DENY, MsgAction.OUTPUT, MsgAction.COPY]
+    gutter = "?"

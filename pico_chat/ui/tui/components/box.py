@@ -8,8 +8,11 @@ from pico_chat.ui.tui.msg_types import MsgAction
 from pico_chat import pico_cfg
 from pico_chat.ui.tui.colors import theme
 
+# Braille spinner frames for animating in-progress thinking.
+SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
 class Box(Component):
-    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None, parent_msg=None, compact_when_unfocused: bool = False, padding: int = 0, padding_y: Optional[int] = None, focus_in_padding: bool = False, focus_color=None):
+    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None, parent_msg=None, compact_when_unfocused: bool = False, padding: int = 0, padding_y: Optional[int] = None, focus_in_padding: bool = False, focus_color=None, thread_mode: bool = False, gutter: str = "▸", gutter_color=None):
         super().__init__(id)
         self.child = child
         self.child.parent = self
@@ -27,6 +30,10 @@ class Box(Component):
         self.padding = max(0, padding)
         self.padding_y = max(0, 0 if padding_y is None else padding_y)
         self.focus_in_padding = focus_in_padding
+        # Thread mode: borderless chat-thread rendering with a role gutter.
+        self.thread_mode = thread_mode
+        self.gutter = gutter
+        self.gutter_color = gutter_color
         
         if self.bg is None: self.bg = theme.get_bg()
         if self.fg is None: self.fg = theme.DEFAULT
@@ -62,8 +69,27 @@ class Box(Component):
             for field in fields:
                 field.suppress_focus_marker = True
 
+        # In thread mode, no borders - child is inset by the gutter width (2 cols)
+        # so content flows to the right of the role gutter. When focused with
+        # actions, the child is one row shorter so the action line sits below.
+        if self.thread_mode:
+            gutter_w = 2
+            has_actions = self.focused and self.parent_msg and self.parent_msg.get_active_actions()
+            child_h = max(0, height - (1 if has_actions else 0))
+            if size_changed:
+                super().set_layout(x, y, width, height)
+                self.child.set_layout(x + gutter_w, y, max(0, width - gutter_w), child_h)
+            else:
+                self.x = x
+                self.y = y
+                self.width = width
+                self.height = height
+                self.child.x = x + gutter_w
+                self.child.y = y
+                self.child.width = max(0, width - gutter_w)
+                self.child.height = child_h
         # In compact mode when unfocused, no borders - child gets full size
-        if self.compact_when_unfocused and not self.focused:
+        elif self.compact_when_unfocused and not self.focused:
             if size_changed:
                 super().set_layout(x, y, width, height)
                 self.child.set_layout(x, y, width, height)
@@ -123,13 +149,24 @@ class Box(Component):
                                            max(1, height - 2 * inset_y))
 
     def get_preferred_height(self, width: int) -> int:
-        """Box adds 2 rows of height for borders (top/bottom), unless in compact unfocused mode."""
+        """Box adds 2 rows of height for borders (top/bottom), unless in compact unfocused or thread mode."""
         if self.inline_editor is not None:
             lpad = getattr(self.parent_msg, 'left_pad', 0) if self.parent_msg else 0
             rpad = getattr(self.parent_msg, 'right_pad', 0) if self.parent_msg else 0
             inner_w = max(1, width - 2 - 2 * self.padding - lpad - rpad)
             return self.inline_editor.get_preferred_height(inner_w) + 2 + 2 * self.padding_y
         if hasattr(self.child, 'get_preferred_height'):
+            # Collapsed messages render a single summary line.
+            if self.parent_msg is not None and getattr(self.parent_msg, "collapsed", False):
+                return 1
+            # In thread mode, no borders; child width is reduced by the gutter.
+            # A focused message with actions gains one extra row for the action
+            # line below the content, which pushes subsequent messages down.
+            if self.thread_mode:
+                base = self.child.get_preferred_height(max(1, width - 2))
+                if self.focused and self.parent_msg and self.parent_msg.get_active_actions():
+                    return base + 1
+                return base
             # In compact mode when unfocused, no borders
             if self.compact_when_unfocused and not self.focused:
                 return self.child.get_preferred_height(width)
@@ -147,8 +184,8 @@ class Box(Component):
             self.subbuffer.mark_changed()
 
     def render(self, buffer: Buffer):
-        # Skip if too small - but compact mode can be 1x1
-        min_size = 1 if (self.compact_when_unfocused and not self.focused) else 2
+        # Skip if too small - but compact and thread modes can be 1x1
+        min_size = 1 if (self.compact_when_unfocused and not self.focused) or self.thread_mode else 2
         if self.width < min_size or self.height < min_size:
             return
         
@@ -194,6 +231,11 @@ class Box(Component):
         
         bg = self.bg
         
+        # Thread mode: borderless chat-thread rendering with a role gutter
+        if self.thread_mode:
+            self._render_thread_to_subbuffer()
+            return
+
         # Compact mode: render without borders when unfocused
         if self.compact_when_unfocused and not self.focused:
             self._render_compact_to_subbuffer()
@@ -351,7 +393,78 @@ class Box(Component):
         # Render child content directly (no border offset)
         temp_buffer = self._create_subbuffer_wrapper()
         self.child.render(temp_buffer)
-    
+
+    def _render_thread_to_subbuffer(self):
+        """Render in thread mode: borderless content with a role gutter.
+
+        The gutter (e.g. ▸ for assistant, ❯ for user) is drawn in the first
+        column, colored by the message's frame color. Content flows to the
+        right. When focused, actions render on the last row.
+        """
+        bg = self.bg
+        fg = self.gutter_color or self.fg
+
+        self.subbuffer.clear()
+
+        # Fill background
+        if bg:
+            for iy in range(self.height):
+                for ix in range(self.width):
+                    self.subbuffer.set(ix, iy, " ", bg=bg)
+
+        # Draw the role gutter in the first column.
+        if self.gutter and self.width > 0:
+            self.subbuffer.set(0, 0, self.gutter, fg=fg, bg=bg)
+
+        # Collapsed messages (e.g. thinking folded by default) render a single
+        # summary line instead of the full content.
+        if self.parent_msg is not None and getattr(self.parent_msg, "collapsed", False):
+            self._render_collapsed_line()
+            return
+
+        # Render child content (no border offset).
+        temp_buffer = self._create_subbuffer_wrapper()
+        self.child.render(temp_buffer)
+
+        # Actions on a dedicated row below the content when focused. This row
+        # is part of the box height (see get_preferred_height), so it pushes
+        # subsequent messages down rather than overlaying content.
+        if self.focused and self.parent_msg:
+            actions = self.parent_msg.get_active_actions()
+            if actions:
+                actions_str = " ".join(action.format() for action in actions)
+                self.subbuffer.write_str(2, self.height - 1, actions_str,
+                                         fg=theme.FOCUSED, bg=bg, max_width=max(0, self.width - 2))
+                # Record hit regions for mouse clicks.
+                self._action_hit_regions = []
+                x_offset = 2
+                for action in actions:
+                    formatted = action.format()
+                    self._action_hit_regions.append((x_offset, x_offset + len(formatted), action))
+                    x_offset += len(formatted) + 1
+
+    def _render_collapsed_line(self):
+        """Render a single summary line for a collapsed message.
+
+        Shows an animated spinner while the message is not finalized, then a
+        static marker once finalized.
+        """
+        bg = self.bg
+        parent = self.parent_msg
+        text = parent._collapsed_text()
+
+        # The gutter already marks the role (… for thinking), so the collapsed
+        # line shows just the spinner + label while streaming, or the label
+        # once finalized.
+        if not parent.finalized:
+            frame = SPINNER_FRAMES[parent.spinner_frame % len(SPINNER_FRAMES)]
+            line = f"{frame} {text}"
+        else:
+            line = text
+
+        self.subbuffer.write_str(2, 0, line, fg=self.gutter_color or self.fg,
+                                 bg=bg, max_width=max(0, self.width - 2))
+
     def _create_subbuffer_wrapper(self):
         """Create a Buffer-compatible wrapper that redirects to SubBuffer with coordinate translation."""
         class SubBufferWrapper:

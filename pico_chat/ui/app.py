@@ -335,8 +335,11 @@ class chatTUI(ChatActionHandlers):
         agent = runtime.ensure_agent()
         if runtime is self._active_runtime():
             self.refresh_status_bar()
-        current_msg = chat.add_message("Sending request...", msg_type=SysMsg())
-        current_msg_type = SysMsg
+        # No placeholder status message: the first real chunk creates its own
+        # message. This keeps the conversation free of transient "Sending
+        # request..." / "Processing results..." clutter.
+        current_msg = None
+        current_msg_type = None
         current_harness_ids = []
         processing_msg = None
 
@@ -375,16 +378,12 @@ class chatTUI(ChatActionHandlers):
                 elif isinstance(chunk, chunks.Thinking):
                     # If not currently in a thinking message, create one
                     if current_msg_type != ThinkingMsg:
-                        if current_msg_type == SysMsg:
-                            # Replace "Sending request..." or "Processing results..." with thinking
-                            new_msg = chat.new_message("", msg_type=ThinkingMsg(), harness_message_ids=current_harness_ids)
-                            chat.replace_message(current_msg, new_msg)
-                            current_msg = new_msg
-                            processing_msg = None  # Clear processing indicator
-                        else:
+                        if current_msg is not None:
                             # Finalize previous and create new
                             current_msg.finalize()
-                            current_msg = chat.add_message("", msg_type=ThinkingMsg(), harness_message_ids=current_harness_ids)
+                        current_msg = chat.add_message("", msg_type=ThinkingMsg(), harness_message_ids=current_harness_ids)
+                        # Thinking folds to a single line by default; expand on focus.
+                        current_msg.set_collapsed(True)
                         current_msg_type = ThinkingMsg
                     
                     current_msg.append(chunk.content)
@@ -392,16 +391,10 @@ class chatTUI(ChatActionHandlers):
                 elif isinstance(chunk, chunks.Content):
                     # If not currently in a content message, create one
                     if current_msg_type != PicoMsg:
-                        if current_msg_type == SysMsg:
-                            # Replace "Sending request..." or "Processing results..." with content
-                            new_msg = chat.new_message("", msg_type=PicoMsg(), harness_message_ids=current_harness_ids)
-                            chat.replace_message(current_msg, new_msg)
-                            current_msg = new_msg
-                            processing_msg = None  # Clear processing indicator
-                        else:
+                        if current_msg is not None:
                             # Finalize previous and create new
                             current_msg.finalize()
-                            current_msg = chat.add_message("", msg_type=PicoMsg(), harness_message_ids=current_harness_ids)
+                        current_msg = chat.add_message("", msg_type=PicoMsg(), harness_message_ids=current_harness_ids)
                         current_msg_type = PicoMsg
                     
                     current_msg.append(chunk.content)
@@ -416,13 +409,7 @@ class chatTUI(ChatActionHandlers):
                         current_msg.finalize()
 
                     if not msg:
-                        if current_msg_type == SysMsg:
-                            # Replace processing message with tool draft
-                            msg = chat.new_message("", msg_type=ToolDraftMsg(), harness_message_ids=current_harness_ids)
-                            chat.replace_message(current_msg, msg)
-                            processing_msg = None  # Clear processing indicator
-                        else:
-                            msg = chat.add_message("", msg_type=ToolDraftMsg(), harness_message_ids=current_harness_ids)
+                        msg = chat.add_message("", msg_type=ToolDraftMsg(), harness_message_ids=current_harness_ids)
                         runtime.active_tool_messages[tool_id] = msg
 
                     msg = ensure_tool_message_type(msg, ToolDraftMsg())
@@ -545,36 +532,6 @@ class chatTUI(ChatActionHandlers):
                             msg.rebuild_tool_display()
                             msg.finalize()
                             del runtime.active_tool_messages[tool_id]
-                            
-                            # Show processing indicator after tool completes
-                            # This will be replaced by the next content/thinking/tool
-                            if processing_msg is None or processing_msg.finalized:
-                                import time
-                                processing_start_time = time.time()
-                                
-                                async def update_processing_time():
-                                    """Update processing message with elapsed time."""
-                                    await asyncio.sleep(2.0)  # Wait 2 seconds before showing timer
-                                    while processing_msg and not processing_msg.finalized:
-                                        elapsed = int(time.time() - processing_start_time)
-                                        if elapsed >= 2:
-                                            processing_msg.set_text(
-                                                f"{theme.MUTED}Processing results... ({elapsed}s){theme.reset()}"
-                                            )
-                                            if runtime is self._active_runtime() and self.compositor:
-                                                self.compositor.request_render()
-                                        await asyncio.sleep(1.0)
-                                
-                                processing_msg = chat.add_message(
-                                    f"{theme.MUTED}Processing results...{theme.reset()}",
-                                    msg_type=SysMsg(),
-                                    harness_message_ids=current_harness_ids
-                                )
-                                current_msg = processing_msg
-                                current_msg_type = SysMsg
-                                
-                                # Start background timer task
-                                asyncio.create_task(update_processing_time())
                     
                     elif chunk.status == chunks.ToolStatus.ERROR:
                         msg = runtime.active_tool_messages.get(tool_id)
@@ -615,7 +572,8 @@ class chatTUI(ChatActionHandlers):
             # Finalize current message and add a plain SysMsg notification.
             # Avoid appending ANSI codes to a MarkdownComponent message (PicoMsg)
             # since the component would render the escape sequences as literal text.
-            current_msg.finalize()
+            if current_msg is not None:
+                current_msg.finalize()
             chat.add_message("[Generation stopped]", msg_type=SysMsg())
             raise 
             
@@ -1311,6 +1269,10 @@ class chatTUI(ChatActionHandlers):
         self.tab_view.can_close = self._can_close_tab
         self.tab_view.set_on_new(self._new_tab)
         
+        # Start with an actual empty conversation tab rather than no tabs.
+        if not self._tabs:
+            self._new_tab()
+        
         chat_screen = ChatScreen(
             self.tab_bar,
             self.chat_history_panel,
@@ -1343,27 +1305,11 @@ class chatTUI(ChatActionHandlers):
         self._update_focus_states()
         self.refresh_status_bar()
         
-        # Start background server status check (non-blocking)
+        # Start background server status check (non-blocking). No status
+        # message is added to the conversation — the status bar reflects it.
         async def background_startup_check():
-            # Show placeholder while checking status
-            placeholder = self.chat_history_panel.add_message(
-                "Checking server status...",
-                msg_type=SysMsg(),
-                title="status"
-            )
-            
-            # Get actual status (may take time if server is unreachable)
             status = await self.agent.get_status()
             self.refresh_status_bar()
-            
-            # Replace placeholder with actual status
-            status_msg = self.chat_history_panel.new_message(
-                StatusCommand.format_status(status),
-                msg_type=SysMsg(),
-                title="status"
-            )
-            self.chat_history_panel.replace_message(placeholder, status_msg)
-            
             logger.info(f"Server status online: {status['online']}")
 
             # Show any startup warnings (e.g. not a git repository)
@@ -1372,7 +1318,6 @@ class chatTUI(ChatActionHandlers):
                     warning,
                     msg_type=SysMsgWarning(),
                 )
-            
 
         # Run all tasks
         try:
