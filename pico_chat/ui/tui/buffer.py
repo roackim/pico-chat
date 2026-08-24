@@ -255,7 +255,17 @@ class Buffer:
                     terminal_col += 2  # Wide character occupies 2 columns
                 else:
                     terminal_col += 1  # Normal character occupies 1 column
+            
+            # Emit a real newline after every row EXCEPT the last. This lets
+            # terminal-native copy preserve line breaks between rows. The last
+            # row gets no newline so the terminal never scrolls (a newline on
+            # the bottom row would shift the whole screen up).
+            if y < self.height - 1:
+                res.append("\n")
         
+        # Return the cursor to the top-left so it is never left on the bottom
+        # row between frames (which could trigger a scroll on the next write).
+        res.append(ANSI.MOVE_HOME)
         # Reset color and hide the hardware cursor at the end to avoid flickering.
         # We handle cursor display manually in components to prevent terminal cursor jitter.
         res.append(ANSI.HIDE_CURSOR)

@@ -1,7 +1,5 @@
 BUG since rework:
 
-[ ] cant edit a message properly now
-
-
-[ ] Lets make the arrow prefixes the same symbol for pico / user (keep different color)
+[ ] cant edit a message properly now (used editing in place, inside box, but now no more boxes)
 [ ] Lets add a mode with explicit role prefix for each message, like "pico: " or "user: " (optional, configurable)
+
