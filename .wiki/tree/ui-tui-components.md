@@ -19,11 +19,6 @@ See [notes/ui.md](../notes/ui.md) for the component model overview.
 
 ## Widgets
 
-### `layout.py`
-`EmptyLine` adds one blank layout row. `SeparatorLine` renders a configurable
-horizontal rule across its allocated width; both report a preferred height of
-one row.
-
 ### `text.py`
 `TextComponent` — displays static or dynamically updated text with auto-scroll.
 Used as base for `ChatHistoryPanel`.
@@ -34,12 +29,9 @@ right horizontal alignment plus top, center, or bottom vertical alignment.
 `Box` — wraps another component with a border, optional title, and optional action buttons.
 Focus state changes border color. Actions appear as labeled buttons in the border.
 Constructor params include `compact_when_unfocused` (render without borders when unfocused) and `parent_msg` (link to owning message).
-Content starts one column inside the border by default; additional horizontal padding
-is opt-in through `padding`, as used by form popups for their focus gutter.
 `_render_compact_to_subbuffer()` — compact borderless render path.
 `_action_hit_regions` — tracks screen positions of action buttons during render for click detection.
 Supports **action flash feedback**: when `parent_msg._flash_action_key` is set, the matching action button renders with `reverse=True` for brief visual feedback.
-`AskPermissionMsg` uses the non-compact Box path so pending tool requests stay visibly framed.
 
 ### `button.py`
 `Button` — focusable control activated by Enter, Space, or a left mouse click;
@@ -81,8 +73,7 @@ shared spacing and focus styling.
 ### `input/basic.py`
 Reusable cursor-aware text editors:
 - `LineInput` — single-line value editing with placeholder and reverse-video cursor
-- `BoxInput` — multiline value editing with cursor navigation, wrapped display
-	lines, and boxed layout support
+- `BoxInput` — multiline value editing with cursor navigation and boxed layout support
 Both editors consume canonical `KeyEvent` metadata while retaining raw-string
 compatibility.
 `TextField` and `TextAreaField` delegate their editing behavior to these components.
@@ -104,37 +95,29 @@ compatibility.
 ### `popup.py`
 `Popup` — centered overlay popup built on `Box` + `TextComponent`.
 - Component tree: `Popup` → `Box` (borders/title/action bar) → `TextComponent` (content)
-- `show(..., content_padding=...)` controls the content inset; regular app popups use one space while callers can opt out.
-- Opening a popup suspends the active background focus scope and closing it restores the previous focused target.
 - `show(title, content)` — displays popup, auto-centers, registers with compositor
 - `PopupScreen` — adapts read-only popup visibility to `ModalHost` lifecycle ownership
 
 ### `form.py`
 Form field components and layout container.
 - `FormField` — ABC for all fields: `get_value()`, `set_value()`, `render()`, `handle_input()`
-- `ComponentField` — adapts a non-interactive reusable component into one form row
-- `FormSection` — titled field group with owned indentation, spacing, and choice alignment
 - `InputResult` — explicit routing result with `handled`, optional sibling
 	`focus` intent, and `redraw`; legacy boolean handlers are adapted with
 	`from_legacy()`
 - Fields can bind to a standalone `FieldModel` for value, dirty, reset, and synchronous validation state.
-- `ToggleField` — `[x]`/`[ ]` boolean toggle with green enabled and muted
-	 disabled marks
+- `ToggleField` — `[x]`/`[ ]` boolean toggle
 - `TextField` — single-line text input with cursor
 - `TextAreaField` — multiline text input with cursor navigation
 - `CheckboxListField` — multi-select `[ ]`/`[x]` list
 - `RadioListField` — single-select `()`/`(x)` list
 - `InlineChoiceField` / `HorizontalSelector` — compact horizontal selector
-	with aligned option columns and green `allow` selection
 - `FormActionField` / `ButtonField` — clickable and keyboard-activatable form action
 - `ProfileListField` — legacy profile list retained for compatibility
 - `ProfileList` — composable dynamic list of `ProfileRow` controls plus a
 	real create button; selection and action focus are separate
 - `ProfileRow` — profile selection control composed with rename, duplicate, and
 	remove `Button` leaves
-- `FormContainer` — vertical layout manager with flattened nested-section focus,
-	Tab/Shift+Tab navigation, and viewport clipping for scrolled fields
-- `FormPopup` — modal form with explicit Validate/Cancel actions; Enter remains field-local and vertical navigation wraps
+- `FormContainer` — vertical layout manager with Tab/Shift+Tab focus
 	navigation, scroll offset, dynamic height recomputation, and `InputResult`
 	focus-intent routing
 
@@ -164,12 +147,8 @@ Declarative construction helpers for regular form fields.
 ### `form_popup.py`
 `FormPopup` — modal overlay wrapping a `FormContainer` inside a `Box`.
 - `FormPopupScreen` — `Screen` adapter for `ModalHost` lifecycle ownership; compositor-only usage remains supported.
-- `show(..., focus_submit=True)` can start with the Enter/submit action focused;
-	deletion confirmation uses this with the popup's red focus color.
-- Focused action labels use reverse-video with the configured focus color as
-	the foreground, so destructive actions remain visibly red.
 - `show(title, fields, on_submit, on_cancel)` — displays form, registers with compositor
-- Action bar: `[Enter] validate` / `[Esc] cancel`; Down from the final field focuses the primary action
+- Action bar: `[Enter] ok` / `[Esc] cancel`
 - Required and model validation with error message overlay
 - `dirty` / `reset()` expose and restore form state; cancel resets before dismissal
 - Enter on TextField moves to next field; Enter on other fields submits

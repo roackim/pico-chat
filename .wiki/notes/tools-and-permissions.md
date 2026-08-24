@@ -10,12 +10,8 @@ The tool system exposes file and shell operations to the LLM agent. Every tool c
 |-------|-----------|
 | `MinimalToolset` | Base; read file, list directory |
 | `FileTools` | Extends minimal; write file, patch file |
-| `ShellTool` | Execute shell commands |
+| `ShellTool` | Run shell command |
 | `SearchTools` | Web search; DuckDuckGo and Wikipedia |
-
-Registered wrapper policy metadata lives with each `ToolWrapper` class in
-`tool_wrappers.py`; `registered_tool_specs()` is the canonical tool registry
-used to seed role policy entries, including default tool-specific settings.
 
 `ToolError` — exception raised by tool functions on failure.
 
@@ -36,11 +32,7 @@ Each tool class has a corresponding `*ToolWrapper` that adapts it to the OpenAI 
 
 Individual wrappers: `ReadTool`, `WriteTool`, `PatchTool`, `RunTool`, `SearchWebTool`, `SearchWikiTool`, `SubagentTool`, `WaitForSubagentsTool`.
 
-`create_toolset(depth)` — factory that builds the active tool dict. Only registers: `read`, `write`, `patch`, `run_command`, `search_web`, `search_wiki`, `subagent`, `wait_for_subagents`. (Iteration/memory tools are no longer registered.)
-
-`run_command` is the LLM-facing name for shell execution. The shorter `run`
-name remains accepted as a legacy call alias, but is not advertised in tool
-schemas. The underlying executor remains `ShellTool`.
+`create_toolset(depth)` — factory that builds the active tool dict. Only registers: `read`, `write`, `patch`, `run`, `search_web`, `search_wiki`, `subagent`, `wait_for_subagents`. (Iteration/memory tools are no longer registered.)
 
 This adapter layer keeps `tools.py` decoupled from any specific LLM API format.
 
@@ -96,28 +88,6 @@ Dangerous pattern detection can upgrade `ALLOW` → `ASK`. It never downgrades `
 
 See [notes/security.md](./security.md) for the security layer details.
 
-## Conversation roles
-
-`Role` (`harness/roles.py`) is the higher-level operating model for a
-conversation. It combines enabled tools, each tool's permission policy and
-settings, and optional role prompt instructions. The active role filters the
-tool schemas advertised to the model and the `PermissionGate` denies disabled
-tools before approval prompts or execution.
-
-Roles are owned by individual `Harness` instances, so different conversations
-can use different roles. `Harness.set_role()` rebuilds the tool map and schemas,
-updates the permission gate, and records a role-transition marker in history.
-`PermissionGate` retains the active role and directly enforces role-owned
-availability, simple/search policies, file inside/outside settings, and shell
-run settings. The existing `ToolPermissionsProfile` remains the compatibility
-fallback when no role is supplied. The global profile remains the default path
-for legacy root harnesses.
-
-The no-argument `/permissions` popup edits this unified role object. It includes
-role metadata and prompt text, tool enablement, current file/run policy controls,
-and saved-role lifecycle actions. The command-line permission-profile
-subcommands remain as compatibility operations during migration.
-
 ## Iteration Tools (`iteration_tools.py`)
 
 **Removed.** Previously provided `loop`, `loop_next`, `loop_itr_done` — was dead code and has been deleted.
@@ -128,8 +98,6 @@ subcommands remain as compatibility operations during migration.
 `WaitForSubagentsTool` collects results from all queued background subagents.
 
 Subagents always run under the **`scaffolder`** profile: read-only inside the repo, deny everything else. The main agent's permission profile is not inherited.
-Starting delegation and waiting for delegated work still pass through the main
-agent's permission gate, so an ask-all profile prompts before either operation.
 
 See [notes/subagents.md](./subagents.md) for the full lifecycle, depth limit, timeout, and config reference.
 
