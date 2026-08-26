@@ -77,17 +77,9 @@ class ChatHistoryPanel(TextComponent):
         
         self.on_action: Optional[callable] = None
 
-        # In-place editing state
-        self._inline_editing_msg = None  # Message currently being edited in-place
-        self._inline_cancel_cb = None    # Optional cancel callback
-
     def set_compositor(self, compositor):
         """Set the compositor for updates."""
         self.compositor = compositor
-
-    @property
-    def is_inline_editing(self) -> bool:
-        return self._inline_editing_msg is not None
 
     def mark_changed(self, rect: Optional[tuple[int, int, int, int]] = None):
         """Mark panel dirty and wake compositor for immediate repaint."""
@@ -447,52 +439,6 @@ class ChatHistoryPanel(TextComponent):
             logger.warning("No clipboard utility found for selection copy")
         except Exception as e:
             logger.error(f"Error copying selection: {e}")
-
-    def start_inline_edit(self, message, initial_text: str, on_submit, on_cancel=None):
-        """Replace the message's rendered content with an editable InputComponent.
-
-        Args:
-            message:      The Message to edit in-place.
-            initial_text: Text to pre-populate the editor with.
-            on_submit:    Callable(text: str) — called when the user confirms.
-            on_cancel:    Optional callable() — called when the user presses Esc.
-        """
-        from pico_chat.ui.tui.components.input.input import InputComponent
-
-        # Stop any previous inline edit first
-        self.stop_inline_edit()
-
-        editor = InputComponent(prompt="")
-        editor.parent = message.box
-
-        # Initial layout — will be corrected on the next render pass
-        box = message.box
-        inner_w = max(1, (box.width or 40) - 2)
-        inner_h = max(1, (box.height or 3) - 2)
-        editor.set_layout(box.x + 1, box.y + 1, inner_w, inner_h)
-        editor.update(initial_text)
-        editor.set_focused(True)
-
-        def _submit_wrapper(text):
-            self.stop_inline_edit()
-            on_submit(text)
-
-        editor.keyboard_handler.on_submit = _submit_wrapper
-
-        message.box.inline_editor = editor
-        message.box.mark_changed()
-        self._inline_editing_msg = message
-        self._inline_cancel_cb = on_cancel
-        self._request_repaint()
-
-    def stop_inline_edit(self):
-        """Remove the active inline editor and restore normal message rendering."""
-        if self._inline_editing_msg is not None:
-            self._inline_editing_msg.box.inline_editor = None
-            self._inline_editing_msg.box.mark_changed()
-            self._inline_editing_msg = None
-        self._inline_cancel_cb = None
-        self._request_repaint()
 
     def move_focus_up(self) -> bool:
         """Move focus to the previous message.
@@ -921,19 +867,6 @@ class ChatHistoryPanel(TextComponent):
                     msg.advance_spinner()
             return False
 
-        # --- In-place inline editor takes priority over all other input ---
-        if isinstance(event, str) and self.has_keyboard_focus and self._inline_editing_msg is not None:
-            editor = self._inline_editing_msg.box.inline_editor
-            if editor is not None:
-                if event == '\x1b':  # Esc → cancel edit
-                    cb = self._inline_cancel_cb
-                    self.stop_inline_edit()
-                    if cb:
-                        cb()
-                    return True
-                editor.handle_input(event)
-                return True
-
         # Handle keyboard input only if this panel has keyboard focus
         if isinstance(event, str) and self.has_keyboard_focus:
             # 'y' yanks (copies) the current mouse selection, if any
@@ -1258,7 +1191,7 @@ class ChatHistoryPanel(TextComponent):
             # Message not found, ignore
             pass
 
-    def add_message(self, message: str, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None, left_margin: int = 0, right_margin: int = 0, harness_message_ids: list = None, command_text: str = None) -> Message:
+    def add_message(self, message: str, msg_type: MsgType = None, title: str = None, frame_color: RGB = None, content_color: RGB = None, left_margin: int = 0, right_margin: int = 0, harness_message_ids: list = None) -> Message:
         """Add a message to chat history and update UI.
         
         Args:
@@ -1269,15 +1202,11 @@ class ChatHistoryPanel(TextComponent):
             left_margin: Optional override for the box left margin
             right_margin: Optional override for the box right margin
             harness_message_ids: List of harness message IDs this UI message references
-            command_text: Original command text (for edit action on command errors)
         
         Returns:
             The created Message object.
         """
-        msg = self.new_message(message, msg_type=msg_type, title=title, frame_color=frame_color, content_color=content_color, left_margin=left_margin, right_margin=right_margin, harness_message_ids=harness_message_ids, append=True)
-        if command_text:
-            msg.command_text = command_text
-        return msg
+        return self.new_message(message, msg_type=msg_type, title=title, frame_color=frame_color, content_color=content_color, left_margin=left_margin, right_margin=right_margin, harness_message_ids=harness_message_ids, append=True)
 
 
     def clear(self):

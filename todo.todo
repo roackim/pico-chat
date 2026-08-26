@@ -1,5 +1,22 @@
 BUG since rework:
 
-[ ] cant edit a message properly now (used editing in place, inside box, but now no more boxes)
+[ ] Cant edit a message properly now (used editing in place, inside box, but now no more boxes) -> disable message editing for now ?
 [ ] Lets add a mode with explicit role prefix for each message, like "pico: " or "user: " (optional, configurable)
 
+[ ] AGENTS.md integration in system prompt / instructions to read ?
+[ ] SKILLS.md Support (!important)
+[ ] Git integration ? like gitui
+[ ] local config override for pico cfg (config for the project)
+
+[ ] Add a /subagents commands 
+	[ ] creates a tab (like /debug panel)
+	[ ] lists all subagents calls (finished / active)
+		[ ] open the convo
+		[ ] close / shutdown the subagent
+
+[ ] Improve messages UI
+[ ] Improve running commands UI
+    [ ] do not show the OK tick if NOT FINISHED ! 
+    [ ] add a loading spinner
+    [ ] make the output be a popup terminal like thing, with scrollback, and a way to close it
+    [ ] add a "stop" button to stop the command

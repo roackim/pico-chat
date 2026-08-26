@@ -281,7 +281,6 @@ class chatTUI(ChatActionHandlers):
 
         return property(getter, setter)
 
-    editing_message_index = _runtime_field("editing_message_index")
     _active_user_input = _runtime_field("active_user_input")
     _active_user_msg = _runtime_field("active_user_msg")
     _paused_user_input = _runtime_field("paused_user_input")
@@ -703,7 +702,6 @@ class chatTUI(ChatActionHandlers):
     def _handle_message_action(self, message, action: MsgAction):
         handlers = {
             MsgAction.COPY: self.handle_copy_action,
-            MsgAction.EDIT: self.handle_edit_action,
             MsgAction.RETRY: self.handle_retry_action,
             MsgAction.STOP: self.handle_stop_action,
             MsgAction.ALLOW: self.handle_allow_action,
@@ -861,50 +859,13 @@ class chatTUI(ChatActionHandlers):
         else:
             import logging
             logger = logging.getLogger("tui")
+            logger.info(f"User submitted: {text[:50]}...")
             
-            # Check if we're editing an existing message
-            if self.editing_message_index is not None:
-                logger.info(f"Editing message at index {self.editing_message_index}: {text[:50]}...")
-                
-                # Get the message being edited
-                if self.editing_message_index < len(self.chat_history_panel.messages):
-                    edited_msg = self.chat_history_panel.messages[self.editing_message_index]
-                    
-                    # Delete from harness history starting at this message's ID
-                    if edited_msg.harness_message_ids:
-                        harness_id = edited_msg.harness_message_ids[0]
-                        if self.agent.delete_messages_after_id(harness_id, inclusive=True):
-                            logger.info(f"Deleted harness messages after ID {harness_id}")
-                    
-                    # Update the message text in place
-                    edited_msg.set_text(text)
-                    
-                    # Clear its harness ID (will be reassigned)
-                    edited_msg.harness_message_ids = []
-                    
-                    # Remove all UI messages AFTER the edited one (keep edited message visible)
-                    messages_to_remove = len(self.chat_history_panel.messages) - self.editing_message_index - 1
-                    for _ in range(messages_to_remove):
-                        self.chat_history_panel.remove_last_message()
-                    
-                    # Queue the edited message for processing
-                    self._enqueue_message(text, edited_msg)
-                else:
-                    # Message was deleted (e.g., via /clear) - treat as new message
-                    logger.warning(f"Edited message at index {self.editing_message_index} no longer exists, creating new message")
-                    user_msg = self.chat_history_panel.add_message(text, msg_type=UserMsg())
-                    self._enqueue_message(text, user_msg)
-                
-                # Clear editing state
-                self.editing_message_index = None
-            else:
-                logger.info(f"User submitted: {text[:50]}...")
-                
-                # Create user message and queue it
-                user_msg = self.chat_history_panel.add_message(text, msg_type=UserMsg())
-                user_msg._tab_state = self._tabs[self._active_tab_index] if self._tabs else None
+            # Create user message and queue it
+            user_msg = self.chat_history_panel.add_message(text, msg_type=UserMsg())
+            user_msg._tab_state = self._tabs[self._active_tab_index] if self._tabs else None
 
-                self._enqueue_message(text, user_msg)
+            self._enqueue_message(text, user_msg)
             
             # Enable auto-scroll to show the new message
             self.chat_history_panel.auto_scroll = True
@@ -1091,7 +1052,6 @@ class chatTUI(ChatActionHandlers):
                 self.chat_history_panel.clear()
                 self.active_tool_messages = {}
                 self.pending_permission_prompt = None
-                self.editing_message_index = None
                 self._active_user_input = None
                 self._active_user_msg = None
                 self._paused_user_input = None
@@ -1140,7 +1100,6 @@ class chatTUI(ChatActionHandlers):
         tab_state.chat_history_panel.clear()
         tab_state.active_tool_messages.clear()
         tab_state.pending_permission_prompt = None
-        tab_state.editing_message_index = None
         tab_state.active_user_input = None
         tab_state.active_user_msg = None
         tab_state.paused_user_input = None
@@ -1190,9 +1149,7 @@ class chatTUI(ChatActionHandlers):
                     return self.input_component.handle_input(event)
 
             # Shortcuts to focus input: 'i' or Enter (when not already in input)
-            # Skip when an inline editor is active (Enter must go to the editor)
-            if (key == 'i' or key == '\r') and self._last_focus_id != "input" \
-                    and not self.chat_history_panel.is_inline_editing:
+            if (key == 'i' or key == '\r') and self._last_focus_id != "input":
                 self.chat_history_panel.clear_focus()
                 self._set_app_focus("input")
                 return True

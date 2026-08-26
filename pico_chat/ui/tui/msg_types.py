@@ -7,7 +7,6 @@ class MsgAction(Enum):
     """Available actions for messages."""
     DELETE = ("d", "delete")
     COPY = ("c", "copy")
-    EDIT = ("e", "edit")
     RETRY = ("r", "retry")
     STOP = ("s", "stop")
     ALLOW = ("a", "allow")
@@ -39,14 +38,14 @@ class MsgType:
 class UserMsg(MsgType):
     name = "user"
     title = "user"
-    actions = [MsgAction.COPY, MsgAction.EDIT, MsgAction.DELETE, MsgAction.STEER]
+    actions = [MsgAction.COPY, MsgAction.DELETE, MsgAction.STEER]
     frame_color = "USER"
     gutter = "▸"
 
 class PicoMsg(MsgType):
     name = "pico"
     title = "pico"
-    actions = [MsgAction.COPY, MsgAction.EDIT, MsgAction.RETRY, MsgAction.DELETE, MsgAction.STOP, MsgAction.PAUSE, MsgAction.RESUME]
+    actions = [MsgAction.COPY, MsgAction.RETRY, MsgAction.DELETE, MsgAction.STOP, MsgAction.PAUSE, MsgAction.RESUME]
     frame_color = "PICO"
     gutter = "▸"
 
@@ -63,7 +62,7 @@ class SysMsgError(SysMsg):
     title = "error"
     frame_color = "ERROR"
     content_color = "ERROR"
-    actions = [MsgAction.COPY, MsgAction.EDIT, MsgAction.DELETE]
+    actions = [MsgAction.COPY, MsgAction.DELETE]
     gutter = "✗"
 
 class SysMsgWarning(SysMsg):
@@ -78,7 +77,7 @@ class ThinkingMsg(PicoMsg):
     title = "thinking"
     frame_color = "MUTED"
     content_color = "MUTED"
-    actions = [MsgAction.COPY, MsgAction.EDIT, MsgAction.RETRY, MsgAction.DELETE, MsgAction.STOP, MsgAction.PAUSE, MsgAction.RESUME]
+    actions = [MsgAction.COPY, MsgAction.RETRY, MsgAction.DELETE, MsgAction.STOP, MsgAction.PAUSE, MsgAction.RESUME]
     gutter = "…"
 
 class ToolCallMsg(MsgType):

@@ -105,9 +105,6 @@ class Message:
         self.metrics_ttft_ms: Optional[float] = None
         self.metrics_duration_ms: Optional[float] = None
         
-        # Command error context (for edit action on failed commands)
-        self.command_text: Optional[str] = None
-        
         # Action click flash feedback (set by ChatHistoryPanel, read by Box)
         self._flash_action_key: Optional[str] = None
         
@@ -142,21 +139,18 @@ class Message:
 
         elif isinstance(self.type, msg_types.PicoMsg):  # includes ThinkingMsg
             if self.is_paused:
-                # Paused: copy, edit prefill, resume, delete
-                keep = {MsgAction.COPY, MsgAction.EDIT, MsgAction.RESUME, MsgAction.DELETE}
+                # Paused: copy, resume, delete
+                keep = {MsgAction.COPY, MsgAction.RESUME, MsgAction.DELETE}
                 actions = [a for a in actions if a in keep]
             elif self.finalized:
                 # Finalized: hide streaming-only actions
                 actions = [a for a in actions if a not in (
                     MsgAction.STOP, MsgAction.PAUSE, MsgAction.RESUME
                 )]
-                # Only ThinkingMsg makes sense to edit as a thinking prefill
-                if not isinstance(self.type, msg_types.ThinkingMsg):
-                    actions = [a for a in actions if a != MsgAction.EDIT]
             else:
                 # Live streaming: hide destructive/post-gen actions
                 actions = [a for a in actions if a not in (
-                    MsgAction.EDIT, MsgAction.DELETE, MsgAction.RETRY, MsgAction.RESUME
+                    MsgAction.DELETE, MsgAction.RETRY, MsgAction.RESUME
                 )]
 
         return actions

@@ -5,7 +5,6 @@ from .builtins import (
     CompactCommand,
     ExitCommand,
     HelpCommand,
-    PrefillCommand,
     PwdCommand,
     ResumeCommand,
     StatusCommand,
@@ -15,6 +14,6 @@ from .builtins import (
 
 __all__ = [
     "HelpCommand", "ClearCommand", "CompactCommand", "ExitCommand",
-    "StopCommand", "ResumeCommand", "PrefillCommand", "StatusCommand",
+    "StopCommand", "ResumeCommand", "StatusCommand",
     "PwdCommand", "CdCommand",
 ]

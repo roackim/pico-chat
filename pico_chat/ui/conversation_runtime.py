@@ -66,14 +66,6 @@ class ConversationRuntime:
     def harness_history(self, value: list) -> None:
         self.ensure_agent().history = list(value)
 
-    @property
-    def editing_message_index(self) -> Optional[int]:
-        return getattr(self, "_editing_message_index", None)
-
-    @editing_message_index.setter
-    def editing_message_index(self, value: Optional[int]) -> None:
-        self._editing_message_index = value
-
     def ensure_agent(self) -> Any:
         """Create the agent lazily for tabs opened after the initial tab."""
         if self.agent is None:
