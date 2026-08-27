@@ -9,9 +9,6 @@ import atexit
 from turtle import done
 from typing import Optional, Any
 
-from openai import chat
-import openai
-
 from pico_chat.ui.tui.compositor import Compositor
 from pico_chat.ui.tui.events import KeyEvent, MouseEvent
 from pico_chat.ui.tui.components import (

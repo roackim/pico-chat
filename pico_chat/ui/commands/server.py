@@ -163,12 +163,29 @@ class ServerInfoCommand(Command):
         ui.chat_history_panel.add_message(msg, msg_type=SysMsg(), title="server")
 
 
+class ServerDiagnoseCommand(Command):
+    def __init__(self):
+        super().__init__("diagnose", "Test connectivity to a server and show the reason on failure",
+                         params=[Param("SERVER_NAME", completions=server_name_completions)])
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if not args:
+            ui.chat_history_panel.add_message("Usage: /server diagnose <name>", msg_type=SysMsgError())
+            return
+        from pico_chat.harness.server_service import ServerService
+        msg = await ServerService().diagnose(args[0])
+        ui.chat_history_panel.add_message(msg, msg_type=SysMsg())
+        if hasattr(ui, "refresh_status_bar"):
+            ui.refresh_status_bar()
+
+
 class ServerCommand(Command):
     def __init__(self):
         remove = ServerRemoveCommand()
         super().__init__("server", "Manage LLM server configurations", subcommands={
             "add": ServerAddCommand(), "list": ServerListCommand(), "use": ServerUseCommand(),
             "info": ServerInfoCommand(), "remove": remove, "rm": remove,
+            "diagnose": ServerDiagnoseCommand(),
         })
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
@@ -187,4 +204,5 @@ class ServerCommand(Command):
 __all__ = [
     "ServerCommand", "ServerAddCommand", "ServerListCommand",
     "ServerUseCommand", "ServerRemoveCommand", "ServerInfoCommand",
+    "ServerDiagnoseCommand",
 ]

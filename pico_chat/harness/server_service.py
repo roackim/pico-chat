@@ -136,17 +136,8 @@ class ServerService:
         test_server = create_server(test_config)
         online = await test_server.check_connection()
 
-        if not online:
-            return ServerAddResult(
-                ok=False,
-                message=(
-                    "Failed to connect to OpenRouter\n"
-                    "Check your API key and internet connection.\n"
-                    "Get your key at: https://openrouter.ai/keys"
-                ),
-            )
-
-        # Save config
+        # Save config regardless of connectivity — a server may be offline
+        # now (or slow) but reachable later. Warn instead of failing.
         server_config: Dict[str, Any] = {
             "type": "openrouter",
             "base_url": "https://openrouter.ai/api/v1",
@@ -163,12 +154,20 @@ class ServerService:
         pico_cfg.config.save_server(server_name, server_config, set_active=False)
 
         provider_msg = f"\nProvider: {provider}" if provider else ""
+        warning = ""
+        if not online:
+            warning = (
+                "\n\n⚠️  Warning: could not reach OpenRouter during the connection test.\n"
+                "Config was saved anyway — it will be used once the server is reachable.\n"
+                "Check your API key and internet connection."
+            )
         return ServerAddResult(
             ok=True,
             message=(
                 f"Added server '{server_name}'\n"
                 f"Type: OpenRouter\n"
-                f"Model: {model_id}{provider_msg}\n\n"
+                f"Model: {model_id}{provider_msg}\n"
+                f"{warning}\n\n"
                 f"Use '/server use {server_name}' to activate"
             ),
             server_name=server_name,
@@ -208,18 +207,8 @@ class ServerService:
         test_server = create_server(test_config)
         online = await test_server.check_connection()
 
-        if not online:
-            return ServerAddResult(
-                ok=False,
-                message=(
-                    f"Failed to connect to {url}\n"
-                    "Server is not responding. Check the URL and ensure the server is running."
-                ),
-            )
-
-        model_name = await test_server.get_model_name()
-        context_window = await test_server.get_context_window()
-
+        # Save config regardless of connectivity — a local server may be
+        # turned off now but started later. Warn instead of failing.
         server_config: Dict[str, Any] = {
             "type": "llamacpp",
             "base_url": url,
@@ -232,6 +221,28 @@ class ServerService:
         from pico_chat import pico_cfg
         pico_cfg.config.save_server(server_name, server_config, set_active=False)
 
+        # Model/context queries are best-effort — they may time out or fail
+        # if the server is offline. Fall back to "unknown" rather than crash.
+        model_name = "unknown"
+        context_window = None
+        if online:
+            try:
+                model_name = await test_server.get_model_name()
+            except Exception as e:
+                logger.warning(f"Failed to query model name for '{server_name}': {e}")
+            try:
+                context_window = await test_server.get_context_window()
+            except Exception as e:
+                logger.warning(f"Failed to query context window for '{server_name}': {e}")
+
+        context_msg = f"Context: {context_window:,} tokens" if context_window else "Context: unknown"
+        warning = ""
+        if not online:
+            warning = (
+                "\n\n⚠️  Warning: could not reach the server during the connection test.\n"
+                "Config was saved anyway — it will be used once the server is running.\n"
+                f"Check that {url} is reachable."
+            )
         return ServerAddResult(
             ok=True,
             message=(
@@ -239,7 +250,8 @@ class ServerService:
                 f"Type: llamacpp\n"
                 f"URL: {url}\n"
                 f"Model: {model_name}\n"
-                f"Context: {context_window:,} tokens\n\n"
+                f"{context_msg}\n"
+                f"{warning}\n\n"
                 f"Use '/server use {server_name}' to activate"
             ),
             server_name=server_name,
@@ -275,17 +287,10 @@ class ServerService:
 
         from pico_chat.harness.llm_server import create_server
         test_server = create_server(test_config)
-        if not await test_server.check_connection():
-            return ServerAddResult(
-                ok=False,
-                message=(
-                    f"Failed to connect to Ollama at {base_url}\n"
-                    "Ensure Ollama is running and the URL is correct."
-                ),
-            )
+        online = await test_server.check_connection()
 
-        models = await test_server.list_models()
-        selected = model or (models[0].id if models else None)
+        # Save config regardless of connectivity — Ollama may be turned off
+        # now but started later. Warn instead of failing.
         server_config: Dict[str, Any] = {
             "type": "ollama",
             "base_url": f"{base_url}/v1",
@@ -294,19 +299,36 @@ class ServerService:
             "retry_attempts": 3,
             "retry_delay": 2.0,
         }
+
+        # Model discovery is best-effort — it may time out if Ollama is offline.
+        selected = model
+        if online:
+            try:
+                models = await test_server.list_models()
+                selected = model or (models[0].id if models else None)
+            except Exception as e:
+                logger.warning(f"Failed to list Ollama models for '{server_name}': {e}")
         if selected:
             server_config["model"] = selected
 
         from pico_chat import pico_cfg
         pico_cfg.config.save_server(server_name, server_config, set_active=False)
         model_text = selected or "none discovered"
+        warning = ""
+        if not online:
+            warning = (
+                "\n\n⚠️  Warning: could not reach Ollama during the connection test.\n"
+                "Config was saved anyway — it will be used once Ollama is running.\n"
+                f"Check that {base_url} is reachable."
+            )
         return ServerAddResult(
             ok=True,
             message=(
                 f"Added server '{server_name}'\n"
                 "Type: Ollama\n"
                 f"URL: {base_url}\n"
-                f"Model: {model_text}\n\n"
+                f"Model: {model_text}\n"
+                f"{warning}\n\n"
                 f"Use '/server use {server_name}' to activate"
             ),
             server_name=server_name,
@@ -362,6 +384,22 @@ class ServerService:
             retry_delay=cfg.get("retry_delay", 2.0),
             max_context=cfg.get("max_context"),
         )
+
+    async def diagnose(self, name: str) -> str:
+        """Run a connection diagnosis for a server and return a report."""
+        from pico_chat import pico_cfg
+        from pico_chat.harness.llm_server import create_server
+        from pico_chat.harness.llm_server_config import get_server_config_by_name
+
+        if name not in pico_cfg.config.servers:
+            return f"Server '{name}' not found.\n\nUse '/server list' to see available servers."
+
+        config = get_server_config_by_name(name)
+        if config is None:
+            return f"Failed to parse config for '{name}'."
+        server = create_server(config)
+        diagnosis = await server.diagnose_connection()
+        return diagnosis.message()
 
     # --- Use / Switch ---
 

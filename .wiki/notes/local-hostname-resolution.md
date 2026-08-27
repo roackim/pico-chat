@@ -1,0 +1,95 @@
+# `.local` (mDNS) Hostname Resolution
+
+pico's LLM server layer (`pico_chat/harness/llm_server.py`) has special handling
+for `*.local` hostnames (mDNS / Bonjour / Avahi), which are common for local
+servers on a LAN (e.g. `http://llm-mini-server.local:8080`).
+
+## Transport: raw httpx (no OpenAI SDK)
+
+The OpenAI-compatible chat transport is implemented **directly on httpx** — the
+`openai` SDK was removed. pico owns the connection, DNS/IP resolution, timeouts,
+retries and connection pooling, giving full visibility into how requests are
+sent (and why they're slow). Only the three supported server families are
+covered: llama.cpp / Ollama / OpenRouter (+ generic OpenAI-compatible).
+
+- One `httpx.AsyncClient` per server (`_new_http_client`), reused across
+  messages in a conversation (keep-alive connections, no per-message handshake).
+- Streaming is done by parsing SSE (`data:` lines) from `POST /chat/completions`;
+  chunks are adapted (`_adapt_stream_chunk` / `_adapt_chat_response`) to the
+  shape the old SDK produced so downstream harness/UI code is unchanged.
+- Ollama uses its native `/api/chat` endpoint (which preserves usage counters).
+
+## The problem
+
+httpx connects via `getaddrinfo`. For a `.local` name this can return a
+bare IPv6 link-local address (`fe80::…`) **without an interface scope index**.
+Connecting to `fe80::` with no zone fails ("no route to host"), even though the
+name *lookup* succeeds — so pico could not reach servers that `ping`/`curl` reach
+fine. This is especially common under **WSL2** (NAT'd multicast) and where DNS
+is otherwise healthy.
+
+## The fix
+
+For `.local` hosts, pico resolves the name to an IPv4 address and swaps it into
+the URL. Resolution is done **in-process via `socket.getaddrinfo`** (the same
+libc resolver the shell uses — nsswitch + mDNS), with a `getent hosts` subprocess
+as a fallback. A bare `getent` subprocess can hang on mDNS when the process
+environment differs from the shell (e.g. under `pixi run` / WSL), which made the
+request fall back to the slow `.local` name; in-process resolution avoids that.
+
+- `_resolve_local_hostname(url)` — performs the rewrite, called from
+  `LLMServer.__init__` so it applies to the single httpx client (built off
+  `config.base_url`).
+- Non-`.local` hosts and any resolver failure return the original URL unchanged.
+
+## Caching + invalidation
+
+Resolutions are cached per-hostname for **the process lifetime** (no TTL) so a
+`getent` subprocess runs at most once per host:
+- `_cached_ip_for(hostname)` / `_resolve_once(hostname)`
+- `invalidate_local_hostname(url)` drops the cache entry
+
+`LLMServer.check_connection()`/`diagnose_connection()` use this for self-healing:
+on a connect failure for a `.local` host they invalidate the cached address,
+re-resolve once, rebuild the httpx client, and retry exactly once. So the cache
+is effectively permanent while a server stays reachable, and only refreshes when
+a failed connection proves the entry stale. Non-`.local` hosts are tried once.
+
+## Proxy-avoidance for local/LAN targets
+
+Even with the hostname resolved to an IP, pico could still fail while `curl`
+succeeds — the classic WSL2 gotcha. httpx defaults to `trust_env=True` and
+silently consumes `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`, routing LAN traffic
+through a bogus inherited proxy.
+
+- `_is_local_target(url)` — detects `localhost`, `*.local`, and RFC1918
+  (192.168./10./172.16-31.) plus link-local targets.
+- `_new_http_client(config)` — for local targets sets `trust_env=False`, so the
+  single owned httpx client reaches the LAN server directly.
+
+## Per-request latency: context-window fetch not cached
+
+`Harness._build_messages()` runs on **every message** and calls
+`get_model_name()` + `get_context_window()` to build the system prompt. Both are
+cached on the server object — **but `get_context_window()` only cached the
+successful result**. If `query_context_window()` failed (e.g. llama.cpp `/props`
+returns 404 / no `n_ctx`), the `except` path fell back to a default **without
+caching**, so a failing/slow query was re-run (opening a fresh `httpx.AsyncClient`
++ hitting `/props` + `list_models()`) on *every message* — the source of
+"10s before the server receives the request" within one conversation.
+
+Fix: `get_context_window()` now caches the **fallback** value
+(`max_context` or 32768) in `_model_context_windows` too, so a failing query is
+tried exactly once and later messages use the cached default.
+
+## Connection diagnostics — `/server diagnose`
+
+`check_connection()` historically swallowed the real error and returned a bare
+bool, hiding *why* a connect failed. Now:
+
+- `LLMServer.diagnose_connection()` → `ConnectionDiagnosis` — returns the
+  underlying exception, the resolved URL (vs original), and builds a hint-rich
+  report mentioning active proxy env vars and DNS resolution.
+- `ServerService.diagnose(name)` — wires it to configured servers.
+- UI: `/server diagnose <name>` prints the report. Run it when a server that
+  `curl`/`ping` can reach is unreachable from pico.

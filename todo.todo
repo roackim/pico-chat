@@ -1,8 +1,14 @@
-BUG since rework:
+
+
+BUGS:
+[ ] Conversation import
+    [ ] import is bugged and does not import properly
+    [ ] import command should fuzzy suggest autocomplete the name from ./
 
 [ ] Cant edit a message properly now (used editing in place, inside box, but now no more boxes) -> disable message editing for now ?
 [ ] Lets add a mode with explicit role prefix for each message, like "pico: " or "user: " (optional, configurable)
 
+FEATURES IDEAS:
 [ ] AGENTS.md integration in system prompt / instructions to read ?
 [ ] SKILLS.md Support (!important)
 [ ] Git integration ? like gitui
@@ -20,3 +26,6 @@ BUG since rework:
     [ ] add a loading spinner
     [ ] make the output be a popup terminal like thing, with scrollback, and a way to close it
     [ ] add a "stop" button to stop the command
+
+[ ] re-add file fuzzy search outside git repos ?
+[ ] remove the warning outside git repos ? (we removed the tree in systemprompt)

@@ -47,9 +47,12 @@ The UI `commands.py` is now a thin adapter that calls `ServerService` and render
 
 ### `llm_server.py`
 `LLMServer` abstract base. Concrete implementations: `LlamaCppServer` (llama.cpp HTTP), `OllamaServer` (Ollama discovery plus OpenAI-compatible chat), `OpenRouterServer` (cloud API), and `OpenAIServer`.
-- `stream_chat(messages)` — yields `Chunk` objects from the LLM stream
-- `list_models()` — discovers models exposed by an endpoint
+
+Transport is **raw httpx** (no `openai` SDK): one owned `httpx.AsyncClient` per server, SSE streaming parsed directly, and responses adapted to the previous SDK chunk shape for the harness/UI.
+- `stream_chat(messages)` / `create_completion(...)` — yields `Chunk` objects from the LLM stream
+- `list_models()` — discovers models exposed by an endpoint via `GET /models`
 - `set_model(model_name)` — changes the selected model without replacing the endpoint
+- `_resolve_local_hostname(url)` — rewrites `.local` (mDNS) hostnames to a routable IP via `getent` (cached per-host for process lifetime); `invalidate_local_hostname()` drops a stale entry on connect failure so pico retries once against a fresh address. See [notes/local-hostname-resolution.md](../notes/local-hostname-resolution.md).
 
 ### `llm_server_config.py`
 `LLMServerConfig` — dataclass for endpoint metadata: name, type, URL, credentials, and legacy/default model selection. `ModelInfo` and `LLMTarget` represent discovered model metadata and an endpoint/model pair.
