@@ -244,3 +244,54 @@ class TestInputComponentSubBuffer:
         
         # Parent should be marked as changed (cursor blinked)
         assert box.subbuffer.has_changed is True
+
+    def test_input_tick_cursor_marks_parent_on_blink(self):
+        """Idle tick_cursor should mark the parent box dirty on a blink flip."""
+        import time
+        input_comp = InputComponent('')
+        input_comp.focused = True
+        box = Box(input_comp, title='Input')
+        box.set_layout(0, 0, 40, 5)
+
+        # First render primes the blink timer.
+        main = Buffer(80, 24)
+        box.render(main)
+        box.subbuffer.has_changed = False
+
+        # tick_cursor right away stays solid (inside pulse delay) -> no change.
+        assert input_comp.tick_cursor() is False
+
+        # After pulse-delay + half blink interval the visibility must flip.
+        time.sleep(1.1)
+        flipped = input_comp.tick_cursor()
+        assert flipped is True
+        # Advancing again marks the parent box for redraw.
+        assert box.subbuffer.has_changed is True
+
+    def test_input_tick_cursor_noop_when_unfocused(self):
+        """tick_cursor should do nothing when the input isn't focused."""
+        input_comp = InputComponent('')
+        input_comp.focused = False
+        box = Box(input_comp, title='Input')
+        box.set_layout(0, 0, 40, 5)
+        box.render(Buffer(80, 24))
+        box.subbuffer.has_changed = False
+        assert input_comp.tick_cursor() is False
+        assert box.subbuffer.has_changed is False
+
+    def test_input_box_lines_only_starts_at_col_one(self):
+        """Lines-only input box renders the child at col 1 with no prefix char."""
+        input_comp = InputComponent('')
+        input_comp.update('hi')
+        box = Box(input_comp, title='message', lines_only=True,
+                  title_provider=lambda: 'message')
+        box.set_layout(0, 0, 40, 3)
+
+        main = Buffer(80, 24)
+        box.render(main)
+
+        # No gutter/prefix glyph in the content column (col 0 row 1 is blank).
+        assert main.cells[1][0].char == ' '
+        # Child content starts at column 1.
+        assert main.cells[1][1].char == 'h'
+        assert main.cells[1][2].char == 'i'

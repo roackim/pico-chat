@@ -110,7 +110,7 @@ class chatTUI(ChatActionHandlers):
         self.popup_screen = None
         self._last_focus_id = "input"
         self.chat_history_panel = ChatHistoryPanel()
-        self.input_component = InputComponent(" ", id="entry", frame_color=theme.USER)
+        self.input_component = InputComponent("", id="entry", frame_color=theme.USER)
         self.input_component.config = pico_cfg.config
         self.input_component.on_submit = self.on_user_submit
         self.input_component.setup_commands(get_command_list())
@@ -1215,6 +1215,11 @@ class chatTUI(ChatActionHandlers):
         # Advance the status-bar spinner while .local resolution or model
         # name discovery is pending.
         if isinstance(event, TickEvent):
+            # Keep the focused input's cursor blinking on idle ticks.
+            if self._last_focus_id == "input" and self.input_component.focused:
+                if self.input_component.tick_cursor():
+                    self.input_component.mark_changed()
+                    self.input_box.mark_changed()
             from pico_chat.harness.llm_server import is_local_resolution_pending
             server = getattr(self._initial_agent, "server", None)
             if server is not None and (

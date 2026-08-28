@@ -472,6 +472,16 @@ class InputComponent(Component):
             return " " + " ".join(hints)
         return ""
     
+    def tick_cursor(self):
+        """Advance the cursor blink phase and request a redraw when focused.
+
+        Called on idle ticks so the cursor keeps blinking even when the
+        content hasn't changed. Returns True if a redraw is needed.
+        """
+        if not self.focused:
+            return False
+        return self.cursor_renderer.advance(parent_box=self.parent)
+
     def render_cursor(self, buffer: Buffer):
         """Render cursor as an overlay (called outside SubBuffer caching).
         
