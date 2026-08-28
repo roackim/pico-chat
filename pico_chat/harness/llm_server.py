@@ -378,6 +378,7 @@ class LLMServer(ABC):
         self._cached_context_window: Optional[int] = None
         self._model_context_windows: dict[str, int] = {}
         self._selected_model: Optional[str] = config.model
+        self._model_name_pending: bool = False
 
     @property
     def selected_model(self) -> Optional[str]:
@@ -402,6 +403,7 @@ class LLMServer(ABC):
         """
         if self._cached_model_name:
             return
+        self._model_name_pending = True
         try:
             await self.get_model_name()
         except Exception as e:
@@ -410,6 +412,8 @@ class LLMServer(ABC):
             await self.get_context_window()
         except Exception as e:
             logger.warning("prewarm context window failed: %s", e)
+        finally:
+            self._model_name_pending = False
 
     async def list_models(self) -> list[ModelInfo]:
         """List models exposed by this endpoint."""

@@ -104,9 +104,6 @@ class chatTUI(ChatActionHandlers):
         if server is not None:
             from pico_chat.harness.llm_server import prewarm_local_resolution
             prewarm_local_resolution(server._original_base_url)
-            # Discover the model name in the background so the status bar shows
-            # the real model (e.g. for llama.cpp) instead of "?".
-            asyncio.ensure_future(server.prewarm_model_name())
         self.compositor = None
         self.navigator = None
         self.modal_host = None
@@ -197,9 +194,10 @@ class chatTUI(ChatActionHandlers):
         role = getattr(getattr(agent, "role", None), "name", "default")
         state = getattr(getattr(agent, "state", None), "name", "IDLE").lower()
 
-        # Show an animated spinner while .local hostname resolution is pending.
+        # Show an animated spinner while .local hostname resolution or model
+        # name discovery is pending.
         from pico_chat.harness.llm_server import is_local_resolution_pending
-        if is_local_resolution_pending(server._original_base_url):
+        if is_local_resolution_pending(server._original_base_url) or getattr(server, "_model_name_pending", False):
             frame = SPINNER_FRAMES[self._status_spinner_frame % len(SPINNER_FRAMES)]
             model = f"{frame} {model}"
 
@@ -1129,7 +1127,10 @@ class chatTUI(ChatActionHandlers):
         if server is not None:
             from pico_chat.harness.llm_server import prewarm_local_resolution
             prewarm_local_resolution(server._original_base_url)
-            asyncio.ensure_future(server.prewarm_model_name())
+            async def _prewarm_and_refresh():
+                await server.prewarm_model_name()
+                self.refresh_status_bar()
+            asyncio.ensure_future(_prewarm_and_refresh())
         tab_state.active_user_msg = None
         tab_state.paused_user_input = None
         tab_state.paused_user_msg = None
@@ -1170,11 +1171,15 @@ class chatTUI(ChatActionHandlers):
     def handle_global_input(self, event: Any) -> bool:
         """Handle focus logging and input dispatch with navigation between input and history."""
         
-        # Advance the status-bar spinner while .local resolution is pending.
+        # Advance the status-bar spinner while .local resolution or model
+        # name discovery is pending.
         if isinstance(event, TickEvent):
             from pico_chat.harness.llm_server import is_local_resolution_pending
             server = getattr(self._initial_agent, "server", None)
-            if server is not None and is_local_resolution_pending(server._original_base_url):
+            if server is not None and (
+                is_local_resolution_pending(server._original_base_url)
+                or getattr(server, "_model_name_pending", False)
+            ):
                 self._status_spinner_frame += 1
                 self.refresh_status_bar()
             return False
@@ -1299,7 +1304,16 @@ class chatTUI(ChatActionHandlers):
         # Set initial focus states
         self._update_focus_states()
         self.refresh_status_bar()
-        
+
+        # Discover the model name in the background (event loop is running now)
+        # so the status bar shows the real model (e.g. llama.cpp) instead of "?".
+        server = getattr(self._initial_agent, "server", None)
+        if server is not None:
+            async def _prewarm_and_refresh():
+                await server.prewarm_model_name()
+                self.refresh_status_bar()
+            asyncio.ensure_future(_prewarm_and_refresh())
+
         # Start background server status check (non-blocking). No status
         # message is added to the conversation — the status bar reflects it.
         async def background_startup_check():
