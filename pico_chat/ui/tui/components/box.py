@@ -12,7 +12,7 @@ from pico_chat.ui.tui.colors import theme
 SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 class Box(Component):
-    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None, parent_msg=None, compact_when_unfocused: bool = False, padding: int = 0, padding_y: Optional[int] = None, focus_in_padding: bool = False, focus_color=None, thread_mode: bool = False, gutter: str = "▸", gutter_color=None):
+    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None, parent_msg=None, compact_when_unfocused: bool = False, padding: int = 0, padding_y: Optional[int] = None, focus_in_padding: bool = False, focus_color=None, thread_mode: bool = False, gutter: str = "▸", gutter_color=None, lines_only: bool = False):
         super().__init__(id)
         self.child = child
         self.child.parent = self
@@ -25,6 +25,7 @@ class Box(Component):
         self.actions = actions or []
         self.focused_action_key = None
         self.compact_when_unfocused = compact_when_unfocused  # If True, render without borders when unfocused
+        self.lines_only = lines_only  # If True, render only full-width top/bottom lines
         # Horizontal content padding is the default. Vertical padding is
         # opt-in; otherwise every compact form row would gain blank lines.
         self.padding = max(0, padding)
@@ -102,6 +103,23 @@ class Box(Component):
                 self.child.y = y
                 self.child.width = width
                 self.child.height = height
+        # Lines-only mode: only full-width top/bottom lines, child inset by 1
+        # vertically, full horizontal width, no walls/corners.
+        elif self.lines_only:
+            inset_y = 1 + self.padding_y
+            if size_changed:
+                super().set_layout(x, y, width, height)
+                self.child.set_layout(x + self.padding, y + inset_y,
+                                      width - 2 * self.padding, height - 2 * inset_y)
+            else:
+                self.x = x
+                self.y = y
+                self.width = width
+                self.height = height
+                self.child.x = x + self.padding
+                self.child.y = y + inset_y
+                self.child.width = width - 2 * self.padding
+                self.child.height = height - 2 * inset_y
         else:
             # Normal mode with borders
             if size_changed:
@@ -239,6 +257,12 @@ class Box(Component):
         # Compact mode: render without borders when unfocused
         if self.compact_when_unfocused and not self.focused:
             self._render_compact_to_subbuffer()
+            return
+
+        # Lines-only mode: just full-width horizontal bars on top and bottom,
+        # no vertical walls and no corner characters.
+        if self.lines_only:
+            self._render_lines_only_to_subbuffer()
             return
         
         if self.focused:
@@ -391,6 +415,35 @@ class Box(Component):
                     self.subbuffer.set(ix, iy, " ", bg=bg)
         
         # Render child content directly (no border offset)
+        temp_buffer = self._create_subbuffer_wrapper()
+        self.child.render(temp_buffer)
+
+    def _render_lines_only_to_subbuffer(self):
+        """Render only full-width horizontal bars on the top and bottom edges.
+
+        No corner characters and no vertical walls — just a clean top and
+        bottom line spanning the full width.
+        """
+        fg = self.focus_color or self.fg
+        bg = self.bg
+
+        self.subbuffer.clear()
+
+        # Fill background
+        if bg:
+            for iy in range(self.height):
+                for ix in range(self.width):
+                    self.subbuffer.set(ix, iy, " ", bg=bg)
+
+        # Top horizontal bar, full width.
+        for ix in range(self.width):
+            self.subbuffer.set(ix, 0, "─", fg=fg, bg=bg)
+
+        # Bottom horizontal bar, full width.
+        for ix in range(self.width):
+            self.subbuffer.set(ix, self.height - 1, "─", fg=fg, bg=bg)
+
+        # Render child content (inset by the layout previously computed).
         temp_buffer = self._create_subbuffer_wrapper()
         self.child.render(temp_buffer)
 
