@@ -127,6 +127,11 @@ class chatTUI(ChatActionHandlers):
             # Recede to muted chrome when the input isn't focused.
             color_provider=lambda: (theme.USER if self.input_box.focused else theme.MUTED),
         )
+        # Mute the typed text too when the input loses focus; keep default
+        # content color (None) while focused.
+        self.input_component.set_content_color_provider(lambda: (
+            None if self.input_box.focused else theme.MUTED
+        ))
         self._focus_targets = [
             _AppFocusTarget(self.input_component, self._set_input_focus, self.input_component.handle_input),
             _AppFocusTarget(self.chat_history_panel, self._set_history_focus, self.chat_history_panel.handle_input),
