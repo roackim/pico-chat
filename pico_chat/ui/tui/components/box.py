@@ -474,9 +474,10 @@ class Box(Component):
         for ix in range(self.width):
             self.subbuffer.set(ix, self.height - 1, "─", fg=fg, bg=bg)
 
-        # Prompt prefix (">") in the first content column.
+        # Prompt prefix ("▸") in the first content column, matching the role
+        # gutter used for chat-history messages in thread mode.
         if self.width > 1 and self.height > 2:
-            self.subbuffer.set(0, 1, ">", fg=fg, bg=bg)
+            self.subbuffer.set(0, 1, "▸", fg=fg, bg=bg)
 
         # Render child content (inset by the layout previously computed).
         temp_buffer = self._create_subbuffer_wrapper()
