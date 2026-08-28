@@ -399,19 +399,32 @@ class LLMServer(ABC):
 
         Populates ``_cached_model_name`` (and context window) so the status bar
         can show the real model without waiting for the first message. Safe to
-        call at tab/conversation open; no-op if already known.
+        call at tab/conversation open; no-op if already known. Retries briefly
+        in case the server is momentarily slow at startup.
         """
         if self._cached_model_name:
             return
         self._model_name_pending = True
         try:
-            await self.get_model_name()
-        except Exception as e:
-            logger.warning("prewarm model name failed: %s", e)
-        try:
-            await self.get_context_window()
-        except Exception as e:
-            logger.warning("prewarm context window failed: %s", e)
+            # If the client was built against an unresolved .local URL (e.g.
+            # resolution failed synchronously in __init__), re-resolve and
+            # rebuild the client so the model query hits the routable IP.
+            if self._hostname and self._hostname.endswith(".local"):
+                new_url = _resolve_local_hostname(self._original_base_url)
+                if new_url != self._original_base_url and new_url != self.config.base_url:
+                    self.config.base_url = new_url
+                    self.client = _new_http_client(self.config)
+            for _ in range(3):
+                try:
+                    await self.get_model_name()
+                    break
+                except Exception as e:
+                    logger.warning("prewarm model name attempt failed: %s", e)
+                    await asyncio.sleep(0.5)
+            try:
+                await self.get_context_window()
+            except Exception as e:
+                logger.warning("prewarm context window failed: %s", e)
         finally:
             self._model_name_pending = False
 

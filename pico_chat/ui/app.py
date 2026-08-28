@@ -1305,15 +1305,6 @@ class chatTUI(ChatActionHandlers):
         self._update_focus_states()
         self.refresh_status_bar()
 
-        # Discover the model name in the background (event loop is running now)
-        # so the status bar shows the real model (e.g. llama.cpp) instead of "?".
-        server = getattr(self._initial_agent, "server", None)
-        if server is not None:
-            async def _prewarm_and_refresh():
-                await server.prewarm_model_name()
-                self.refresh_status_bar()
-            asyncio.ensure_future(_prewarm_and_refresh())
-
         # Start background server status check (non-blocking). No status
         # message is added to the conversation — the status bar reflects it.
         async def background_startup_check():
