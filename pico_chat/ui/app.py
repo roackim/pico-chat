@@ -191,6 +191,10 @@ class chatTUI(ChatActionHandlers):
             or getattr(server, "_cached_model_name", None)
             or "?"
         )
+        # Strip a leading path from a model id (e.g. /data/llm/weights/Qwen3.8-27B-Q4_0.gguf
+        # -> Qwen3.8-27B-Q4_0.gguf) for a compact status bar.
+        if isinstance(model, str) and "/" in model:
+            model = model.rsplit("/", 1)[-1]
         role = getattr(getattr(agent, "role", None), "name", "default")
         state = getattr(getattr(agent, "state", None), "name", "IDLE").lower()
 
@@ -200,6 +204,18 @@ class chatTUI(ChatActionHandlers):
         if is_local_resolution_pending(server._original_base_url) or getattr(server, "_model_name_pending", False):
             frame = SPINNER_FRAMES[self._status_spinner_frame % len(SPINNER_FRAMES)]
             model = f"{frame} {model}"
+
+        # Color the server/model field by connection state:
+        #   checking -> orange, error -> red, ok -> green.
+        conn = getattr(server, "_connection_state", "unknown")
+        if conn == "checking":
+            server_color = theme.WARNING
+        elif conn == "error":
+            server_color = theme.ERROR
+        elif conn == "ok":
+            server_color = theme.SUCCESS
+        else:
+            server_color = theme.DEFAULT
 
         usage = getattr(agent, "_last_usage", None)
         context_used = getattr(usage, "prompt_tokens", None)
@@ -224,6 +240,9 @@ class chatTUI(ChatActionHandlers):
         })
         self.status_bar.set_field_colors({
             "context": self._context_color(context_used, context_max),
+            "endpoint": server_color,
+            "model": server_color,
+            "endpoint_model": server_color,
         })
 
     @staticmethod

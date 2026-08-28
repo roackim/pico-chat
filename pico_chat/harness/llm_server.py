@@ -379,6 +379,8 @@ class LLMServer(ABC):
         self._model_context_windows: dict[str, int] = {}
         self._selected_model: Optional[str] = config.model
         self._model_name_pending: bool = False
+        # Connection state for the status bar: "unknown" | "checking" | "ok" | "error".
+        self._connection_state: str = "unknown"
 
     @property
     def selected_model(self) -> Optional[str]:
@@ -405,6 +407,7 @@ class LLMServer(ABC):
         if self._cached_model_name:
             return
         self._model_name_pending = True
+        self._connection_state = "checking"
         try:
             # If the client was built against an unresolved .local URL (e.g.
             # resolution failed synchronously in __init__), re-resolve and
@@ -417,10 +420,13 @@ class LLMServer(ABC):
             for _ in range(3):
                 try:
                     await self.get_model_name()
+                    self._connection_state = "ok"
                     break
                 except Exception as e:
                     logger.warning("prewarm model name attempt failed: %s", e)
                     await asyncio.sleep(0.5)
+            else:
+                self._connection_state = "error"
             try:
                 await self.get_context_window()
             except Exception as e:
@@ -542,8 +548,10 @@ class LLMServer(ABC):
             ConnectionDiagnosis with ok/message details
         """
         error = None
+        self._connection_state = "checking"
         try:
             await asyncio.wait_for(self.client.get("/models"), timeout=self.config.timeout)
+            self._connection_state = "ok"
             return ConnectionDiagnosis(ok=True, url=self.config.base_url, error=None)
         except Exception as e:
             error = e
@@ -557,10 +565,12 @@ class LLMServer(ABC):
                 self.client = _new_http_client(self.config)
                 try:
                     await asyncio.wait_for(self.client.get("/models"), timeout=self.config.timeout)
+                    self._connection_state = "ok"
                     return ConnectionDiagnosis(ok=True, url=self.config.base_url, error=None)
                 except Exception as e2:
                     error = e2
 
+        self._connection_state = "error"
         return ConnectionDiagnosis(
             ok=False,
             url=self.config.base_url,
