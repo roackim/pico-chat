@@ -12,13 +12,14 @@ from pico_chat.ui.tui.colors import theme
 SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 class Box(Component):
-    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None, parent_msg=None, compact_when_unfocused: bool = False, padding: int = 0, padding_y: Optional[int] = None, focus_in_padding: bool = False, focus_color=None, thread_mode: bool = False, gutter: str = "▸", gutter_color=None, lines_only: bool = False, title_provider: Optional[callable] = None):
+    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None, parent_msg=None, compact_when_unfocused: bool = False, padding: int = 0, padding_y: Optional[int] = None, focus_in_padding: bool = False, focus_color=None, thread_mode: bool = False, gutter: str = "▸", gutter_color=None, lines_only: bool = False, title_provider: Optional[callable] = None, color_provider: Optional[callable] = None):
         super().__init__(id)
         self.child = child
         self.child.parent = self
         self.parent_msg = parent_msg  # Reference to parent Message if provided
         self.title = title
         self._title_provider = title_provider  # Optional callable -> current title
+        self._color_provider = color_provider  # Optional callable -> current fg color
         self.bg = bg
         self.fg = fg
         self.focus_color = focus_color
@@ -62,6 +63,13 @@ class Box(Component):
         if self._title_provider is not None:
             return self._title_provider() or self.title
         return self.title
+
+    @property
+    def current_fg_color(self):
+        """Resolve the foreground color, honoring a dynamic color_provider."""
+        if self._color_provider is not None:
+            return self._color_provider() or self.fg
+        return self.fg
     
     def set_focused(self, focused: bool):
         """Set the focused state of this box."""
@@ -78,11 +86,11 @@ class Box(Component):
             for field in fields:
                 field.suppress_focus_marker = True
 
-        # In thread mode, no borders - child is inset by the gutter width (2 cols)
+        # In thread mode, no borders - child is inset by the gutter width (1 col)
         # so content flows to the right of the role gutter. When focused with
         # actions, the child is one row shorter so the action line sits below.
         if self.thread_mode:
-            gutter_w = 2
+            gutter_w = 1
             has_actions = self.focused and self.parent_msg and self.parent_msg.get_active_actions()
             child_h = max(0, height - (1 if has_actions else 0))
             if size_changed:
@@ -436,7 +444,12 @@ class Box(Component):
         inline in the top bar, and a ``>`` prompt prefix sits in the first
         content column.
         """
-        fg = self.focus_color or self.fg
+        if self.focused and self.focus_color:
+            fg = self.focus_color
+        elif self._color_provider:
+            fg = self._color_provider()
+        else:
+            fg = self.fg
         bg = self.bg
 
         self.subbuffer.clear()

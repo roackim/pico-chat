@@ -125,10 +125,15 @@ class chatTUI(ChatActionHandlers):
             fg=self.input_component.frame_color,
             lines_only=True,
             # Mode-switch the section title based on whether the input looks
-            # like a command (leading "/").
+            # like a command (leading "/"), and tint the bars accordingly.
             title_provider=lambda: (
                 "command" if (self.input_component.text or "").lstrip().startswith("/")
                 else "message"
+            ),
+            color_provider=lambda: (
+                theme.PERMISSION
+                if (self.input_component.text or "").lstrip().startswith("/")
+                else theme.FOCUSED
             ),
         )
         self._focus_targets = [
