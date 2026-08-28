@@ -1,5 +1,6 @@
 import asyncio
 import json
+from types import SimpleNamespace
 
 from pico_chat.harness.roles import Role
 from pico_chat.ui.commands.builtins import ConversationExportCommand, ConversationImportCommand
@@ -36,7 +37,16 @@ class FakePanel:
         self.messages = []
 
     def add_message(self, *args, **kwargs):
-        self.messages.append((args, kwargs))
+        msg = SimpleNamespace(
+            text=args[0] if args else "",
+            harness_message_ids=kwargs.get("harness_message_ids"),
+            type=kwargs.get("msg_type"),
+            tool_name=None, tool_args=None, tool_output=None,
+            tool_status=None, show_output=True,
+            rebuild_tool_display=lambda: None, finalize=lambda: None,
+        )
+        self.messages.append(msg)
+        return msg
 
     def clear(self):
         self.messages.clear()
@@ -121,9 +131,29 @@ def test_conversation_import_defaults_role_when_missing(tmp_path, monkeypatch):
     # Defaulted to 'default' and warned in the chat.
     assert ui.agent.role.name == "default"
     assert ui.agent.history == history
-    all_text = "\n".join(m[0][0] for m in ui.chat_history_panel.messages)
+    all_text = "\n".join(m.text for m in ui.chat_history_panel.messages)
     assert "ghost-role" in all_text
     assert "default" in all_text
+
+
+def test_conversation_import_handles_tool_call_only_assistant(tmp_path):
+    """Assistant messages with tool_calls and no content must not crash."""
+    ui = FakeUI()
+    filename = tmp_path / "toolcall.json"
+    history = [
+        {"role": "user", "content": "list files"},
+        {"role": "assistant", "content": None, "tool_calls": [
+            {"id": "call_1", "function": {"name": "read", "arguments": "{}"}}
+        ]},
+        {"role": "tool", "tool_call_id": "call_1", "content": "ok"},
+    ]
+    filename.write_text(json.dumps({"role": "default", "history": history}))
+
+    command = ConversationImportCommand()
+    asyncio.run(command.execute(ui, [str(filename)]))
+
+    assert ui.agent.history == history
+    assert "Import failed" not in "\n".join(m.text for m in ui.chat_history_panel.messages)
 
 
 def test_conversation_import_rejects_malformed_envelope(tmp_path):
@@ -134,7 +164,7 @@ def test_conversation_import_rejects_malformed_envelope(tmp_path):
     command = ConversationImportCommand()
     asyncio.run(command.execute(ui, [str(filename)]))
 
-    assert "missing 'role'" in ui.chat_history_panel.messages[-1][0][0]
+    assert "missing 'role'" in ui.chat_history_panel.messages[-1].text
 
 
 def test_conversation_import_rejects_non_string_role(tmp_path):
@@ -144,7 +174,7 @@ def test_conversation_import_rejects_non_string_role(tmp_path):
 
     asyncio.run(ConversationImportCommand().execute(ui, [str(filename)]))
 
-    assert "role must be a string" in ui.chat_history_panel.messages[-1][0][0]
+    assert "role must be a string" in ui.chat_history_panel.messages[-1].text
 
 
 def test_conversation_import_rejects_invalid_json(tmp_path):
@@ -154,4 +184,4 @@ def test_conversation_import_rejects_invalid_json(tmp_path):
 
     asyncio.run(ConversationImportCommand().execute(ui, [str(filename)]))
 
-    assert "Invalid JSON file" in ui.chat_history_panel.messages[-1][0][0]
+    assert "Invalid JSON file" in ui.chat_history_panel.messages[-1].text

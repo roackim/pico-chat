@@ -159,11 +159,13 @@ class ConversationImportCommand(Command):
             ids = [message_id] if message_id else None
 
             if role == "user":
-                ui.chat_history_panel.add_message(content, msg_type=UserMsg(),
+                ui.chat_history_panel.add_message(content or "", msg_type=UserMsg(),
                                                   harness_message_ids=ids)
             elif role == "assistant":
                 # Split thinking/content using the same tag parser the harness
                 # uses, so imported reasoning renders as a ThinkingMsg.
+                # content may be None for tool-call-only assistant messages.
+                content = content or ""
                 parser = ThinkingTagParser()
                 segments = parser.feed(content) + parser.flush()
                 for segment in segments:
