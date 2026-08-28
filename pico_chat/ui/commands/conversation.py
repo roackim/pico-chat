@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-import re
+import os
 from typing import Any, Dict, List
 
 from .base import ChatUIProtocol, Command, Param
@@ -11,10 +11,22 @@ from pico_chat.ui.tui.msg_types import (
     PicoMsg,
     SysMsg,
     SysMsgError,
+    SysMsgWarning,
     ThinkingMsg,
     ToolCallMsg,
     UserMsg,
 )
+
+
+def json_file_completions() -> List[str]:
+    """List ``.json`` files in the current directory for fuzzy autocomplete."""
+    try:
+        return sorted(
+            entry.name for entry in os.scandir(".")
+            if entry.is_file() and entry.name.endswith(".json")
+        )
+    except OSError:
+        return []
 
 
 class ConversationExportCommand(Command):
@@ -55,7 +67,7 @@ class ConversationExportCommand(Command):
 class ConversationImportCommand(Command):
     def __init__(self):
         super().__init__("import", "Import conversation history from a JSON file", params=[
-            Param("FILENAME", required=True),
+            Param("FILENAME", required=True, completions=json_file_completions),
         ])
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
@@ -96,18 +108,33 @@ class ConversationImportCommand(Command):
                         msg_type=SysMsgError(), title="conversation")
                     return
 
+            # Apply the saved role, warning if it no longer exists.
+            role_warning = None
             if role_name:
                 from pico_chat.harness import roles
                 runtime = ui._active_runtime() if hasattr(ui, "_active_runtime") else None
-                role = roles.load_role(role_name)
-                if runtime is not None:
-                    runtime.switch_role(role)
-                else:
-                    ui.agent.set_role(role)
+                try:
+                    role = roles.load_role(role_name)
+                    if runtime is not None:
+                        runtime.switch_role(role)
+                    else:
+                        ui.agent.set_role(role)
+                except KeyError:
+                    default_role = roles.load_role("default")
+                    if runtime is not None:
+                        runtime.switch_role(default_role)
+                    else:
+                        ui.agent.set_role(default_role)
+                    role_warning = (
+                        f"Role '{role_name}' no longer exists — defaulted to 'default'."
+                    )
 
             ui.agent.history = history
             ui.chat_history_panel.clear()
             self._rebuild_ui_from_history(ui, history)
+            if role_warning:
+                ui.chat_history_panel.add_message(
+                    role_warning, msg_type=SysMsgWarning(), title="conversation")
             ui.chat_history_panel.add_message(
                 f"Conversation imported from {filename}\n({len(history)} messages)",
                 msg_type=SysMsg(), title="conversation")
@@ -123,6 +150,8 @@ class ConversationImportCommand(Command):
 
     def _rebuild_ui_from_history(self, ui: ChatUIProtocol, history: List[Dict[str, Any]]):
         """Reconstruct visible messages from imported harness history."""
+        from pico_chat.harness.thinking_parser import ThinkingTagParser
+
         for message in history:
             role = message.get("role", "")
             content = message.get("content", "")
@@ -133,21 +162,22 @@ class ConversationImportCommand(Command):
                 ui.chat_history_panel.add_message(content, msg_type=UserMsg(),
                                                   harness_message_ids=ids)
             elif role == "assistant":
-                thinking_match = re.search(r"leshoot(.*?)ground", content, re.DOTALL)
-                if thinking_match:
-                    thinking = thinking_match.group(1)
-                    answer = re.sub(r"leshoot.*?ground", "", content,
-                                    flags=re.DOTALL).strip()
-                    if thinking:
+                # Split thinking/content using the same tag parser the harness
+                # uses, so imported reasoning renders as a ThinkingMsg.
+                parser = ThinkingTagParser()
+                segments = parser.feed(content) + parser.flush()
+                for segment in segments:
+                    if not segment.text:
+                        continue
+                    if segment.is_thinking:
                         ui.chat_history_panel.add_message(
-                            thinking, msg_type=ThinkingMsg(), harness_message_ids=ids)
-                    if answer:
+                            segment.text, msg_type=ThinkingMsg(), harness_message_ids=ids)
+                    else:
                         ui.chat_history_panel.add_message(
-                            answer, msg_type=PicoMsg(), harness_message_ids=ids)
-                elif content:
-                    message_type = ThinkingMsg() if "leshoot" in content else PicoMsg()
+                            segment.text, msg_type=PicoMsg(), harness_message_ids=ids)
+                if not segments and content:
                     ui.chat_history_panel.add_message(
-                        content, msg_type=message_type, harness_message_ids=ids)
+                        content, msg_type=PicoMsg(), harness_message_ids=ids)
                 for tool_call in message.get("tool_calls", []):
                     if not isinstance(tool_call, dict) or "function" not in tool_call:
                         continue

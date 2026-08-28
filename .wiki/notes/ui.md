@@ -56,6 +56,17 @@ context estimate after a response supplies authoritative usage data.
 The `context` field is colorized by how full the context window is:
 green below 33%, orange/amber below 66%, and red at or above 66%.
 
+## Conversation import/export
+
+`/conversation export <file>` writes `{"role": ..., "history": [...]}`.
+`/conversation import <file>`:
+- Fuzzy-autocompletes `.json` files in the current directory.
+- Restores the saved role; if the role no longer exists, it defaults to
+  `default` and posts a warning message in the chat.
+- Rebuilds visible messages, splitting assistant thinking/content with the
+  same `ThinkingTagParser` the harness uses (so imported reasoning renders as
+  a `ThinkingMsg`).
+
 ## Library Contracts
 
 ### Widget Lifecycle and Ownership

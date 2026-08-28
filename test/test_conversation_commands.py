@@ -101,6 +101,31 @@ def test_conversation_import_accepts_legacy_history_array(tmp_path):
     assert ui.agent.role.name == "default"
 
 
+def test_conversation_import_defaults_role_when_missing(tmp_path, monkeypatch):
+    ui = FakeUI()
+    filename = tmp_path / "missing-role.json"
+    history = [{"role": "user", "content": "imported"}]
+    filename.write_text(json.dumps({"role": "ghost-role", "history": history}))
+
+    def fake_load(name):
+        if name == "ghost-role":
+            raise KeyError(f"Role not found: {name}")
+        return Role(name)
+
+    monkeypatch.setattr("pico_chat.harness.roles.load_role", fake_load)
+
+    command = ConversationImportCommand()
+    command._rebuild_ui_from_history = lambda ui, history: None
+    asyncio.run(command.execute(ui, [str(filename)]))
+
+    # Defaulted to 'default' and warned in the chat.
+    assert ui.agent.role.name == "default"
+    assert ui.agent.history == history
+    all_text = "\n".join(m[0][0] for m in ui.chat_history_panel.messages)
+    assert "ghost-role" in all_text
+    assert "default" in all_text
+
+
 def test_conversation_import_rejects_malformed_envelope(tmp_path):
     ui = FakeUI()
     filename = tmp_path / "malformed.json"
