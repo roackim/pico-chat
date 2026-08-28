@@ -202,6 +202,10 @@ _HOSTNAME_RE = re.compile(
 # getent subprocess on every connect while keeping stale entries self-healing.
 _local_cache: dict[str, Optional[str]] = {}
 
+# Hostnames currently being resolved in a background prewarm thread. Used by the
+# UI to show an animated "resolving" indicator in the status bar.
+_resolving: set[str] = set()
+
 
 def _getent_host(hostname: str) -> Optional[str]:
     """Resolve a hostname to an IPv4 address.
@@ -309,6 +313,45 @@ def invalidate_local_hostname(url: str) -> None:
         pass
 
 
+def prewarm_local_resolution(url: str) -> None:
+    """Kick off ``.local`` resolution for ``url`` in a background thread.
+
+    ``socket.getaddrinfo`` (used for mDNS) can block for a moment. Running it
+    off the event loop and populating the cache means that by the time the user
+    sends a message, the resolved IP is already cached — no first-message stall.
+    Safe to call for any URL; non-``.local`` hosts are no-ops.
+    """
+    hostname = urlsplit(url).hostname
+    if not hostname or not hostname.endswith(".local"):
+        return
+    if _cached_ip_for(hostname):
+        return  # already resolved
+    if hostname in _resolving:
+        return  # already in progress
+
+    import threading
+
+    _resolving.add(hostname)
+
+    def _resolve():
+        try:
+            _resolve_once(hostname)
+        except Exception as e:
+            logger.warning("prewarm resolution failed for %s: %s", hostname, e)
+        finally:
+            _resolving.discard(hostname)
+
+    threading.Thread(target=_resolve, daemon=True).start()
+
+
+def is_local_resolution_pending(url: str) -> bool:
+    """True if ``.local`` resolution for ``url`` is currently in progress."""
+    hostname = urlsplit(url).hostname
+    if not hostname or not hostname.endswith(".local"):
+        return False
+    return hostname in _resolving
+
+
 class LLMServer(ABC):
     """Abstract base class for LLM server implementations."""
 
@@ -349,6 +392,24 @@ class LLMServer(ABC):
         self._selected_model = model_name
         self._cached_model_name = model_name
         self._cached_context_window = self._model_context_windows.get(model_name)
+
+    async def prewarm_model_name(self) -> None:
+        """Discover and cache the model name in the background.
+
+        Populates ``_cached_model_name`` (and context window) so the status bar
+        can show the real model without waiting for the first message. Safe to
+        call at tab/conversation open; no-op if already known.
+        """
+        if self._cached_model_name:
+            return
+        try:
+            await self.get_model_name()
+        except Exception as e:
+            logger.warning("prewarm model name failed: %s", e)
+        try:
+            await self.get_context_window()
+        except Exception as e:
+            logger.warning("prewarm context window failed: %s", e)
 
     async def list_models(self) -> list[ModelInfo]:
         """List models exposed by this endpoint."""

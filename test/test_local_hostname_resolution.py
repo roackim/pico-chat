@@ -9,6 +9,7 @@ from pico_chat.harness.llm_server import (
     _local_cache,
     _resolve_local_hostname,
     invalidate_local_hostname,
+    prewarm_local_resolution,
 )
 from pico_chat.harness.llm_server_config import LLMServerConfig
 
@@ -87,6 +88,34 @@ def test_invalidate_drops_cache():
         # Re-resolving should call getent again.
         _resolve_local_hostname("http://srv.local")
         assert getent.call_count == 2
+
+
+# --- Pre-warm ---
+
+
+def test_prewarm_resolves_in_background():
+    with patch("pico_chat.harness.llm_server._getent_host", return_value="192.168.1.50") as getent:
+        prewarm_local_resolution("http://srv.local:8080")
+        # The background thread should populate the cache.
+        import time
+        deadline = time.time() + 2
+        while "srv.local" not in _local_cache and time.time() < deadline:
+            time.sleep(0.01)
+        assert _local_cache.get("srv.local") == "192.168.1.50"
+        getent.assert_called_once()
+
+
+def test_prewarm_skips_non_local():
+    with patch("pico_chat.harness.llm_server._getent_host") as getent:
+        prewarm_local_resolution("http://openrouter.ai/api/v1")
+        getent.assert_not_called()
+
+
+def test_prewarm_skips_if_already_cached():
+    _local_cache["srv.local"] = "192.168.1.50"
+    with patch("pico_chat.harness.llm_server._getent_host") as getent:
+        prewarm_local_resolution("http://srv.local:8080")
+        getent.assert_not_called()
 
 
 # --- Connect-time invalidate + retry ---

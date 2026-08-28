@@ -10,7 +10,8 @@ from turtle import done
 from typing import Optional, Any
 
 from pico_chat.ui.tui.compositor import Compositor
-from pico_chat.ui.tui.events import KeyEvent, MouseEvent
+from pico_chat.ui.tui.events import KeyEvent, MouseEvent, TickEvent
+from pico_chat.ui.tui.components.box import SPINNER_FRAMES
 from pico_chat.ui.tui.components import (
     TextComponent, Box, InputComponent, ComponentField, Label,
 )
@@ -97,6 +98,15 @@ class chatTUI(ChatActionHandlers):
     def __init__(self, agent):
         self._initial_agent = agent
         self._agent_factory = self._runtime_agent_factory()
+        # Pre-warm .local hostname resolution for the initial agent so the
+        # first message doesn't stall on DNS/mDNS lookup.
+        server = getattr(agent, "server", None)
+        if server is not None:
+            from pico_chat.harness.llm_server import prewarm_local_resolution
+            prewarm_local_resolution(server._original_base_url)
+            # Discover the model name in the background so the status bar shows
+            # the real model (e.g. for llama.cpp) instead of "?".
+            asyncio.ensure_future(server.prewarm_model_name())
         self.compositor = None
         self.navigator = None
         self.modal_host = None
@@ -133,6 +143,7 @@ class chatTUI(ChatActionHandlers):
         self.editing_prefill_for_resume = False
         self.tab_bar = TabBar(id="tabs")
         self.status_bar = StatusBar(fields=pico_cfg.config.ui_status_bar_fields, id="status")
+        self._status_spinner_frame = 0
         self.tab_view = TabView(tab_bar=self.tab_bar)
         self._tabs = []
         self._active_tab_index = 0
@@ -177,9 +188,20 @@ class chatTUI(ChatActionHandlers):
             return
 
         config = server.config
-        model = getattr(server, "selected_model", None) or config.model or "?"
+        model = (
+            getattr(server, "selected_model", None)
+            or config.model
+            or getattr(server, "_cached_model_name", None)
+            or "?"
+        )
         role = getattr(getattr(agent, "role", None), "name", "default")
         state = getattr(getattr(agent, "state", None), "name", "IDLE").lower()
+
+        # Show an animated spinner while .local hostname resolution is pending.
+        from pico_chat.harness.llm_server import is_local_resolution_pending
+        if is_local_resolution_pending(server._original_base_url):
+            frame = SPINNER_FRAMES[self._status_spinner_frame % len(SPINNER_FRAMES)]
+            model = f"{frame} {model}"
 
         usage = getattr(agent, "_last_usage", None)
         context_used = getattr(usage, "prompt_tokens", None)
@@ -1098,6 +1120,16 @@ class chatTUI(ChatActionHandlers):
         tab_state.active_tool_messages.clear()
         tab_state.pending_permission_prompt = None
         tab_state.active_user_input = None
+
+        # Pre-warm .local hostname resolution so the first message doesn't
+        # stall on DNS/mDNS lookup, and discover the model name in the
+        # background so the status bar shows it instead of "?".
+        agent = tab_state.agent
+        server = getattr(agent, "server", None)
+        if server is not None:
+            from pico_chat.harness.llm_server import prewarm_local_resolution
+            prewarm_local_resolution(server._original_base_url)
+            asyncio.ensure_future(server.prewarm_model_name())
         tab_state.active_user_msg = None
         tab_state.paused_user_input = None
         tab_state.paused_user_msg = None
@@ -1138,6 +1170,15 @@ class chatTUI(ChatActionHandlers):
     def handle_global_input(self, event: Any) -> bool:
         """Handle focus logging and input dispatch with navigation between input and history."""
         
+        # Advance the status-bar spinner while .local resolution is pending.
+        if isinstance(event, TickEvent):
+            from pico_chat.harness.llm_server import is_local_resolution_pending
+            server = getattr(self._initial_agent, "server", None)
+            if server is not None and is_local_resolution_pending(server._original_base_url):
+                self._status_spinner_frame += 1
+                self.refresh_status_bar()
+            return False
+
         # Handle keyboard navigation between input and history
         if isinstance(event, (str, KeyEvent)):
             key = event.key if isinstance(event, KeyEvent) else event

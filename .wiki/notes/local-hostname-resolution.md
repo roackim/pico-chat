@@ -42,6 +42,25 @@ request fall back to the slow `.local` name; in-process resolution avoids that.
   `config.base_url`).
 - Non-`.local` hosts and any resolver failure return the original URL unchanged.
 
+## Pre-warming
+
+`prewarm_local_resolution(url)` kicks off `.local` resolution in a background
+thread (off the event loop) and populates the cache, so the first message in a
+conversation doesn't stall on DNS/mDNS. It's called when the initial agent is
+set up and when a new tab/conversation is opened (`ui/app.py`). Non-`.local`
+hosts and already-cached hosts are no-ops.
+
+While resolution is in progress, `is_local_resolution_pending(url)` returns
+True; the status bar shows an animated spinner next to the model name
+(`ui/app.py` advances a `SPINNER_FRAMES` frame on each `TickEvent`).
+
+## Model-name pre-warm
+
+`LLMServer.prewarm_model_name()` discovers and caches the model name (and
+context window) in the background at tab/conversation open, so the status bar
+shows the real model (e.g. for llama.cpp) instead of `?`. `refresh_status_bar`
+falls back to `server._cached_model_name` once populated.
+
 ## Caching + invalidation
 
 Resolutions are cached per-hostname for **the process lifetime** (no TTL) so a
