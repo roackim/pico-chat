@@ -14,7 +14,7 @@ from .subcommand_completion import SubcommandCompletion
 from .context_completion import ContextCompletion
 from .argument_completion import ArgumentCompletion
 from pico_chat.ui.tui.buffer import Buffer
-from pico_chat.ui.tui.events import KeyEvent, MouseEvent
+from pico_chat.ui.tui.events import KeyEvent, MouseEvent, TickEvent
 from pico_chat.ui.tui.layout_utils import display_width
 
 from pico_chat.ui.tui.colors import theme
@@ -587,6 +587,13 @@ class InputComponent(Component):
 
     def handle_input(self, event: Any) -> bool:
         """Handle input events by delegating to appropriate handlers."""
+        # Idle ticks drive the cursor blink. Handle BEFORE the generic path so
+        # we don't reset the cursor pulse (mark_input) on every tick, which
+        # would keep the cursor permanently solid. Return True on a blink flip
+        # so the compositor requests a redraw exactly when needed.
+        if isinstance(event, TickEvent):
+            return self.tick_cursor()
+
         key = event.key if isinstance(event, KeyEvent) else event
         # Ignore keyboard input if not focused (but allow mouse events for potential focus change)
         if not self.focused and not isinstance(event, MouseEvent):
