@@ -20,7 +20,7 @@ from pico_chat.ui.tui.components.popup import Popup, PopupScreen
 from pico_chat.ui.tui.components.form_popup import FormPopup
 from pico_chat.ui.tui.components.tab_bar import TabBar
 from pico_chat.ui.tui.components.tab_view import TabView
-from pico_chat.ui.tui.components.bars import StatusBar, BarStyle
+from pico_chat.ui.tui.components.bars import StatusBar
 from pico_chat.ui.chat_history_panel import ChatHistoryPanel
 from pico_chat.ui.chat_message import Message
 from pico_chat.ui.commands import handle_command, get_command_list, get_subcommand_list
@@ -122,7 +122,7 @@ class chatTUI(ChatActionHandlers):
         self.input_box = Box(
             self.input_component,
             title="",
-            fg=self.input_component.frame_color,
+            fg=theme.DEFAULT,  # Neutral chrome — mode signaling lives on the text.
             lines_only=True,
         )
         # Tint the typed text by input mode: default message, command (leading
@@ -151,11 +151,11 @@ class chatTUI(ChatActionHandlers):
         self.log_handler = setup_tui_logging(self.debug_panel)
         self.editing_prefill_for_resume = False
         self.tab_bar = TabBar(id="tabs")
+        # Restore BarStyle's default 1-col left padding so the status text
+        # sits one space in from the left edge, matching the message gutter.
         self.status_bar = StatusBar(
             fields=pico_cfg.config.ui_status_bar_fields,
             id="status",
-            # No leading indent so the first field (server:model) sits at col 0.
-            style=BarStyle(theme.DEFAULT, theme.get_bg(), theme.FOCUSED, padding=0),
         )
         self._status_spinner_frame = 0
         self.tab_view = TabView(tab_bar=self.tab_bar)
@@ -1214,13 +1214,9 @@ class chatTUI(ChatActionHandlers):
         """Handle focus logging and input dispatch with navigation between input and history."""
         
         # Advance the status-bar spinner while .local resolution or model
-        # name discovery is pending.
+        # name discovery is pending. The input cursor blink is driven by the
+        # input component's own handle_input(TickEvent) path.
         if isinstance(event, TickEvent):
-            # Keep the focused input's cursor blinking on idle ticks.
-            if self._last_focus_id == "input" and self.input_component.focused:
-                if self.input_component.tick_cursor():
-                    self.input_component.mark_changed()
-                    self.input_box.mark_changed()
             from pico_chat.harness.llm_server import is_local_resolution_pending
             server = getattr(self._initial_agent, "server", None)
             if server is not None and (

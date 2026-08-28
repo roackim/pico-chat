@@ -279,8 +279,8 @@ class TestInputComponentSubBuffer:
         assert input_comp.tick_cursor() is False
         assert box.subbuffer.has_changed is False
 
-    def test_input_box_lines_only_starts_at_col_one(self):
-        """Lines-only input box renders the child at col 1 with no prefix char."""
+    def test_input_box_prefix_and_child_offset(self):
+        """Lines-only input box draws ▸ at col 0, content starts at col 1."""
         input_comp = InputComponent('')
         input_comp.update('hi')
         box = Box(input_comp, title='message', lines_only=True,
@@ -290,8 +290,8 @@ class TestInputComponentSubBuffer:
         main = Buffer(80, 24)
         box.render(main)
 
-        # No gutter/prefix glyph in the content column (col 0 row 1 is blank).
-        assert main.cells[1][0].char == ' '
+        # Gutter/prefix glyph at column 0 on the content row.
+        assert main.cells[1][0].char == '▸'
         # Child content starts at column 1.
         assert main.cells[1][1].char == 'h'
         assert main.cells[1][2].char == 'i'
@@ -328,7 +328,7 @@ class TestInputComponentSubBuffer:
         box.set_layout(0, 0, 40, 3)
         main = Buffer(80, 24)
         box.render(main)
-        # Only the bar character '─' across the top, no 'message' text.
-        assert main.cells[0][0].char == '─'
-        assert main.cells[2][0].char == '─'
+        # Only the thicker bar character '━' across the top/bottom, no section.
+        assert main.cells[0][0].char == '━'
+        assert main.cells[2][0].char == '━'
         assert 'message' not in "".join(c.char for c in main.cells[0])
