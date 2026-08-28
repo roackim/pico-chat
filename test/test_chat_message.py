@@ -29,6 +29,17 @@ def test_thread_mode_uses_role_gutter():
     assert pico.box.gutter == "▸"
 
 
+def test_user_message_content_colored_user():
+    """User message content is tinted with the USER color."""
+    from pico_chat.ui.tui.msg_types import UserMsg
+    from pico_chat.ui.tui.colors import theme
+
+    msg = Message("hello", msg_type=UserMsg(), max_width=40)
+    # The content component's fg resolves from the message type's content_color.
+    assert msg.component.fg is not None
+    assert msg.component.fg == theme.USER
+
+
 def test_thinking_message_is_collapsible():
     from pico_chat.ui.tui.msg_types import ThinkingMsg
 

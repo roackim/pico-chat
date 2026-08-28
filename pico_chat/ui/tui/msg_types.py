@@ -40,6 +40,7 @@ class UserMsg(MsgType):
     title = "user"
     actions = [MsgAction.COPY, MsgAction.DELETE, MsgAction.STEER]
     frame_color = "USER"
+    content_color = "USER"
     gutter = "▸"
 
 class PicoMsg(MsgType):

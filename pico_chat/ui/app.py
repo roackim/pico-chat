@@ -124,6 +124,8 @@ class chatTUI(ChatActionHandlers):
             title="",
             fg=theme.USER,  # Color the bars/prefix with the user color.
             lines_only=True,
+            # Recede to muted chrome when the input isn't focused.
+            color_provider=lambda: (theme.USER if self.input_box.focused else theme.MUTED),
         )
         self._focus_targets = [
             _AppFocusTarget(self.input_component, self._set_input_focus, self.input_component.handle_input),
@@ -1226,6 +1228,13 @@ class chatTUI(ChatActionHandlers):
             if self._last_focus_id == "input" and self.input_component.has_active_completion():
                 if key in ('\x1b', '\x1b[A', '\x1b[B', '\t', '\r', '\n'):
                     return self.input_component.handle_input(event)
+
+            # ESC while the input is focused (and nothing is being completed)
+            # unfocuses the input, moving focus to the history panel. The focus
+            # manager updates each widget's focused state.
+            if key == '\x1b' and self._last_focus_id == "input" and not self.input_component.has_active_completion():
+                self._set_app_focus("history")
+                return True
 
             # Shortcuts to focus input: 'i' or Enter (when not already in input)
             if (key == 'i' or key == '\r') and self._last_focus_id != "input":

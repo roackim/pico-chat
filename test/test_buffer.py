@@ -316,6 +316,27 @@ class TestInputComponentSubBuffer:
         assert main.cells[1][1].char == ' '
         assert main.cells[1][2].char == 'h'
 
+    def test_input_box_color_provider_mutes_when_unfocused(self):
+        """A color_provider swaps bar/prefix color with the focused state."""
+        user_color = (10, 20, 30)
+        muted_color = (90, 90, 90)
+        input_comp = InputComponent(' ')
+        box = Box(
+            input_comp, title='', lines_only=True, fg=user_color,
+            color_provider=lambda: (user_color if box.focused else muted_color),
+        )
+        box.set_layout(0, 0, 40, 3)
+
+        main = Buffer(80, 24)
+        box.set_focused(True)
+        box.render(main)
+        assert main.cells[1][0].fg == user_color
+
+        box.set_focused(False)
+        box.render(main)
+        assert main.cells[1][0].char == '▸'
+        assert main.cells[1][0].fg == muted_color
+
     def test_input_content_color_provider_tints_text(self):
         """A content color provider recolors the typed text (not the bars)."""
         red = (255, 0, 0)

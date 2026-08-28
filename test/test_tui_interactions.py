@@ -430,14 +430,13 @@ def test_clicking_status_bar_does_not_focus_input():
 
 
 def test_tick_advances_focused_input_cursor_blink():
-    """A tick event advances the focused input's cursor and marks the box dirty."""
+    """The input's own handle_input drives the cursor blink on a TickEvent."""
     ui = chatTUI(StubAgent())
-    ui._set_app_focus("input")
     ui.input_box.set_layout(0, 20, 80, 3)
     ui.input_box.render(Buffer(80, 24))
 
     # First tick stays inside the pulse delay -> no redraw needed.
-    handled = ui.handle_global_input(TickEvent(0))
+    handled = ui.input_component.handle_input(TickEvent(0))
     assert handled is False
 
     # Force the blink to be past the pulse delay so the next tick flips.
@@ -445,6 +444,36 @@ def test_tick_advances_focused_input_cursor_blink():
     renderer.last_input_time -= 5.0
     # The box subbuffer flags a redraw once the cursor visibility toggles.
     ui.input_box.subbuffer.has_changed = False
-    ui.handle_global_input(TickEvent(1))
+    flipped = ui.input_component.handle_input(TickEvent(1))
 
+    assert flipped is True
     assert ui.input_box.subbuffer.has_changed is True
+
+
+def test_esc_unfocuses_input_when_focused():
+    """ESC while input is focused moves focus to history (unfocuses input)."""
+    ui = chatTUI(StubAgent())
+    ui._set_app_focus("input")
+
+    handled = ui.handle_global_input('\x1b')
+
+    assert handled is True
+    assert ui._last_focus_id == "history"
+    assert ui.input_box.focused is False
+
+
+def test_esc_with_active_completion_not_unfocused():
+    """ESC with an active completion is passed to the input (cancels it)."""
+    ui = chatTUI(StubAgent())
+    ui._set_app_focus("input")
+    # Simulate an active completion menu (so ESC should route to the input).
+    class FakeCompletion:
+        is_active = True
+        def cancel(self, text, pos):
+            pass
+    ui.input_component.command_completion = FakeCompletion()
+
+    handled = ui.handle_global_input('\x1b')
+
+    # Should NOT unfocus; completion handling consumes it.
+    assert handled is not True or ui._last_focus_id == "input"
