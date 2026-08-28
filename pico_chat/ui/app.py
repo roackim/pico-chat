@@ -191,10 +191,16 @@ class chatTUI(ChatActionHandlers):
             or getattr(server, "_cached_model_name", None)
             or "?"
         )
-        # Strip a leading path from a model id (e.g. /data/llm/weights/Qwen3.8-27B-Q4_0.gguf
-        # -> Qwen3.8-27B-Q4_0.gguf) for a compact status bar.
-        if isinstance(model, str) and "/" in model:
-            model = model.rsplit("/", 1)[-1]
+        # Strip a leading path and common file suffix from a model id
+        # (e.g. /data/llm/weights/Qwen3.8-27B-Q4_0.gguf -> Qwen3.8-27B-Q4_0)
+        # for a compact status bar.
+        if isinstance(model, str):
+            if "/" in model:
+                model = model.rsplit("/", 1)[-1]
+            for suffix in (".gguf", ".bin", ".safetensors"):
+                if model.endswith(suffix):
+                    model = model[: -len(suffix)]
+                    break
         role = getattr(getattr(agent, "role", None), "name", "default")
         state = getattr(getattr(agent, "state", None), "name", "IDLE").lower()
 
