@@ -12,12 +12,13 @@ from pico_chat.ui.tui.colors import theme
 SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 class Box(Component):
-    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None, parent_msg=None, compact_when_unfocused: bool = False, padding: int = 0, padding_y: Optional[int] = None, focus_in_padding: bool = False, focus_color=None, thread_mode: bool = False, gutter: str = "▸", gutter_color=None, lines_only: bool = False):
+    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None, parent_msg=None, compact_when_unfocused: bool = False, padding: int = 0, padding_y: Optional[int] = None, focus_in_padding: bool = False, focus_color=None, thread_mode: bool = False, gutter: str = "▸", gutter_color=None, lines_only: bool = False, title_provider: Optional[callable] = None):
         super().__init__(id)
         self.child = child
         self.child.parent = self
         self.parent_msg = parent_msg  # Reference to parent Message if provided
         self.title = title
+        self._title_provider = title_provider  # Optional callable -> current title
         self.bg = bg
         self.fg = fg
         self.focus_color = focus_color
@@ -54,6 +55,13 @@ class Box(Component):
     @property
     def children(self):
         return [self.child]
+
+    @property
+    def current_title(self) -> str:
+        """Resolve the title, honoring a dynamic title_provider if set."""
+        if self._title_provider is not None:
+            return self._title_provider() or self.title
+        return self.title
     
     def set_focused(self, focused: bool):
         """Set the focused state of this box."""
@@ -104,21 +112,23 @@ class Box(Component):
                 self.child.width = width
                 self.child.height = height
         # Lines-only mode: only full-width top/bottom lines, child inset by 1
-        # vertically, full horizontal width, no walls/corners.
+        # vertically and 1 column right (to clear the ">" prefix), no walls.
         elif self.lines_only:
+            inset_x = 1 + self.padding
             inset_y = 1 + self.padding_y
             if size_changed:
                 super().set_layout(x, y, width, height)
-                self.child.set_layout(x + self.padding, y + inset_y,
-                                      width - 2 * self.padding, height - 2 * inset_y)
+                self.child.set_layout(x + inset_x, y + inset_y,
+                                      width - inset_x - self.padding,
+                                      height - 2 * inset_y)
             else:
                 self.x = x
                 self.y = y
                 self.width = width
                 self.height = height
-                self.child.x = x + self.padding
+                self.child.x = x + inset_x
                 self.child.y = y + inset_y
-                self.child.width = width - 2 * self.padding
+                self.child.width = width - inset_x - self.padding
                 self.child.height = height - 2 * inset_y
         else:
             # Normal mode with borders
@@ -243,7 +253,7 @@ class Box(Component):
             fg = self.parent_msg.frame_color
             actions = self.parent_msg.get_active_actions()
         else:
-            title = self.title
+            title = self.current_title
             fg = self.fg
             actions = self.actions
         
@@ -422,7 +432,9 @@ class Box(Component):
         """Render only full-width horizontal bars on the top and bottom edges.
 
         No corner characters and no vertical walls — just a clean top and
-        bottom line spanning the full width.
+        bottom line spanning the full width. The current title (mode) is drawn
+        inline in the top bar, and a ``>`` prompt prefix sits in the first
+        content column.
         """
         fg = self.focus_color or self.fg
         bg = self.bg
@@ -439,9 +451,19 @@ class Box(Component):
         for ix in range(self.width):
             self.subbuffer.set(ix, 0, "─", fg=fg, bg=bg)
 
+        # Section name (mode) inline in the top bar: "─ message ───...".
+        title = self.current_title
+        if title:
+            title_str = f" {title[:max(0, self.width - 4)]} "
+            self.subbuffer.write_str(1, 0, title_str, fg=fg, bg=bg)
+
         # Bottom horizontal bar, full width.
         for ix in range(self.width):
             self.subbuffer.set(ix, self.height - 1, "─", fg=fg, bg=bg)
+
+        # Prompt prefix (">") in the first content column.
+        if self.width > 1 and self.height > 2:
+            self.subbuffer.set(0, 1, ">", fg=fg, bg=bg)
 
         # Render child content (inset by the layout previously computed).
         temp_buffer = self._create_subbuffer_wrapper()

@@ -119,7 +119,18 @@ class chatTUI(ChatActionHandlers):
         self.input_component.setup_context(get_context_items)
         from pico_chat.ui.commands import COMMANDS
         self.input_component.setup_command_registry(COMMANDS)
-        self.input_box = Box(self.input_component, title="message", fg=self.input_component.frame_color, lines_only=True)
+        self.input_box = Box(
+            self.input_component,
+            title="message",
+            fg=self.input_component.frame_color,
+            lines_only=True,
+            # Mode-switch the section title based on whether the input looks
+            # like a command (leading "/").
+            title_provider=lambda: (
+                "command" if (self.input_component.text or "").lstrip().startswith("/")
+                else "message"
+            ),
+        )
         self._focus_targets = [
             _AppFocusTarget(self.input_component, self._set_input_focus, self.input_component.handle_input),
             _AppFocusTarget(self.chat_history_panel, self._set_history_focus, self.chat_history_panel.handle_input),
