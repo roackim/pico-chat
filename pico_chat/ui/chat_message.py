@@ -207,7 +207,62 @@ class Message:
     def advance_spinner(self):
         """Advance the animated spinner frame (called on TickEvent)."""
         self.spinner_frame = (self.spinner_frame + 1) % len(SPINNER_FRAMES)
-        self.box.mark_changed()
+        # Live tool messages bake the current spinner glyph into their display
+        # text, so rebuild so the braille frame actually animates.
+        if self.is_tool_message():
+            self.rebuild_tool_display()
+        else:
+            self.box.mark_changed()
+
+    def is_tool_message(self) -> bool:
+        """True for tool-call, tool-draft, and permission-request messages."""
+        return isinstance(self.type, (
+            msg_types.ToolCallMsg, msg_types.ToolDraftMsg, msg_types.AskPermissionMsg,
+        ))
+
+    def spinner_glyph(self) -> str:
+        """Current braille spinner frame (for live/in-progress messages)."""
+        return SPINNER_FRAMES[self.spinner_frame % len(SPINNER_FRAMES)]
+
+    def tool_terminal_state(self) -> Optional[str]:
+        """Resolve the *terminal* tool state, independent of status strings.
+
+        Returns one of ``"completed"``, ``"error"``, ``"denied"``,
+        ``"cancelled"``, or ``None`` while still running (or when there is no
+        terminal state to report).
+        """
+        status = self.tool_status or ""
+        for terminal, needles in (
+            ("completed", ("completed",)),
+            ("error", ("error",)),
+            ("denied", ("denied",)),
+            ("cancelled", ("cancelled",)),
+        ):
+            if any(n in status for n in needles):
+                return terminal
+        return None
+
+    def status_glyph(self) -> tuple[str, Any]:
+        """Return a single (glyph, color) describing the message lifecycle.
+
+        Lifecycle rule:
+        - not finalized            → braille spinner (loading)
+        - finalized + terminal state → ✓ / ✗ / ⏹ per terminal state
+        - finalized, no terminal   → muted ⋯ fallback
+        """
+        from pico_chat.ui.tui.colors import theme
+
+        if not self.finalized:
+            return self.spinner_glyph(), theme.MUTED
+
+        terminal = self.tool_terminal_state()
+        if terminal == "completed":
+            return "✓", theme.SUCCESS
+        if terminal in ("error", "denied"):
+            return "✗", theme.ERROR
+        if terminal == "cancelled":
+            return "⏹", theme.WARNING
+        return "⋯", theme.MUTED
 
     def _collapsed_text(self) -> str:
         """Return the single-line summary shown when collapsed."""
@@ -334,15 +389,12 @@ class Message:
                 else:
                     colored_parts.append(f"{theme.MUTED}{part}{theme.reset()}")
             status_parts = [' | '.join(colored_parts)]
-            
-            # For compact mode, use a simple symbol
-            if 'completed' in self.tool_status:
-                status_symbol = f" {theme.SUCCESS}✓{theme.reset()}"
-            elif 'error' in self.tool_status or 'denied' in self.tool_status:
-                status_symbol = f" {theme.ERROR}✗{theme.reset()}"
-            elif 'executing' in self.tool_status:
-                status_symbol = f" {theme.MUTED}⋯{theme.reset()}"
-        
+
+            # Compact symbol reflects the lifecycle: spinner while running,
+            # ✓/✗/⏹ only once finalized. Never show a "done" mark early.
+            glyph, glyph_color = self.status_glyph()
+            status_symbol = f" {glyph_color}{glyph}{theme.reset()}"
+
         # Build header line - use "?" prefix for permission requests, ">" for tool calls
         from pico_chat.ui.tui import msg_types
         if isinstance(self.type, msg_types.AskPermissionMsg):

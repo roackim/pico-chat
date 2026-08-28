@@ -1,0 +1,71 @@
+"""Tests for tool-message lifecycle status glyphs.
+
+Verifies the "no ✓ until finished" rule and that a loading spinner is shown
+while a tool command is running.
+"""
+
+from pico_chat.ui.chat_message import Message
+from pico_chat.ui.tui.msg_types import ToolCallMsg
+from pico_chat.ui.tui.colors import theme
+
+
+def _tool(msg_type=None, status=None, finalized=False):
+    msg = Message("", msg_type=msg_type or ToolCallMsg(), max_width=40)
+    msg.tool_name = "run"
+    msg.tool_args = '{"command": "ls"}'
+    if status is not None:
+        msg.tool_status = status
+    if finalized:
+        msg.finalize()
+    return msg
+
+
+def test_spinner_while_not_finalized():
+    msg = _tool(status="approved | executing", finalized=False)
+    glyph, color = msg.status_glyph()
+    assert glyph in ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+    assert color == theme.MUTED
+
+
+def test_no_done_mark_while_running():
+    """A running command never reports a ✓ glyph."""
+    msg = _tool(status="approved | executing", finalized=False)
+    glyph, _ = msg.status_glyph()
+    assert glyph not in ("✓", "✗")
+
+
+def test_check_mark_only_after_finalized_completed():
+    msg = _tool(status="approved | completed", finalized=True)
+    glyph, color = msg.status_glyph()
+    assert glyph == "✓"
+    assert color == theme.SUCCESS
+
+
+def test_error_mark_after_finalized():
+    msg = _tool(status="error", finalized=True)
+    glyph, color = msg.status_glyph()
+    assert glyph == "✗"
+    assert color == theme.ERROR
+
+
+def test_denied_mark_after_finalized():
+    msg = _tool(status="denied", finalized=True)
+    glyph, color = msg.status_glyph()
+    assert glyph == "✗"
+    assert color == theme.ERROR
+
+
+def test_autoapproved_not_terminal():
+    """auto-approved is a pending permission state, not a done state."""
+    msg = _tool(status="auto-approved", finalized=False)
+    glyph, _ = msg.status_glyph()
+    assert glyph not in ("✓", "✗")
+
+
+def test_advance_spinner_rebuilds_tool_display():
+    """Spinner animates because advance_spinner rebuilds the tool display."""
+    msg = _tool(status="approved | executing", finalized=False)
+    before = msg.get_formatted()
+    msg.advance_spinner()
+    after = msg.get_formatted()
+    assert before != after

@@ -860,11 +860,13 @@ class ChatHistoryPanel(TextComponent):
 
     def handle_input(self, event: Any) -> bool:
         """Handle mouse wheel for scrolling and keyboard navigation."""
-        # Animate the spinner on any in-progress collapsible message.
+        # Animate the spinner on any in-progress message: collapsible (thinking)
+        # or live tool messages (running command / pending permission).
         if isinstance(event, TickEvent):
             for msg in self.messages:
-                if getattr(msg, "collapsible", False) and not getattr(msg, "finalized", True):
-                    msg.advance_spinner()
+                if not getattr(msg, "finalized", True):
+                    if getattr(msg, "collapsible", False) or getattr(msg, "is_tool_message", lambda: False)():
+                        msg.advance_spinner()
             return False
 
         # Handle keyboard input only if this panel has keyboard focus
