@@ -121,21 +121,17 @@ class chatTUI(ChatActionHandlers):
         self.input_component.setup_command_registry(COMMANDS)
         self.input_box = Box(
             self.input_component,
-            title="message",
+            title="",
             fg=self.input_component.frame_color,
             lines_only=True,
-            # Mode-switch the section title based on whether the input looks
-            # like a command (leading "/"), and tint the bars accordingly.
-            title_provider=lambda: (
-                "command" if (self.input_component.text or "").lstrip().startswith("/")
-                else "message"
-            ),
-            color_provider=lambda: (
-                theme.PERMISSION
-                if (self.input_component.text or "").lstrip().startswith("/")
-                else theme.FOCUSED
-            ),
         )
+        # Tint the typed text by input mode: default message, command (leading
+        # "/"). The surrounding bars stay neutral so the mode reads on the text.
+        self.input_component.set_content_color_provider(lambda: (
+            theme.PERMISSION
+            if (self.input_component.text or "").lstrip().startswith("/")
+            else theme.FOCUSED
+        ))
         self._focus_targets = [
             _AppFocusTarget(self.input_component, self._set_input_focus, self.input_component.handle_input),
             _AppFocusTarget(self.chat_history_panel, self._set_history_focus, self.chat_history_panel.handle_input),
@@ -1274,7 +1270,19 @@ class chatTUI(ChatActionHandlers):
             # Ignore wheel scroll events for focus purposes — they shouldn't
             # change focus, only scroll the panel under the cursor.
             if event.pressed and event.button not in (64, 65):
-                if self._focus_scope.focus_at(event.x, event.y):
+                clicked_focus = self._focus_scope.focus_at(event.x, event.y)
+                # Clicking the input box (including its top/bottom bars) or the
+                # status bar should always return focus to the input field.
+                in_input_box = (
+                    self.input_box.x <= event.x < self.input_box.x + self.input_box.width
+                    and self.input_box.y <= event.y < self.input_box.y + self.input_box.height
+                )
+                if not clicked_focus and in_input_box:
+                    # Clicking the input box (bars or field) focuses input.
+                    self._set_app_focus("input")
+                    self.chat_history_panel.clear_focus()
+                    return True
+                elif clicked_focus:
                     target_id = "input" if self._focus_scope.focused_index == 0 else "history"
                     if target_id == "input":
                     # Clear focused message when clicking input

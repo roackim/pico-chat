@@ -295,3 +295,40 @@ class TestInputComponentSubBuffer:
         # Child content starts at column 1.
         assert main.cells[1][1].char == 'h'
         assert main.cells[1][2].char == 'i'
+
+    def test_input_content_color_provider_tints_text(self):
+        """A content color provider recolors the typed text (not the bars)."""
+        red = (255, 0, 0)
+        green = (0, 255, 0)
+        input_comp = InputComponent('')
+        input_comp.set_content_color_provider(lambda: green if input_comp.text.startswith('/') else red)
+        input_comp.update('hello')
+        box = Box(input_comp, title='', lines_only=True)
+        box.set_layout(0, 0, 40, 3)
+
+        main = Buffer(80, 24)
+        box.render(main)
+
+        # Message mode -> red text at col 1.
+        assert main.cells[1][1].char == 'h'
+        assert main.cells[1][1].fg == red
+
+        # Command mode -> green text.
+        input_comp._command_registry = {}
+        input_comp.update('/help')
+        box.mark_changed()
+        box.render(main)
+        assert main.cells[1][1].char == '/'
+        assert main.cells[1][1].fg == green
+
+    def test_input_box_empty_title_renders_no_section(self):
+        """An empty title means no inline section name in the top bar."""
+        input_comp = InputComponent('')
+        box = Box(input_comp, title='', lines_only=True)
+        box.set_layout(0, 0, 40, 3)
+        main = Buffer(80, 24)
+        box.render(main)
+        # Only the bar character '─' across the top, no 'message' text.
+        assert main.cells[0][0].char == '─'
+        assert main.cells[2][0].char == '─'
+        assert 'message' not in "".join(c.char for c in main.cells[0])

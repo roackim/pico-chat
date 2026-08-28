@@ -27,6 +27,7 @@ class InputComponent(Component):
         self.prompt = prompt
         self.frame_color = frame_color if frame_color is not None else theme.DEFAULT
         self.content_color = content_color if content_color is not None else theme.DEFAULT
+        self._content_color_provider: Optional[callable] = None
         self.bg = theme.get_bg()  # Use global background
         self.config = None  # Config object passed during initialization
         self.focused = True  # Track focus state for input handling and cursor rendering
@@ -341,7 +342,16 @@ class InputComponent(Component):
             self.buffer.text, self.buffer.cursor_pos
         )
         return cursor_row == 0
-    
+
+    def set_content_color_provider(self, provider: Optional[callable]):
+        """Set a dynamic content-color provider.
+
+        The callable is invoked on every render (no args) and its return value
+        overrides ``content_color`` — used to tint the typed text by input mode
+        (e.g. message vs command) without re-theming the surrounding bars.
+        """
+        self._content_color_provider = provider
+
     def set_focused(self, focused: bool):
         """Set the focused state of this input component."""
         self.focused = focused
@@ -356,6 +366,13 @@ class InputComponent(Component):
         """Render the input field with prompt, text, and scrolling (cursor rendered separately)."""
         # Clear background
         buffer.fill(self.x, self.y, self.width, self.height, " ", bg=self.bg)
+
+        # Resolve dynamic content color (mode-aware text tint) if provided.
+        content_color = self.content_color
+        if self._content_color_provider is not None:
+            provider_color = self._content_color_provider()
+            if provider_color is not None:
+                content_color = provider_color
         
         # Get wrapped lines
         lines = self.coord_mapper.get_wrapped_lines(self.buffer.text)
@@ -384,7 +401,7 @@ class InputComponent(Component):
                 # Continuation lines already have proper padding
                 display_line = line
             
-            buffer.write_str(self.x, self.y + line_idx, display_line, fg=self.content_color, bg=self.bg, max_width=self.width)
+            buffer.write_str(self.x, self.y + line_idx, display_line, fg=content_color, bg=self.bg, max_width=self.width)
         
         # Note: Cursor is rendered separately via render_cursor() called after SubBuffer blit
         

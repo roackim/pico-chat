@@ -1,6 +1,6 @@
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.components.form import RadioListField, TextField
-from pico_chat.ui.tui.events import KeyEvent, normalize_key
+from pico_chat.ui.tui.events import KeyEvent, normalize_key, TickEvent
 from pico_chat.ui.tui.components.form_popup import FormPopup
 from pico_chat.ui.tui.components.tab_bar import TabBar
 from pico_chat.ui.tui.components.config_overlay import ConfigOverlay
@@ -401,3 +401,50 @@ def test_form_tab_and_shift_tab_move_focus_both_directions():
     assert popup._form_container.get_focused_field().label == "Type"
     assert popup.handle_input(normalize_key("\x1b[Z")) is True
     assert popup._form_container.get_focused_field().label == "Name"
+
+
+def test_clicking_input_box_bars_focuses_input():
+    """Clicking anywhere in the input box (incl. its bars) focuses the input."""
+    ui = chatTUI(StubAgent())
+    ui._set_app_focus("history")
+    # Geometry: place the input box bottom-anchored, click directly on its top bar.
+    ui.input_box.set_layout(0, 20, 80, 3)
+
+    handled = ui.handle_global_input(MouseEvent(5, 20, 0, True))
+
+    assert handled is True
+    assert ui._last_focus_id == "input"
+
+
+def test_clicking_status_bar_does_not_focus_input():
+    """Clicks outside the input box and history are not consumed for focus."""
+    ui = chatTUI(StubAgent())
+    # Place input box and status bar far from the click point.
+    ui.input_box.set_layout(0, 20, 80, 3)
+    ui._set_app_focus("history")
+
+    handled = ui.handle_global_input(MouseEvent(70, 2, 0, True))
+
+    assert handled is False
+    assert ui._last_focus_id == "history"
+
+
+def test_tick_advances_focused_input_cursor_blink():
+    """A tick event advances the focused input's cursor and marks the box dirty."""
+    ui = chatTUI(StubAgent())
+    ui._set_app_focus("input")
+    ui.input_box.set_layout(0, 20, 80, 3)
+    ui.input_box.render(Buffer(80, 24))
+
+    # First tick stays inside the pulse delay -> no redraw needed.
+    handled = ui.handle_global_input(TickEvent(0))
+    assert handled is False
+
+    # Force the blink to be past the pulse delay so the next tick flips.
+    renderer = ui.input_component.cursor_renderer
+    renderer.last_input_time -= 5.0
+    # The box subbuffer flags a redraw once the cursor visibility toggles.
+    ui.input_box.subbuffer.has_changed = False
+    ui.handle_global_input(TickEvent(1))
+
+    assert ui.input_box.subbuffer.has_changed is True
