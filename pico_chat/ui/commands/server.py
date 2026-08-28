@@ -112,6 +112,18 @@ class ServerUseCommand(Command):
             return
         try:
             ui.agent.switch_server(result.new_config)
+            # Pre-warm the new server's model name so the status bar shows it
+            # (e.g. for llama.cpp) instead of "?" until the first message.
+            server = getattr(ui.agent, "server", None)
+            if server is not None:
+                from pico_chat.harness.llm_server import prewarm_local_resolution
+                prewarm_local_resolution(server._original_base_url)
+                import asyncio
+                async def _prewarm_and_refresh():
+                    await server.prewarm_model_name()
+                    if hasattr(ui, "refresh_status_bar"):
+                        ui.refresh_status_bar()
+                asyncio.ensure_future(_prewarm_and_refresh())
             if hasattr(ui, "refresh_status_bar"):
                 ui.refresh_status_bar()
             ui.chat_history_panel.add_message(result.message, msg_type=SysMsg())
