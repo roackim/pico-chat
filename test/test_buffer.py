@@ -296,6 +296,26 @@ class TestInputComponentSubBuffer:
         assert main.cells[1][1].char == 'h'
         assert main.cells[1][2].char == 'i'
 
+    def test_input_box_colors_prefix_and_bars_with_fg(self):
+        """Prefix and bars inherit the box fg (e.g. USER), text stays plain."""
+        user_color = (10, 20, 30)
+        input_comp = InputComponent(' ')
+        input_comp.update('hi')
+        box = Box(input_comp, title='', lines_only=True, fg=user_color)
+        box.set_layout(0, 0, 40, 3)
+
+        main = Buffer(80, 24)
+        box.render(main)
+
+        # Prefix and bars use the box fg color.
+        assert main.cells[1][0].char == '▸'
+        assert main.cells[1][0].fg == user_color
+        assert main.cells[0][0].char == '─'
+        assert main.cells[0][0].fg == user_color
+        # A one-char prompt (space) leaves the text at col 2, like chat gutter.
+        assert main.cells[1][1].char == ' '
+        assert main.cells[1][2].char == 'h'
+
     def test_input_content_color_provider_tints_text(self):
         """A content color provider recolors the typed text (not the bars)."""
         red = (255, 0, 0)
@@ -328,7 +348,7 @@ class TestInputComponentSubBuffer:
         box.set_layout(0, 0, 40, 3)
         main = Buffer(80, 24)
         box.render(main)
-        # Only the thicker bar character '━' across the top/bottom, no section.
-        assert main.cells[0][0].char == '━'
-        assert main.cells[2][0].char == '━'
+        # Normal bar character '─' across the top/bottom, no section.
+        assert main.cells[0][0].char == '─'
+        assert main.cells[2][0].char == '─'
         assert 'message' not in "".join(c.char for c in main.cells[0])

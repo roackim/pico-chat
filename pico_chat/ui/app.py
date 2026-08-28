@@ -110,7 +110,7 @@ class chatTUI(ChatActionHandlers):
         self.popup_screen = None
         self._last_focus_id = "input"
         self.chat_history_panel = ChatHistoryPanel()
-        self.input_component = InputComponent("", id="entry", frame_color=theme.USER)
+        self.input_component = InputComponent(" ", id="entry", frame_color=theme.USER)
         self.input_component.config = pico_cfg.config
         self.input_component.on_submit = self.on_user_submit
         self.input_component.setup_commands(get_command_list())
@@ -122,16 +122,9 @@ class chatTUI(ChatActionHandlers):
         self.input_box = Box(
             self.input_component,
             title="",
-            fg=theme.DEFAULT,  # Neutral chrome — mode signaling lives on the text.
+            fg=theme.USER,  # Color the bars/prefix with the user color.
             lines_only=True,
         )
-        # Tint the typed text by input mode: default message, command (leading
-        # "/"). The surrounding bars stay neutral so the mode reads on the text.
-        self.input_component.set_content_color_provider(lambda: (
-            theme.PERMISSION
-            if (self.input_component.text or "").lstrip().startswith("/")
-            else theme.FOCUSED
-        ))
         self._focus_targets = [
             _AppFocusTarget(self.input_component, self._set_input_focus, self.input_component.handle_input),
             _AppFocusTarget(self.chat_history_panel, self._set_history_focus, self.chat_history_panel.handle_input),

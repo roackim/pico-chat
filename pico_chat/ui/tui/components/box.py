@@ -460,9 +460,9 @@ class Box(Component):
                 for ix in range(self.width):
                     self.subbuffer.set(ix, iy, " ", bg=bg)
 
-        # Top horizontal bar, full width (thicker ━).
+        # Top horizontal bar, full width.
         for ix in range(self.width):
-            self.subbuffer.set(ix, 0, "━", fg=fg, bg=bg)
+            self.subbuffer.set(ix, 0, "─", fg=fg, bg=bg)
 
         # Section name (mode) inline in the top bar: "─ message ───...".
         title = self.current_title
@@ -470,9 +470,9 @@ class Box(Component):
             title_str = f" {title[:max(0, self.width - 4)]} "
             self.subbuffer.write_str(1, 0, title_str, fg=fg, bg=bg)
 
-        # Bottom horizontal bar, full width (thicker ━).
+        # Bottom horizontal bar, full width.
         for ix in range(self.width):
-            self.subbuffer.set(ix, self.height - 1, "━", fg=fg, bg=bg)
+            self.subbuffer.set(ix, self.height - 1, "─", fg=fg, bg=bg)
 
         # Prompt prefix ("▸") in the first content column, matching the role
         # gutter used for chat-history messages in thread mode.
