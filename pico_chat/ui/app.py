@@ -20,7 +20,7 @@ from pico_chat.ui.tui.components.popup import Popup, PopupScreen
 from pico_chat.ui.tui.components.form_popup import FormPopup
 from pico_chat.ui.tui.components.tab_bar import TabBar
 from pico_chat.ui.tui.components.tab_view import TabView
-from pico_chat.ui.tui.components.bars import StatusBar
+from pico_chat.ui.tui.components.bars import StatusBar, BarStyle
 from pico_chat.ui.chat_history_panel import ChatHistoryPanel
 from pico_chat.ui.chat_message import Message
 from pico_chat.ui.commands import handle_command, get_command_list, get_subcommand_list
@@ -155,7 +155,12 @@ class chatTUI(ChatActionHandlers):
         self.log_handler = setup_tui_logging(self.debug_panel)
         self.editing_prefill_for_resume = False
         self.tab_bar = TabBar(id="tabs")
-        self.status_bar = StatusBar(fields=pico_cfg.config.ui_status_bar_fields, id="status")
+        self.status_bar = StatusBar(
+            fields=pico_cfg.config.ui_status_bar_fields,
+            id="status",
+            # No leading indent so the first field (server:model) sits at col 0.
+            style=BarStyle(theme.DEFAULT, theme.get_bg(), theme.FOCUSED, padding=0),
+        )
         self._status_spinner_frame = 0
         self.tab_view = TabView(tab_bar=self.tab_bar)
         self._tabs = []
