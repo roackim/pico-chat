@@ -729,23 +729,31 @@ class Harness:
             # 3. Handle Tool Calls
             if delta.tool_calls:
                 for tc in delta.tool_calls:
-                    idx = tc.index
-                    if idx not in tool_calls_buffer:
-                        tool_calls_buffer[idx] = {
+                    # Key chunks by tool-call id when available; some providers
+                    # send distinct calls that reuse the same index, which would
+                    # otherwise merge their names/arguments. Fall back to index
+                    # only when id is absent.
+                    key = tc.id or tc.index
+                    if key not in tool_calls_buffer:
+                        tool_calls_buffer[key] = {
+                            "index": tc.index,
                             "id": tc.id,
                             "type": "function",
                             "function": {"name": "", "arguments": ""}
                         }
-                    elif tc.id:
-                        tool_calls_buffer[idx]["id"] = tc.id
+                    else:
+                        # Keep the first seen index for stable output ordering.
+                        tool_calls_buffer[key]["index"] = tool_calls_buffer[key].get("index", tc.index)
+                    if tc.id:
+                        tool_calls_buffer[key]["id"] = tc.id
 
-                    if tc.function.name:
-                        tool_calls_buffer[idx]["function"]["name"] += tc.function.name
-                    if tc.function.arguments:
-                        tool_calls_buffer[idx]["function"]["arguments"] += tc.function.arguments
+                    if getattr(tc.function, "name", None):
+                        tool_calls_buffer[key]["function"]["name"] += tc.function.name
+                    if getattr(tc.function, "arguments", None):
+                        tool_calls_buffer[key]["function"]["arguments"] += tc.function.arguments
 
-                    tc_data = tool_calls_buffer[idx]
-                    tool_call_id = tc_data["id"] or f"idx_{idx}"
+                    tc_data = tool_calls_buffer[key]
+                    tool_call_id = tc_data["id"] or f"idx_{tc_data['index']}"
                     yield chunks.ToolDraft(
                         tool_call_id=tool_call_id,
                         tool_name=tc_data["function"]["name"],
@@ -772,10 +780,10 @@ class Harness:
         # Reconstruct tool calls list
         tool_calls_list = []
         if tool_calls_buffer:
-            for idx in sorted(tool_calls_buffer.keys()):
-                tc_data = tool_calls_buffer[idx]
+            for key in sorted(tool_calls_buffer.keys()):
+                tc_data = tool_calls_buffer[key]
                 tool_calls_list.append({
-                    "id": tc_data["id"] or f"idx_{idx}",
+                    "id": tc_data["id"] or f"idx_{tc_data.get('index', 0)}",
                     "type": "function",
                     "function": {
                         "name": tc_data["function"]["name"],

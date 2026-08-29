@@ -126,6 +126,10 @@ class Message:
     
     def finalize(self):
         self.finalized = True
+        # Tool messages bake their status symbol into the display text; rebuild
+        # so the finalized ✓/✗/⏹ replaces any stale running-spinner glyph.
+        if self.is_tool_message():
+            self.rebuild_tool_display()
         self.box.mark_changed()  # Finalization affects actions display
     
     def get_active_actions(self):
