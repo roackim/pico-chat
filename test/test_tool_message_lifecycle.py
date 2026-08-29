@@ -128,3 +128,30 @@ def test_harness_stop_tool_kills_run(tmp_path):
             raise AssertionError("stop_tool did not terminate the command")
 
     asyncio.run(scenario())
+
+
+def test_run_tool_schema_name_is_run():
+    """The LLM-facing tool name is 'run' (not 'run_command')."""
+    from pico_chat.harness.tool_wrappers import RunTool
+    from pico_chat.harness.tools import MinimalToolset
+    import tempfile, os
+
+    tmp = tempfile.mkdtemp()
+    tool = RunTool(MinimalToolset(tmp, permissions=None))
+    assert tool.get_schema()["function"]["name"] == "run"
+
+
+def test_dynamic_gutter_contextual():
+    """Gutter is ? for ask, spinner while running, ✓ when completed."""
+    from pico_chat.ui.tui.msg_types import AskPermissionMsg, ToolCallMsg
+
+    ask = Message("", msg_type=AskPermissionMsg(), max_width=40)
+    ask.tool_name = "run"
+    assert ask.dynamic_gutter()[0] == "?"
+
+    running = _tool(status="approved | executing", finalized=False)
+    glyph, _ = running.dynamic_gutter()
+    assert glyph in ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+
+    done = _tool(status="approved | completed", finalized=True)
+    assert done.dynamic_gutter()[0] == "✓"

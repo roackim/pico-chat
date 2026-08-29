@@ -203,7 +203,7 @@ class RunTool(ToolWrapper):
     
     def __init__(self, toolset: MinimalToolset):
         super().__init__(
-            name="run_command",
+            name="run",
             description=(
                 "Execute a shell command in the workspace. "
                 "Supports pipes (|), command chaining (&&, ||, ;). "

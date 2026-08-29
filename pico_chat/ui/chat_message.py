@@ -269,6 +269,23 @@ class Message:
             return "⏹", theme.WARNING
         return "⋯", theme.MUTED
 
+    def dynamic_gutter(self) -> tuple[str, Any]:
+        """Return a lifecycle-aware (gutter glyph, color) for tool messages.
+
+        - permission/ask message      → "?" (PERMISSION)
+        - running / not finalized     → braille spinner (MUTED)
+        - completed / error / etc.    → ✓ / ✗ / ⏹ (per terminal state)
+
+        Non-tool messages fall back to their static gutter + frame color.
+        """
+        from pico_chat.ui.tui.colors import theme
+
+        if isinstance(self.type, msg_types.AskPermissionMsg):
+            return "?", theme.PERMISSION
+        if self.is_tool_message():
+            return self.status_glyph()
+        return getattr(self.type, "gutter", "▸"), self.frame_color
+
     def _collapsed_text(self) -> str:
         """Return the single-line summary shown when collapsed."""
         if isinstance(self.type, msg_types.ThinkingMsg):

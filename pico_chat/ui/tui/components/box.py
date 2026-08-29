@@ -493,6 +493,13 @@ class Box(Component):
         bg = self.bg
         fg = self.gutter_color or self.fg
 
+        # Lifecycle-aware gutter: tool/permission messages swap their prefix
+        # glyph with the running/done state (spinner → ✓/✗/⏹, ? for ask).
+        gutter = self.gutter
+        if self.parent_msg is not None and hasattr(self.parent_msg, "dynamic_gutter"):
+            gutter, dynamic_color = self.parent_msg.dynamic_gutter()
+            fg = dynamic_color or fg
+
         self.subbuffer.clear()
 
         # Fill background
@@ -502,8 +509,8 @@ class Box(Component):
                     self.subbuffer.set(ix, iy, " ", bg=bg)
 
         # Draw the role gutter in the first column.
-        if self.gutter and self.width > 0:
-            self.subbuffer.set(0, 0, self.gutter, fg=fg, bg=bg)
+        if gutter and self.width > 0:
+            self.subbuffer.set(0, 0, gutter, fg=fg, bg=bg)
 
         # Collapsed messages (e.g. thinking folded by default) render a single
         # summary line instead of the full content.
