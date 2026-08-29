@@ -550,13 +550,14 @@ class Box(Component):
         text = parent._collapsed_text()
 
         # The gutter already marks the role (… for thinking), so the collapsed
-        # line shows just the spinner + label while streaming, or the label
-        # once finalized.
+        # line shows the spinner + label while streaming, then a completion
+        # marker + "thoughts" once finalized.
         if not parent.finalized:
             frame = SPINNER_FRAMES[parent.spinner_frame % len(SPINNER_FRAMES)]
             line = f"{frame} {text}"
         else:
-            line = text
+            done_glyph, done_color = parent.done_glyph()
+            line = f"{done_color}{done_glyph}{theme.reset()} {parent.done_label(text)}"
 
         self.subbuffer.write_str(2, 0, line, fg=self.gutter_color or self.fg,
                                  bg=bg, max_width=max(0, self.width - 2))

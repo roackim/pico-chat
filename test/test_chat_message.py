@@ -76,8 +76,20 @@ def test_thinking_spinner_animates_while_streaming():
     assert "⠙" in second  # spinner frame 1
     assert second != first
 
-    # Once finalized, the spinner is replaced by a static marker.
+    # Once finalized, the spinner is replaced by a done marker + "thoughts".
     msg.finalize()
     finalized = row()
     assert "⠋" not in finalized
     assert "⠙" not in finalized
+    assert "✓" in finalized
+    assert "thoughts" in finalized
+
+
+def test_thinking_done_glyph_and_label():
+    from pico_chat.ui.tui.msg_types import ThinkingMsg
+
+    msg = Message("deep reasoning", msg_type=ThinkingMsg(), max_width=40)
+    msg.finalize()
+    glyph, color = msg.done_glyph()
+    assert glyph == "✓"
+    assert msg.done_label("thinking") == "thoughts"

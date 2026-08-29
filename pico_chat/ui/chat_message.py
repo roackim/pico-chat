@@ -291,6 +291,26 @@ class Message:
         if isinstance(self.type, msg_types.ThinkingMsg):
             return "thinking"
         return self.type.title or self.type.name
+
+    def done_glyph(self) -> tuple[str, Any]:
+        """Return a (glyph, color) shown on a collapsed message once done.
+
+        Thinking messages show a muted "✓" once finalized; tool/permission
+        messages reuse their terminal status glyph.
+        """
+        from pico_chat.ui.tui.colors import theme
+
+        if isinstance(self.type, msg_types.ThinkingMsg):
+            return "✓", theme.MUTED
+        if self.is_tool_message():
+            return self.status_glyph()
+        return "✓", theme.MUTED
+
+    def done_label(self, collapsed_text: str) -> str:
+        """Label shown beside the done marker for a finalized collapsed message."""
+        if isinstance(self.type, msg_types.ThinkingMsg):
+            return "thoughts"
+        return collapsed_text
     
     def _format_line_wrap(self) -> str:
         """Format the message text with smart word wrapping and padding.
