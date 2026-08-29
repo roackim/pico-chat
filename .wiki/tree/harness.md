@@ -52,7 +52,7 @@ Transport is **raw httpx** (no `openai` SDK): one owned `httpx.AsyncClient` per 
 - `stream_chat(messages)` / `create_completion(...)` — yields `Chunk` objects from the LLM stream
 - `list_models()` — discovers models exposed by an endpoint via `GET /models`
 - `set_model(model_name)` — changes the selected model without replacing the endpoint
-- `_resolve_local_hostname(url)` — rewrites `.local` (mDNS) hostnames to a routable IP via `getent` (cached per-host for process lifetime); `invalidate_local_hostname()` drops a stale entry on connect failure so pico retries once against a fresh address. See [notes/local-hostname-resolution.md](../notes/local-hostname-resolution.md).
+- `_resolve_local_hostname(url)` — rewrites `.local` (mDNS) hostnames to a routable IP via `getent` (cached per-host for process lifetime); `invalidate_local_hostname()` drops a stale entry on connect failure so pico retries once against a fresh address. `_resolve_local_hostname_async`/`_resolve_local_hostname_await` are non-blocking variants used by `LLMServer.__init__` and `diagnose_connection()` so an offline `.local` host never blocks the event loop. See [notes/local-hostname-resolution.md](../notes/local-hostname-resolution.md).
 
 ### `llm_server_config.py`
 `LLMServerConfig` — dataclass for endpoint metadata: name, type, URL, credentials, and legacy/default model selection. `ModelInfo` and `LLMTarget` represent discovered model metadata and an endpoint/model pair.

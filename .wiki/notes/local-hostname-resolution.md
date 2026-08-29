@@ -37,9 +37,16 @@ as a fallback. A bare `getent` subprocess can hang on mDNS when the process
 environment differs from the shell (e.g. under `pixi run` / WSL), which made the
 request fall back to the slow `.local` name; in-process resolution avoids that.
 
-- `_resolve_local_hostname(url)` — performs the rewrite, called from
-  `LLMServer.__init__` so it applies to the single httpx client (built off
-  `config.base_url`).
+- `_resolve_local_hostname(url)` — performs the rewrite synchronously (blocking).
+  Used by tests and as the underlying blocking resolver.
+- `_resolve_local_hostname_async(url)` — non-blocking variant used by
+  `LLMServer.__init__`: returns the resolved URL if already cached, otherwise
+  kicks off a background resolution and returns the original URL unchanged, so
+  construction never blocks on mDNS.
+- `_resolve_local_hostname_await(url)` — awaitable variant that runs the
+  blocking resolver in a thread executor (`asyncio.to_thread`), used by
+  `diagnose_connection()`'s retry path so the event loop stays responsive even
+  when the mDNS lookup stalls on an offline host.
 - Non-`.local` hosts and any resolver failure return the original URL unchanged.
 
 ## Pre-warming
@@ -60,6 +67,12 @@ True; the status bar shows an animated spinner next to the model name
 context window) in the background at tab/conversation open, so the status bar
 shows the real model (e.g. for llama.cpp) instead of `?`. `refresh_status_bar`
 falls back to `server._cached_model_name` once populated.
+
+It also drives the status-bar connection color. It first runs a real
+`diagnose_connection()` probe so the color reflects true reachability — green
+only when the server actually responds, red when it's unreachable, orange while
+the probe is in flight. (`get_model_name()` swallows network errors and falls
+back to the configured model, so it can't be used to judge reachability.)
 
 ## Caching + invalidation
 

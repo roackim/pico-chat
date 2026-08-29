@@ -1218,7 +1218,9 @@ class chatTUI(ChatActionHandlers):
         # input component's own handle_input(TickEvent) path.
         if isinstance(event, TickEvent):
             from pico_chat.harness.llm_server import is_local_resolution_pending
-            server = getattr(self._initial_agent, "server", None)
+            runtime = self._active_runtime()
+            agent = runtime.agent if runtime and getattr(runtime, "agent", None) else self._initial_agent
+            server = getattr(agent, "server", None)
             if server is not None and (
                 is_local_resolution_pending(server._original_base_url)
                 or getattr(server, "_model_name_pending", False)

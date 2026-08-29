@@ -883,15 +883,21 @@ class ChatHistoryPanel(TextComponent):
             
             # Handle action keys when a message is focused
             if self.focused_message_index is not None:
-                focused_msg = self.messages[self.focused_message_index]
-                
-                action = next(
-                    (candidate for candidate in focused_msg.get_active_actions() if candidate.key == event),
-                    None,
-                )
-                if action is not None:
-                    self._dispatch_action(focused_msg, action)
-                    return True
+                # Guard against a stale index (e.g. messages cleared or
+                # truncated while focus was held) so we never index out of
+                # range.
+                if self.focused_message_index >= len(self.messages):
+                    self.focused_message_index = None
+                else:
+                    focused_msg = self.messages[self.focused_message_index]
+
+                    action = next(
+                        (candidate for candidate in focused_msg.get_active_actions() if candidate.key == event),
+                        None,
+                    )
+                    if action is not None:
+                        self._dispatch_action(focused_msg, action)
+                        return True
         
         # Handle mouse input
         if isinstance(event, MouseEvent):
@@ -1094,8 +1100,15 @@ class ChatHistoryPanel(TextComponent):
         
         # Keep only last max_messages
         if len(self.messages) > self.max_messages:
+            dropped = len(self.messages) - self.max_messages
             self.messages = self.messages[-self.max_messages:]
             self._message_height_cache.clear()
+            # Adjust the focused-message index so it stays valid after the
+            # oldest messages are dropped from the front.
+            if self.focused_message_index is not None:
+                self.focused_message_index = max(0, self.focused_message_index - dropped)
+                if self.focused_message_index >= len(self.messages):
+                    self.focused_message_index = None
 
         self._line_map_cache = None
         self._line_map_cache_key = None
@@ -1218,6 +1231,9 @@ class ChatHistoryPanel(TextComponent):
         self.scroll_offset = 0
         self.auto_scroll = True
         self.anchored_start_y = None
+        self.focused_message_index = None
+        self._selection = None
+        self._selection_dragging = False
         self._request_repaint()
 
     def restore_messages(self, messages: list) -> None:

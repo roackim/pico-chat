@@ -344,6 +344,48 @@ def prewarm_local_resolution(url: str) -> None:
     threading.Thread(target=_resolve, daemon=True).start()
 
 
+def _resolve_local_hostname_async(url: str) -> str:
+    """Resolve a ``.local`` hostname without blocking the event loop.
+
+    Returns the resolved URL if the address is already cached, otherwise kicks
+    off a background resolution (via ``prewarm_local_resolution``) and returns
+    the original URL unchanged. The caller can re-resolve later once the cache
+    is populated. Never performs blocking I/O on the calling thread.
+    """
+    hostname = urlsplit(url).hostname
+    if not hostname or not hostname.endswith(".local"):
+        return url
+    ip = _cached_ip_for(hostname)
+    if ip:
+        parts = urlsplit(url)
+        netloc = f"{ip}:{parts.port}" if parts.port else ip
+        return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+    # Not cached yet — resolve in the background and keep the original URL for
+    # now so construction never blocks on mDNS.
+    prewarm_local_resolution(url)
+    return url
+
+
+async def _resolve_local_hostname_await(url: str) -> str:
+    """Resolve a ``.local`` hostname to a routable URL, off the event loop.
+
+    Runs the blocking resolver in a thread executor so the event loop stays
+    responsive even when the mDNS lookup stalls on an offline host. Returns the
+    original URL unchanged if the host cannot be resolved.
+    """
+    hostname = urlsplit(url).hostname
+    if not hostname or not hostname.endswith(".local"):
+        return url
+    ip = _cached_ip_for(hostname)
+    if not ip:
+        ip = await asyncio.to_thread(_resolve_once, hostname)
+    if not ip:
+        return url
+    parts = urlsplit(url)
+    netloc = f"{ip}:{parts.port}" if parts.port else ip
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
 def is_local_resolution_pending(url: str) -> bool:
     """True if ``.local`` resolution for ``url`` is currently in progress."""
     hostname = urlsplit(url).hostname
@@ -361,10 +403,13 @@ class LLMServer(ABC):
         self._original_base_url = config.base_url
         # If this is a .local host, we rewrite base_url to a routable IP;
         # keep the original hostname so a stale cache can be invalidated and
-        # re-resolved on connection failure.
+        # re-resolved on connection failure. Resolution can block for seconds
+        # on an offline mDNS host, so it must never run on the event loop.
+        # We kick it off in a background thread and fall back to the original
+        # URL until the resolved address is ready.
         self._hostname = urlsplit(config.base_url).hostname
         if self._hostname and self._hostname.endswith(".local"):
-            self.config.base_url = _resolve_local_hostname(config.base_url)
+            self.config.base_url = _resolve_local_hostname_async(config.base_url)
         self.client = _new_http_client(self.config)
         logger.info(
             "LLM client initialized: original=%s resolved=%s trust_env=%s",
@@ -413,19 +458,23 @@ class LLMServer(ABC):
             # resolution failed synchronously in __init__), re-resolve and
             # rebuild the client so the model query hits the routable IP.
             if self._hostname and self._hostname.endswith(".local"):
-                new_url = _resolve_local_hostname(self._original_base_url)
+                new_url = _resolve_local_hostname_async(self._original_base_url)
                 if new_url != self._original_base_url and new_url != self.config.base_url:
                     self.config.base_url = new_url
                     self.client = _new_http_client(self.config)
-            for _ in range(3):
-                try:
-                    await self.get_model_name()
-                    self._connection_state = "ok"
-                    break
-                except Exception as e:
-                    logger.warning("prewarm model name attempt failed: %s", e)
-                    await asyncio.sleep(0.5)
-            else:
+            # Probe the connection first so the status bar reflects the true
+            # reachability: green only when the server actually responds.
+            # ``get_model_name`` swallows network errors and falls back to the
+            # configured model, so it can't be used to judge reachability.
+            diagnosis = await self.diagnose_connection()
+            if not diagnosis.ok:
+                self._connection_state = "error"
+                return
+            try:
+                await self.get_model_name()
+                self._connection_state = "ok"
+            except Exception as e:
+                logger.warning("prewarm model name failed: %s", e)
                 self._connection_state = "error"
             try:
                 await self.get_context_window()
@@ -559,7 +608,7 @@ class LLMServer(ABC):
         # .local host: drop stale cache and re-resolve once.
         if self._hostname and self._hostname.endswith(".local"):
             invalidate_local_hostname(self._original_base_url)
-            new_url = _resolve_local_hostname(self._original_base_url)
+            new_url = await _resolve_local_hostname_await(self._original_base_url)
             if new_url != self._original_base_url:
                 self.config.base_url = new_url
                 self.client = _new_http_client(self.config)
