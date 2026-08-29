@@ -751,11 +751,14 @@ class Harness:
             # 3. Handle Tool Calls
             if delta.tool_calls:
                 for tc in delta.tool_calls:
-                    # Key chunks by tool-call id when available; some providers
-                    # send distinct calls that reuse the same index, which would
-                    # otherwise merge their names/arguments. Fall back to index
-                    # only when id is absent.
-                    key = tc.id or tc.index
+                    # Key chunks by the integer tool-call index. Streaming
+                    # deltas for one call share the index, so name/arguments
+                    # accumulate under the same key. We deliberately do NOT key
+                    # by id: some providers only emit the id on the first delta,
+                    # which would split one logical call into separate
+                    # int-keyed and str-keyed slots (crashing sorted() and
+                    # dropping args).
+                    key = tc.index
                     if key not in tool_calls_buffer:
                         tool_calls_buffer[key] = {
                             "index": tc.index,
@@ -763,10 +766,8 @@ class Harness:
                             "type": "function",
                             "function": {"name": "", "arguments": ""}
                         }
-                    else:
-                        # Keep the first seen index for stable output ordering.
-                        tool_calls_buffer[key]["index"] = tool_calls_buffer[key].get("index", tc.index)
                     if tc.id:
+                        # Keep the (last seen) id for the final tool_call dict.
                         tool_calls_buffer[key]["id"] = tc.id
 
                     if getattr(tc.function, "name", None):
