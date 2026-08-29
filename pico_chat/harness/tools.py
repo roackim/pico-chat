@@ -319,6 +319,9 @@ class ShellTool:
                 confirmation_callback=confirmation_callback
             )
         
+        # Handle to the currently-running command (for stop/cancellation).
+        self._active_proc: Optional["asyncio.subprocess.Process"] = None
+        
         # Check bwrap availability if containerization is enabled
         self._bwrap_available = None
         if self.permissions.run.use_container:
@@ -481,6 +484,105 @@ class ShellTool:
         except Exception as e:
             raise ToolError(f"Command execution failed: {e}")
 
+    async def run_async(self, command: str, timeout: int = 30) -> str:
+        """Cancellable async version of :meth:`run`.
+
+        Runs the command as a subprocess whose handle is stored on
+        ``self._active_proc`` so a "stop" request can terminate it
+        mid-flight. Returns the same formatted output as :meth:`run`.
+        """
+        import asyncio
+
+        allowed, message = self.security_checker.check_chain(command)
+        if not allowed:
+            raise ToolError(message)
+
+        if self.permissions.run.use_container:
+            if self._bwrap_available is False:
+                raise ToolError(
+                    "Containerization enabled but bubblewrap (bwrap) is not available. "
+                    "Install bubblewrap or disable containerization in permissions."
+                )
+            exec_args = self._build_bwrap_command(command)
+            shell = False
+            cwd = None
+        else:
+            exec_args = command
+            shell = True
+            cwd = self.workspace
+
+        try:
+            if shell:
+                proc = await asyncio.create_subprocess_shell(
+                    exec_args,
+                    shell=True,
+                    cwd=cwd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    start_new_session=True,  # own process group so stop kills children
+                )
+            else:
+                proc = await asyncio.create_subprocess_exec(
+                    *exec_args,
+                    cwd=cwd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    start_new_session=True,
+                )
+            self._active_proc = proc
+
+            try:
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+            except asyncio.TimeoutError:
+                self._kill_process_group(proc)
+                await proc.communicate()
+                raise ToolError(f"Command timed out after {timeout}s")
+            finally:
+                if self._active_proc is proc:
+                    self._active_proc = None
+
+            stdout = (stdout or b"").decode("utf-8", errors="replace").rstrip()
+            stderr = (stderr or b"").decode("utf-8", errors="replace").rstrip()
+
+            output_parts = []
+            if stdout:
+                output_parts.append(f"[stdout]\n{stdout}")
+            if stderr:
+                output_parts.append(f"[stderr]\n{stderr}")
+            output_parts.append(f"[exit:{proc.returncode}]")
+            return '\n'.join(output_parts) if output_parts else "[exit:0]"
+        except ToolError:
+            raise
+        except Exception as e:
+            raise ToolError(f"Command execution failed: {e}")
+
+    def cancel_active(self) -> bool:
+        """Terminate the currently-running command, if any.
+
+        Kills the whole process group so child processes (e.g. ``sleep``)
+        are terminated too. Returns True if a process was terminated.
+        """
+        if self._active_proc is not None and self._active_proc.returncode is None:
+            try:
+                self._kill_process_group(self._active_proc)
+                return True
+            except Exception:
+                return False
+        return False
+
+    @staticmethod
+    def _kill_process_group(proc) -> None:
+        """Kill a subprocess and its entire process group (best effort)."""
+        import os
+        import signal
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
 
 class MinimalToolset:
     """
@@ -552,6 +654,14 @@ class MinimalToolset:
     def run(self, command: str, timeout: int = 30) -> str:
         """Execute shell command"""
         return self.shell_tool.run(command, timeout)
+
+    async def run_async(self, command: str, timeout: int = 30) -> str:
+        """Execute shell command asynchronously (cancellable)."""
+        return await self.shell_tool.run_async(command, timeout)
+
+    def cancel_active_run(self) -> bool:
+        """Terminate the currently-running shell command, if any."""
+        return self.shell_tool.cancel_active()
 
 
 class SearchTools:

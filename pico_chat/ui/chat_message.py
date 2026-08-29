@@ -153,6 +153,11 @@ class Message:
                     MsgAction.DELETE, MsgAction.RETRY, MsgAction.RESUME
                 )]
 
+        elif self.is_tool_message():
+            # The STOP action only applies while the command is still running.
+            if self.finalized:
+                actions = [a for a in actions if a != MsgAction.STOP]
+
         return actions
     
     def update_actions(self):

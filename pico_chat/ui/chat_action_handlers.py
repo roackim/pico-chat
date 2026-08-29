@@ -290,10 +290,24 @@ class ChatActionHandlers:
             logger.error("Message not found in history")
     
     def handle_stop_action(self, message):
-        """Handle stop action for ongoing generation."""
+        """Handle stop action for ongoing generation, or a running command."""
         logger = logging.getLogger("tui")
         logger.info("Stop action triggered")
-        
+
+        from pico_chat.ui.tui.msg_types import ToolCallMsg, ToolDraftMsg
+        # For a running tool message, stop just that command (not the whole
+        # generation) so the model can continue with other work.
+        if isinstance(message.type, (ToolCallMsg, ToolDraftMsg)) and not message.finalized:
+            stopped = self.agent.stop_tool() if hasattr(self.agent, "stop_tool") else False
+            if stopped:
+                message.tool_status = "cancelled"
+                message.tool_output = "[stopped by user]"
+                message.finalize()
+                message.rebuild_tool_display()
+                logger.info("Running command stopped by user")
+                return
+            logger.info("No running command to stop")
+
         if self.stop_generation():
             logger.info("Generation stopped by user")
             # The cancellation will be handled in _process_generation

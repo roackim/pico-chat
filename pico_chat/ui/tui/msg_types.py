@@ -86,7 +86,7 @@ class ToolCallMsg(MsgType):
     title = "tool"
     frame_color = "WARNING"
     content_color = None
-    actions = [MsgAction.OUTPUT, MsgAction.COPY, MsgAction.DELETE]
+    actions = [MsgAction.OUTPUT, MsgAction.COPY, MsgAction.DELETE, MsgAction.STOP]
     gutter = "⚙"
 
 

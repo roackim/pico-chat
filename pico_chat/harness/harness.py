@@ -15,7 +15,7 @@ from pico_chat.harness import chunks
 from pico_chat.harness.llm_server import create_server, LLMServer
 from pico_chat.harness.llm_server_config import get_server_config
 from pico_chat.harness.permission_gate import PermissionGate
-from pico_chat.harness.thinking_parser import ThinkingTagParser, MetricsState
+from pico_chat.harness.thinking_parser import ThinkingTagParser, MetricsState, THINKING_TAGS
 from pico_chat.harness.usage import TokenUsage, usage_from_response
 
 # Import the minimal toolset
@@ -286,6 +286,24 @@ class Harness:
     def abort_subagents(self):
         """Called by the UI when the user wants to abort waiting background subagents."""
         self._abort_subagents_event.set()
+
+    def stop_tool(self) -> bool:
+        """Terminate the currently-running shell command (run tool), if any.
+
+        Returns True if a running command was stopped.
+        """
+        run_tool = self.tools_map.get("run_command") or self.tools_map.get("run")
+        if run_tool is not None:
+            cancel = getattr(run_tool, "cancel_active_run", None)
+            if callable(cancel):
+                return cancel()
+            # Fallback for RunTool instances exposing execute_async's toolset.
+            toolset = getattr(run_tool, "toolset", None)
+            if toolset is not None:
+                cancel = getattr(toolset, "cancel_active_run", None)
+                if callable(cancel):
+                    return cancel()
+        return False
 
     async def _wait_for_user_input(self, prompt: str) -> str:
         """Wait for the user to provide text via the UI."""
@@ -913,11 +931,16 @@ class Harness:
                 
                 func = self.tools_map[lookup_name]
                 
-                # Execute normally (sync or async)
+                # Execute normally (sync or async). Prefer an async entry point
+                # so shell commands remain cancellable (stop button).
                 if inspect.iscoroutinefunction(func.execute):
                     result = await func.execute(**args)
                 else:
-                    result = func.execute(**args)
+                    execute_async = getattr(func, "execute_async", None)
+                    if execute_async is not None and inspect.iscoroutinefunction(execute_async):
+                        result = await execute_async(**args)
+                    else:
+                        result = func.execute(**args)
                 
                 if not isinstance(result, str):
                     result = str(result)

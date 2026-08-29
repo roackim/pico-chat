@@ -229,6 +229,13 @@ class RunTool(ToolWrapper):
         except ToolError as e:
             return str(e)
 
+    async def execute_async(self, command: str) -> str:
+        """Cancellable async execution of a shell command."""
+        try:
+            return await self.toolset.run_async(command)
+        except ToolError as e:
+            return str(e)
+
 
 import asyncio as _asyncio
 
