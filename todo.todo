@@ -1,9 +1,9 @@
 
 
 BUGS:
-[ ] Conversation import
-    [ ] import is bugged and does not import properly
-    [ ] import command should fuzzy suggest autocomplete the name from ./
+[x] Conversation import
+    [x] import is bugged and does not import properly
+    [x] import command should fuzzy suggest autocomplete the name from ./
 
 [ ] Cant edit a message properly now (used editing in place, inside box, but now no more boxes) -> disable message editing for now ?
 [ ] Lets add a mode with explicit role prefix for each message, like "pico: " or "user: " (optional, configurable)
@@ -22,10 +22,16 @@ FEATURES IDEAS:
 
 [ ] Improve messages UI
 [ ] Improve running commands UI
-    [ ] do not show the OK tick if NOT FINISHED ! 
-    [ ] add a loading spinner
-    [ ] make the output be a popup terminal like thing, with scrollback, and a way to close it
-    [ ] add a "stop" button to stop the command
+    [x] do not show the OK tick if NOT FINISHED ! 
+    [x] add a loading spinner
+    [x] make the output be a popup terminal like thing, with scrollback, and a way to close it
+    [x] add a "stop" button to stop the command
 
-[ ] re-add file fuzzy search outside git repos ?
-[ ] remove the warning outside git repos ? (we removed the tree in systemprompt)
+[x] re-add file fuzzy search outside git repos ?
+[x] remove the warning outside git repos ? (we removed the tree in systemprompt)
+[x] when changing permission role: status bar not updated
+
+
+BUGS:
+[ ] when deleting permission role in /permission, not updated till input
+[ ] role / permission is unclear

@@ -89,6 +89,9 @@ class Config:
 
         # Context building settings
         self.context_format: Literal["tree", "flat"] = "tree"  # Tree format saves tokens by avoiding path repetition
+        self.context_max_files: int = 500   # Max entries listed by the @ file picker / context tree
+        self.context_max_depth: int = 4     # Max directory depth walked when listing files
+        self.context_ignore_gitignore: bool = False  # If True, list gitignored files too
 
         # Subagent settings
         self.subagent_max_depth: int = 1        # Maximum subagent recursion depth
@@ -160,6 +163,8 @@ class Config:
                 settings = data["settings"]
                 for key in ["max_file_size", "max_search_results",
                            "command_timeout", "target_fps", "context_format",
+                           "context_max_files", "context_max_depth",
+                           "context_ignore_gitignore",
                            "active_model",
                            "debug_log_enabled",
                            "preserve_reasoning_traces",

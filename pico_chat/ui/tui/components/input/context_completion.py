@@ -57,6 +57,30 @@ class ContextCompletion:
         
         return text_after_trigger
     
+    def _resolve_items(self, current_word: str) -> List[str]:
+        """Resolve the file list for the current word.
+
+        If ``current_word`` ends with ``/`` and points at an existing
+        directory, list that directory's contents (relative to the workspace
+        root) so the user can build a path folder-by-folder. Otherwise return
+        the top-level listing.
+        """
+        items = self.get_items()
+        if not current_word:
+            return items
+        # A trailing slash means the user is drilling into a directory.
+        if current_word.endswith('/'):
+            prefix = current_word
+            # Match items that live under this directory prefix.
+            children = [it for it in items if it.startswith(prefix) and it != prefix]
+            if children:
+                # Strip the prefix and keep only immediate children (no
+                # further "/" beyond a trailing dir slash), so we show one
+                # level at a time.
+                stripped = [it[len(prefix):] for it in children]
+                return [it for it in stripped if '/' not in it.rstrip('/')]
+        return items
+    
     def update(self, text: str, cursor_pos: int):
         """Auto-update menu based on current text and cursor position."""
         # Get current word at cursor
@@ -81,8 +105,8 @@ class ContextCompletion:
             self.hide()
             return
         
-        # Get available items
-        items = self.get_items()
+        # Get available items (resolved for subdirectory drilling)
+        items = self._resolve_items(current_word)
         if not items:
             self.hide()
             return
@@ -92,8 +116,16 @@ class ContextCompletion:
             self.hide()
             return
         
+        # When drilling into a directory (current_word ends with "/"), the fuzzy
+        # search term is the text after the last slash — which is empty, so
+        # all immediate children are shown. Otherwise use the whole word.
+        if current_word.endswith('/'):
+            search_term = ""
+        else:
+            search_term = current_word
+        
         # Update menu with fuzzy filtering
-        self.menu.update(items, current_word, display_prefix=self.trigger)
+        self.menu.update(items, search_term, display_prefix=self.trigger)
         self.is_active = self.menu.is_visible
     
     def accept_selection(self, text: str, cursor_pos: int) -> Optional[tuple[str, int]]:
@@ -106,9 +138,13 @@ class ContextCompletion:
         if trigger_pos is None:
             return None
         
+        # Preserve any directory prefix already typed (e.g. "./src/").
+        current_word = self.get_current_context_word(text, cursor_pos) or ""
+        prefix = current_word if current_word.endswith('/') else ""
+        
         # Replace from trigger to cursor with selected item
-        new_text = text[:trigger_pos] + self.trigger + selected + text[cursor_pos:]
-        new_cursor_pos = trigger_pos + self.trigger_len + len(selected)
+        new_text = text[:trigger_pos] + self.trigger + prefix + selected + text[cursor_pos:]
+        new_cursor_pos = trigger_pos + self.trigger_len + len(prefix) + len(selected)
         
         return (new_text, new_cursor_pos)
     

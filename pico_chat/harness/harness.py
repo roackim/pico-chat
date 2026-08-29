@@ -9,7 +9,7 @@ from typing import AsyncGenerator, Any, Dict, List, Optional
 
 from pico_chat.harness.llm_status import AgentState
 from pico_chat.harness.debug import get_debug_stream
-from pico_chat.harness.context_builder import build_harness_context, is_git_repo
+from pico_chat.harness.context_builder import build_harness_context
 from pico_chat.harness.system_prompt import get_system_message
 from pico_chat.harness import chunks
 from pico_chat.harness.llm_server import create_server, LLMServer
@@ -77,13 +77,11 @@ class Harness:
         
         # Build initial project context
         self.startup_warnings: list[str] = []
-        if not is_git_repo(self.workspace):
-            self.startup_warnings.append(
-                f"Not a git repository: '{self.workspace}'\n"
-                "File tree context is disabled. Initialize a git repo to enable it."
-            )
         self.project_context = build_harness_context(self.workspace)
         self.debug_stream.log("CONTEXT", "Project context built")
+        # Cache for the @ file picker listing (invalidated on workspace change).
+        self._file_list_cache: list[str] = []
+        self._file_list_cache_key: tuple = ()
         
         # Calculate schemas once and log
         self.tools_map = {
@@ -175,18 +173,14 @@ class Harness:
         self.workspace = str(resolved)
         os.chdir(self.workspace)
 
-        # Rebuild project context
+        # Rebuild project context and invalidate the @ file picker cache.
         self.project_context = build_harness_context(self.workspace)
+        self._file_list_cache = []
+        self._file_list_cache_key = ()
         self.debug_stream.log("WORKSPACE", f"Workspace changed to: {self.workspace}")
 
-        # Recheck git-repo warning
-        warnings: list[str] = []
-        if not is_git_repo(self.workspace):
-            warnings.append(
-                f"Not a git repository: '{self.workspace}'\n"
-                "File tree context is disabled. Initialize a git repo to enable it."
-            )
-        return warnings
+        # No git-repo warning: the file tree is built regardless of git status.
+        return []
 
     def switch_server(self, new_config):
         """Switch to a different LLM server at runtime.
@@ -376,13 +370,29 @@ class Harness:
         return None
 
     def list_files_and_folders(self) -> List[str]:
-        """Returns a list of all files and folders in the workspace, respecting .gitignore."""
-        # Always use flat format for file/folder listing (needed for @file completion)
-        context = build_harness_context(self.workspace, format="flat")
-        # build_harness_context returns a string with "Project Root: ...", "Files ...", and then the paths
-        lines = context.split('\n')
-        # Skip the first two lines (Project Root and Files header)
-        return [line.strip() for line in lines[2:] if line.strip()]
+        """Returns a bounded list of files/folders for the @ file picker.
+
+        Uses a depth/max-files-bounded walk so it stays responsive on huge
+        trees (e.g. ``$HOME``). The result is cached per-workspace so typing
+        ``./`` doesn't re-walk the tree on every keystroke.
+        """
+        from pico_chat.harness.context_builder import list_files_bounded
+        from pico_chat import pico_cfg
+
+        cache_key = (self.workspace, pico_cfg.config.context_max_files,
+                     pico_cfg.config.context_max_depth,
+                     pico_cfg.config.context_ignore_gitignore)
+        if getattr(self, "_file_list_cache_key", None) == cache_key:
+            return self._file_list_cache
+        entries = list_files_bounded(
+            self.workspace,
+            max_files=pico_cfg.config.context_max_files,
+            max_depth=pico_cfg.config.context_max_depth,
+            ignore_gitignore=pico_cfg.config.context_ignore_gitignore,
+        )
+        self._file_list_cache = entries
+        self._file_list_cache_key = cache_key
+        return entries
 
     def estimate_context_usage(self) -> tuple[int, int, float]:
         """

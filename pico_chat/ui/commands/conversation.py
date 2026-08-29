@@ -132,6 +132,8 @@ class ConversationImportCommand(Command):
             ui.agent.history = history
             ui.chat_history_panel.clear()
             self._rebuild_ui_from_history(ui, history)
+            if hasattr(ui, "refresh_status_bar"):
+                ui.refresh_status_bar()
             if role_warning:
                 ui.chat_history_panel.add_message(
                     role_warning, msg_type=SysMsgWarning(), title="conversation")

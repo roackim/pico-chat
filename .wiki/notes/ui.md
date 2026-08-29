@@ -56,6 +56,10 @@ context estimate after a response supplies authoritative usage data.
 The `context` field is colorized by how full the context window is:
 green below 33%, orange/amber below 66%, and red at or above 66%.
 
+The `role` field reflects the active conversation role and is refreshed
+whenever the role changes (via `/roles use`, the `/permissions` role editor,
+or a conversation import that applies a saved role).
+
 ## Conversation import/export
 
 `/conversation export <file>` writes `{"role": ..., "history": [...]}`.

@@ -262,6 +262,8 @@ class PermissionsCommand(Command):
                 previous_name = getattr(getattr(agent, "role", None), "name", "default")
                 agent.set_role(updated)
                 _show_role_change(ui.chat_history_panel, previous_name, updated.name)
+            if hasattr(ui, "refresh_status_bar"):
+                ui.refresh_status_bar()
             if updated.name not in role_options:
                 role_options.append(updated.name)
                 field("available_roles").options = role_options
@@ -276,6 +278,8 @@ class PermissionsCommand(Command):
                     previous_name = getattr(getattr(agent, "role", None), "name", "default")
                     agent.set_role(selected)
                     _show_role_change(ui.chat_history_panel, previous_name, selected.name)
+                if hasattr(ui, "refresh_status_bar"):
+                    ui.refresh_status_bar()
                 sync_fields(selected)
             except (KeyError, OSError, TypeError) as exc:
                 ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
@@ -340,6 +344,8 @@ class PermissionsCommand(Command):
                         previous_name = getattr(getattr(agent, "role", None), "name", "default")
                         agent.set_role(replacement)
                         _show_role_change(ui.chat_history_panel, previous_name, replacement.name)
+                    if hasattr(ui, "refresh_status_bar"):
+                        ui.refresh_status_bar()
                 role_options.remove(name)
                 field("available_roles").options = role_options
                 field("available_roles").set_value(role_options.index(replacement.name))

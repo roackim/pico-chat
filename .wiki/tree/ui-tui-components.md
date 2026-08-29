@@ -232,7 +232,7 @@ Handles canonical keyboard, mouse, and paste events.
 |--------|----------|-------|
 | `command_completion.py` | `/` at start of input | Command name fuzzy search |
 | `subcommand_completion.py` | Second word after a `/` command | Subcommand suggestions |
-| `context_completion.py` | Context-aware (e.g., after `./`) | Configurable trigger prefix (default: `./`) |
+| `context_completion.py` | Context-aware (e.g., after `./`) | Configurable trigger prefix (default: `./`); typing `./dir/` drills into the directory and lists its immediate children; Tab on a directory appends `/` (not a space) so paths can be built folder-by-folder |
 | `argument_completion.py` | After any command with `Param` schema | Generic fuzzy completer; reads `Command.params`, resolves argument index, filters completions via menu |
 | `path_completion.py` | After `/` mid-word or explicit file path input | — |
 | `server_completion.py` | After `/server` subcommand | Deprecated — superseded by `argument_completion.py` with `Param` schema |

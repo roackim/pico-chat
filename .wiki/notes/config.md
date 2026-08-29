@@ -55,6 +55,9 @@ model-aware context cache. Existing `[servers]` configs remain supported;
 - `config.preserve_reasoning_traces` — preserve `<think>` tags and `reasoning_content` in history for multi-turn reasoning
 - `config.max_file_size`, `config.max_search_results`, `config.command_timeout`
 - `config.context_format` — `"tree"` or `"flat"` for context injection
+- `config.context_max_files` — max entries listed by the `@` file picker / context tree (default 500)
+- `config.context_max_depth` — max directory depth walked when listing files (default 4)
+- `config.context_ignore_gitignore` — if `True`, list gitignored files too (default `False`)
 - `config.target_fps` — compositor render rate
 - `config.subagent_max_depth`, `config.subagent_timeout`, `config.subagent_max_context`, `config.subagent_server` — subagent limits (see [subagents.md](./subagents.md))
 

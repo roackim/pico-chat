@@ -129,7 +129,8 @@ See [notes/security.md](../notes/security.md).
 
 ### `context_builder.py`
 `build_harness_context()` — constructs the context injected alongside the system prompt.
-- Detects git repo root
+- Builds the file tree regardless of git status (outside a git repo there is no `.gitignore`, so the whole directory is listed — this keeps the `@` file picker working everywhere)
+- `list_files_bounded()` — breadth-first, depth/max-files-bounded walk used by the `@` file picker so it stays responsive on huge trees (e.g. `$HOME`); respects `.gitignore` unless `ignore_gitignore` is set
 - Builds file tree (with guardrails to avoid huge trees)
 - Injects current date and time
 - Returns structured context string
