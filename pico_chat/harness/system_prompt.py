@@ -25,11 +25,11 @@ Instructions:
 - Never expose secrets or credentials in output.
 """
 
-MODEL_CONTEXT_PROMPT = """
-Model Context:
-Model used: {model_name}
-Context window: {context_window} max tokens
-"""
+# MODEL_CONTEXT_PROMPT = """
+# Model Context:
+# Model used: {model_name}
+# Context window: {context_window} max tokens
+# """
 
 
 import datetime
@@ -81,11 +81,11 @@ def format_system_prompt(
     prompt = BASE_PROMPT
     
     # Add model context if available
-    if model_name or context_window:
-        prompt += MODEL_CONTEXT_PROMPT.format(
-            model_name=model_name or "Unknown",
-            context_window=context_window or "Unknown"
-        )
+    # if model_name or context_window:
+        # prompt += MODEL_CONTEXT_PROMPT.format(
+            # model_name=model_name or "Unknown",
+            # context_window=context_window or "Unknown"
+        # )
 
     if role_name or role_prompt:
         prompt += ROLE_PROMPT_TEMPLATE.format(
