@@ -662,6 +662,10 @@ class Harness:
         metrics = MetricsState()
         parser = ThinkingTagParser()
         tool_calls_buffer: Dict[int, Dict[str, Any]] = {}
+        # Maps a tool-call index -> the active buffer key (a tool-call id, or
+        # the index itself when no id was ever seen) so id-less argument deltas
+        # continue the right slot. Reset each stream.
+        self._active_tool_slot_by_index: Dict[int, Any] = {}
         # Keep the previous provider-reported usage until a new one arrives.
         # Resetting here made the status bar flicker between the authoritative
         # count and the (lower) heuristic estimate during generation.
@@ -751,24 +755,39 @@ class Harness:
             # 3. Handle Tool Calls
             if delta.tool_calls:
                 for tc in delta.tool_calls:
-                    # Key chunks by the integer tool-call index. Streaming
-                    # deltas for one call share the index, so name/arguments
-                    # accumulate under the same key. We deliberately do NOT key
-                    # by id: some providers only emit the id on the first delta,
-                    # which would split one logical call into separate
-                    # int-keyed and str-keyed slots (crashing sorted() and
-                    # dropping args).
-                    key = tc.index
-                    if key not in tool_calls_buffer:
-                        tool_calls_buffer[key] = {
-                            "index": tc.index,
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {"name": "", "arguments": ""}
-                        }
+                    # Robust keying for streaming providers. Deltas for ONE call
+                    # carry the id only on the first chunk and id-less
+                    # argument fragments afterwards; but the model may also
+                    # emit SEVERAL distinct calls that share the same index.
+                    # So: when an id is present, key by it (start/continue a
+                    # dedicated slot); when absent, continue the slot currently
+                    # active for this index.
                     if tc.id:
-                        # Keep the (last seen) id for the final tool_call dict.
-                        tool_calls_buffer[key]["id"] = tc.id
+                        key = tc.id
+                        if tc.id not in tool_calls_buffer:
+                            tool_calls_buffer[tc.id] = {
+                                "index": tc.index,
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""}
+                            }
+                        # Remember this id as the active slot for the index, so
+                        # subsequent id-less argument deltas attach correctly.
+                        self._active_tool_slot_by_index[tc.index] = tc.id
+                    else:
+                        # No id: this is a continuation of whatever call is
+                        # currently occupying this index.
+                        key = self._active_tool_slot_by_index.get(tc.index)
+                        if key is None:
+                            # Very first delta had no id either — key by index.
+                            key = tc.index
+                        if key not in tool_calls_buffer:
+                            tool_calls_buffer[key] = {
+                                "index": tc.index,
+                                "id": None,
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""}
+                            }
 
                     if getattr(tc.function, "name", None):
                         tool_calls_buffer[key]["function"]["name"] += tc.function.name
