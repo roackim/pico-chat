@@ -105,16 +105,8 @@ def test_two_tool_calls_same_index_distinct_ids_do_not_merge():
                     if getattr(tc.function, "arguments", None):
                         tool_calls_buffer[key]["function"]["arguments"] += tc.function.arguments
 
-        # Reconstruction
-        calls = []
-        for key in sorted(tool_calls_buffer.keys()):
-            tc = tool_calls_buffer[key]
-            calls.append({
-                "id": tc["id"] or f"idx_{tc.get('index',0)}",
-                "type": "function",
-                "function": {"name": tc["function"]["name"], "arguments": tc["function"]["arguments"]},
-            })
-        return calls
+        # Reconstruction via the shared production helper.
+        return Harness._assemble_tool_calls(tool_calls_buffer)
 
     calls = asyncio.run(run())
 
@@ -129,3 +121,47 @@ def test_two_tool_calls_same_index_distinct_ids_do_not_merge():
     for c in calls:
         assert c["function"]["name"] == "run"
         assert c["function"]["arguments"].startswith("{")
+
+
+def test_assemble_tool_calls_mixed_int_str_keys_do_not_crash():
+    """Buffer with int (index) and str (id) keys reconstructs type-safely."""
+    from pico_chat.harness.harness import Harness
+
+    # One call keyed by id (str), another fell back to index (int).
+    stream = [
+        _delta_with_tool_calls([
+            SimpleNamespace(index=0, id="call_a", function=SimpleNamespace(name="run", arguments="{\"command\": \"a\"}")),
+        ]),
+        _delta_with_tool_calls([
+            SimpleNamespace(index=1, id=None, function=SimpleNamespace(name="run", arguments="{\"command\": \"b\"}")),
+        ]),
+    ]
+
+    def collect():
+        tool_calls_buffer = {}
+        for chunk in stream:
+            for tc in chunk.choices[0].delta.tool_calls:
+                key = tc.id or tc.index
+                if key not in tool_calls_buffer:
+                    tool_calls_buffer[key] = {
+                        "index": tc.index, "id": tc.id,
+                        "type": "function",
+                        "function": {"name": "", "arguments": ""},
+                    }
+                else:
+                    tool_calls_buffer[key]["index"] = tool_calls_buffer[key].get("index", tc.index)
+                if tc.id:
+                    tool_calls_buffer[key]["id"] = tc.id
+                if getattr(tc.function, "name", None):
+                    tool_calls_buffer[key]["function"]["name"] += tc.function.name
+                if getattr(tc.function, "arguments", None):
+                    tool_calls_buffer[key]["function"]["arguments"] += tc.function.arguments
+        # Must not raise '<' not supported between 'int' and 'str'.
+        calls = Harness._assemble_tool_calls(tool_calls_buffer)
+        return calls, set(type(k).__name__ for k in tool_calls_buffer)
+
+    calls, key_types = collect()
+    assert len(calls) == 2
+    assert key_types == {"str", "int"}
+    assert calls[0]["function"]["arguments"] == '{"command": "a"}'
+    assert calls[1]["function"]["arguments"] == '{"command": "b"}'

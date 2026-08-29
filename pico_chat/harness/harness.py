@@ -620,6 +620,28 @@ class Harness:
         )
         return system_msg.get("content", "")
 
+    @staticmethod
+    def _assemble_tool_calls(buffer: Dict) -> list:
+        """Reconstruct tool_call dicts from the stream buffer.
+
+        Keys may be mixed int (index fallback) and str (id), so ordering sorts
+        by the buffered integer index to stay type-safe.
+        """
+        calls = []
+        for tc_data in sorted(
+            buffer.values(),
+            key=lambda t: (t.get("index", 0), str(t.get("id") or "")),
+        ):
+            calls.append({
+                "id": tc_data["id"] or f"idx_{tc_data.get('index', 0)}",
+                "type": "function",
+                "function": {
+                    "name": tc_data["function"]["name"],
+                    "arguments": tc_data["function"]["arguments"]
+                }
+            })
+        return calls
+
     async def _stream_llm_response(self, messages: List[Dict[str, Any]]) -> AsyncGenerator[chunks.Chunk, None]:
         """Stream LLM response and collect content/tool calls.
 
@@ -780,16 +802,7 @@ class Harness:
         # Reconstruct tool calls list
         tool_calls_list = []
         if tool_calls_buffer:
-            for key in sorted(tool_calls_buffer.keys()):
-                tc_data = tool_calls_buffer[key]
-                tool_calls_list.append({
-                    "id": tc_data["id"] or f"idx_{tc_data.get('index', 0)}",
-                    "type": "function",
-                    "function": {
-                        "name": tc_data["function"]["name"],
-                        "arguments": tc_data["function"]["arguments"]
-                    }
-                })
+            tool_calls_list = self._assemble_tool_calls(tool_calls_buffer)
 
         # Log results
         full_content = parser.full_content
