@@ -536,15 +536,12 @@ class InputComponent(Component):
             result = completion.accept_selection(self.buffer.text, self.buffer.cursor_pos)
             if result:
                 new_text, new_cursor_pos = result
-                # For path building, a directory selection appends "/" (not a
-                # space) so the user can keep drilling folder-by-folder. A file
-                # selection appends a space to finish the path.
+                # accept_selection already appends "/" to a directory selection
+                # (so the user can keep drilling). For a file selection, append
+                # a space to finish the path. Never append a second "/".
                 selected = completion.menu.get_selected() or ""
                 is_dir = selected.endswith('/')
-                if add_space and is_dir:
-                    self.buffer.text = new_text + "/"
-                    self.buffer.cursor_pos = len(self.buffer.text)
-                elif add_space:
+                if add_space and not is_dir:
                     self.buffer.text = new_text + " "
                     self.buffer.cursor_pos = len(self.buffer.text)
                 else:

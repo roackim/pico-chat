@@ -60,25 +60,34 @@ class ContextCompletion:
     def _resolve_items(self, current_word: str) -> List[str]:
         """Resolve the file list for the current word.
 
-        If ``current_word`` ends with ``/`` and points at an existing
-        directory, list that directory's contents (relative to the workspace
-        root) so the user can build a path folder-by-folder. Otherwise return
-        the top-level listing.
+        If ``current_word`` points into a directory (e.g. ``src/`` or a partial
+        ``src/fo``), list that directory's immediate children as full relative
+        paths (e.g. ``src/a.py``, ``src/sub/``) so the user sees the aggregated
+        path. Otherwise return the top-level listing.
         """
         items = self.get_items()
         if not current_word:
             return items
-        # A trailing slash means the user is drilling into a directory.
+        # Determine the directory prefix the user is drilling into. For
+        # "src/" it's "src/"; for a partial "src/fo" it's "src/".
         if current_word.endswith('/'):
             prefix = current_word
-            # Match items that live under this directory prefix.
-            children = [it for it in items if it.startswith(prefix) and it != prefix]
-            if children:
-                # Strip the prefix and keep only immediate children (no
-                # further "/" beyond a trailing dir slash), so we show one
-                # level at a time.
-                stripped = [it[len(prefix):] for it in children]
-                return [it for it in stripped if '/' not in it.rstrip('/')]
+        elif '/' in current_word:
+            prefix = current_word.rsplit('/', 1)[0] + '/'
+        else:
+            # No slash: still at the top level.
+            return items
+        # Match items that live under this directory prefix.
+        children = [it for it in items if it.startswith(prefix) and it != prefix]
+        if children:
+            # Keep only immediate children (no further "/" beyond a trailing
+            # dir slash), so we show one level at a time — but keep the full
+            # relative path so the user sees the aggregated path.
+            immediate = [it for it in children if '/' not in it[len(prefix):].rstrip('/')]
+            # Offer a ".." entry to navigate back up a level. It goes LAST so
+            # it is never the default highlight — the user must explicitly
+            # select it.
+            return immediate + ["../"]
         return items
     
     def update(self, text: str, cursor_pos: int):
@@ -116,16 +125,30 @@ class ContextCompletion:
             self.hide()
             return
         
-        # When drilling into a directory (current_word ends with "/"), the fuzzy
-        # search term is the text after the last slash — which is empty, so
-        # all immediate children are shown. Otherwise use the whole word.
-        if current_word.endswith('/'):
-            search_term = ""
+        # When drilling into a directory, the fuzzy search term is the text after
+        # the last slash. For "src/" that's empty (show all children); for a
+        # partial "src/fo" it's "fo" (filter within the directory).
+        if '/' in current_word:
+            search_term = current_word.rsplit('/', 1)[-1]
         else:
             search_term = current_word
         
-        # Update menu with fuzzy filtering
-        self.menu.update(items, search_term, display_prefix=self.trigger)
+        # Keep the "../" navigation entry always visible when drilling, even
+        # while the user types a partial name that would fuzzy-filter it out.
+        # It stays at the END so it is never the default highlight.
+        has_parent = "../" in items
+        if has_parent:
+            rest = [it for it in items if it != "../"]
+        else:
+            rest = items
+        
+        # Update menu with fuzzy filtering. No display prefix: the items are
+        # already relative paths (or bare names when drilling), so showing
+        # "./" would be redundant.
+        self.menu.update(rest, search_term, display_prefix="")
+        if has_parent:
+            self.menu.items = self.menu.items + ["../"]
+            self.menu.is_visible = len(self.menu.items) > 0
         self.is_active = self.menu.is_visible
     
     def accept_selection(self, text: str, cursor_pos: int) -> Optional[tuple[str, int]]:
@@ -142,10 +165,28 @@ class ContextCompletion:
         current_word = self.get_current_context_word(text, cursor_pos) or ""
         prefix = current_word if current_word.endswith('/') else ""
         
-        # Replace from trigger to cursor with selected item
-        new_text = text[:trigger_pos] + self.trigger + prefix + selected + text[cursor_pos:]
-        new_cursor_pos = trigger_pos + self.trigger_len + len(prefix) + len(selected)
-        
+        # The ".." entry navigates up one level: drop the last path segment.
+        if selected == "../":
+            if prefix:
+                stripped = prefix.rstrip('/')
+                if '/' in stripped:
+                    parent = stripped.rsplit('/', 1)[0] + '/'
+                else:
+                    # Single-level dir (e.g. "src/") — going up returns to root.
+                    parent = ""
+                new_text = text[:trigger_pos] + self.trigger + parent + text[cursor_pos:]
+                new_cursor_pos = trigger_pos + self.trigger_len + len(parent)
+            else:
+                new_text = text[:trigger_pos] + self.trigger + text[cursor_pos:]
+                new_cursor_pos = trigger_pos + self.trigger_len
+            return (new_text, new_cursor_pos)
+
+        # _resolve_items returns full relative paths (e.g. "notes/doc.md"), so
+        # we must NOT re-prepend the directory prefix — that would double it
+        # ("./notes/notes/doc.md"). Just insert the selected path as-is.
+        new_text = text[:trigger_pos] + self.trigger + selected + text[cursor_pos:]
+        new_cursor_pos = trigger_pos + self.trigger_len + len(selected)
+
         return (new_text, new_cursor_pos)
     
     def hide(self):
