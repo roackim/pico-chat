@@ -1,6 +1,6 @@
 """Chat message representation with formatting and action support."""
 
-from typing import Optional
+from typing import Any, Optional
 from pico_chat import pico_cfg
 from pico_chat.ui.tui.colors import theme, RGB
 from pico_chat.ui.tui.components import TextComponent, Box
