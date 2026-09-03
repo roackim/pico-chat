@@ -1,7 +1,7 @@
 """Reusable text editing components for forms and small UI controls."""
 
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from pico_chat import pico_cfg
 from pico_chat.ui.tui.buffer import Buffer
@@ -147,10 +147,12 @@ class LineInput(Component):
 class BoxInput(Component):
     """A reusable multiline editor rendered inside its allocated rectangle."""
 
-    def __init__(self, value: str = "", placeholder: str = "", id: Optional[str] = None):
+    def __init__(self, value: str = "", placeholder: str = "", id: Optional[str] = None,
+                 on_submit: Optional[Callable[[str], Any]] = None):
         super().__init__(id)
         self.value = value
         self.placeholder = placeholder
+        self.on_submit = on_submit
         self.cursor_row = 0
         self.cursor_col = 0
         self.focused = False
@@ -258,6 +260,20 @@ class BoxInput(Component):
             self._set_flat_cursor(position)
             handled = True
         elif key in ("\r", "\n"):
+            # Plain Enter submits (when a handler is wired) instead of inserting
+            # a newline; Alt+Enter inserts a newline.
+            if self.on_submit is not None:
+                self.on_submit(self.value)
+                handled = True
+            else:
+                line = lines[self.cursor_row]
+                lines[self.cursor_row:self.cursor_row + 1] = [line[:self.cursor_col], line[self.cursor_col:]]
+                self.value = "\n".join(lines)
+                self.cursor_row += 1
+                self.cursor_col = 0
+                handled = True
+        elif key in ("\x1b\r", "\x1b\n", "\x1b[13;3u", "\x1b[27;3;13~"):
+            # Alt+Enter -> insert a newline.
             line = lines[self.cursor_row]
             lines[self.cursor_row:self.cursor_row + 1] = [line[:self.cursor_col], line[self.cursor_col:]]
             self.value = "\n".join(lines)

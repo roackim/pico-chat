@@ -240,12 +240,6 @@ class Split(Container):
                 return "fill", 0
             if size == "auto":
                 return "content", 0
-            if size in ("*", "fill"):
-                return "fill", 0
-            if size == "content":
-                return "content", 0
-            if isinstance(size, int) and size == 0:
-                return "fill", 0
             if isinstance(size, int):
                 return "fixed", size
             if isinstance(size, float):
@@ -310,10 +304,7 @@ class Vsplit(Split):
 class Hsplit(Split):
     def layout(self):
         preferred = [child.get_preferred_height(self.width) if hasattr(child, "get_preferred_height") else 0 for child in self.children]
-        original_sizes = self.sizes
-        self.sizes = [Content() if size == 0 else size for size in original_sizes]
         actual_sizes = self._calculate_actual_sizes(self.height, preferred)
-        self.sizes = original_sizes
 
         curr_y = self.y
         for i, child in enumerate(self.children):

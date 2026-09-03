@@ -174,13 +174,10 @@ class FormSection:
         return height
 
     def _align_choices(self, width: int) -> None:
-        choice_fields = [field for field in self.fields
-                         if isinstance(field, InlineChoiceField)]
-        if not choice_fields:
-            return
-        value_column = max(len(field.label) + 4 for field in choice_fields)
-        for field in choice_fields:
-            field.value_column = value_column
+        # Choices right-align against the field edge (matching ToggleField's
+        # right-aligned checkmark), so no explicit column is needed.  Kept as a
+        # no-op hook for hosts that want a shared value column.
+        return
 
     def render(self, buffer: Buffer, x: int, y: int, width: int, height: int):
         content_width = max(1, width - self.content_indent)
@@ -347,15 +344,19 @@ class TextField(FormField):
 # ────────────────────────────────────────────────────────────────
 
 class TextAreaField(FormField):
-    """Multiline text input (description / notes style)."""
+    """Multiline text input (description / notes style).
+
+    Plain Enter submits (moves focus to the next field) when ``on_submit`` is
+    provided; Alt+Enter always inserts a newline.
+    """
 
     def __init__(self, label: str, *, value: str = "", placeholder: str = "",
-                 min_lines: int = 3, **kw):
+                 min_lines: int = 3, on_submit=None, **kw):
         self.highlight_label = kw.pop("highlight_label", False)
         model = kw.pop("model", None) or TextFieldModel(
             value, required=kw.get("required", False))
         super().__init__(label, model=model, **kw)
-        self._editor = BoxInput(model.value, placeholder)
+        self._editor = BoxInput(model.value, placeholder, on_submit=on_submit)
         self.min_lines = min_lines
 
     @property
@@ -410,6 +411,21 @@ class TextAreaField(FormField):
         if handled:
             self.model.set_value(self.get_value())
         return handled
+
+    def handle_input_result(self, event: Any) -> InputResult:
+        # Plain Enter submits: the editor calls on_submit, and we request the
+        # container move focus to the next field. Alt+Enter is handled inside
+        # the editor as a newline and returns handled without a focus request.
+        key = event.key if isinstance(event, KeyEvent) else event
+        if key in ("\r", "\n") and self._editor.on_submit is not None:
+            self._editor.handle_input(event)
+            self.model.set_value(self.get_value())
+            return InputResult(handled=True, focus="next", redraw=True)
+        handled = self._editor.handle_input(event)
+        if handled:
+            self.model.set_value(self.get_value())
+            return InputResult(handled=True, redraw=True)
+        return InputResult(handled=False)
 
 
 # ────────────────────────────────────────────────────────────────
@@ -978,17 +994,28 @@ class InlineChoiceField(FormField):
         self._selected = int(value)
         self.model.set_value(self._selected)
 
+    def _parts(self):
+        return [
+            (f"[{option}]" if index == self._selected else f" {option} ").center(9)
+            for index, option in enumerate(self.options)
+        ]
+
+    def _group_start_x(self, x: int, width: int) -> int:
+        """Left edge of the right-aligned choice group."""
+        marker = self.focus_marker()
+        group_width = sum(len(part) for part in self._parts())
+        value_column = getattr(self, "value_column", 0)
+        if value_column:
+            return x + max(value_column, len(marker) + len(self.label) + 2)
+        return x + max(len(marker), width - group_width)
+
     def render(self, buffer: Buffer, x: int, y: int, width: int, height: int):
         marker = self.focus_marker()
         self._write(buffer, x, y, f"{marker}{self.label}:",
                     fg=_label_color() if self.focused else theme.DEFAULT, max_width=width)
-        # Keep colons attached to their labels while aligning all choices at
-        # one shared column when the form assigns one.
-        value_column = getattr(self, "value_column", len(marker) + len(self.label) + 2)
-        cursor_x = x + max(value_column, len(marker) + len(self.label) + 2)
-        for index, option in enumerate(self.options):
-            part = f"[{option}]" if index == self._selected else f" {option} "
-            part = part.center(9)
+        cursor_x = self._group_start_x(x, width)
+        for index, part in enumerate(self._parts()):
+            option = self.options[index]
             option_color = (
                 self._option_colors.get(option, theme.FOCUSED)
                 if index == self._selected else theme.MUTED
@@ -1008,13 +1035,9 @@ class InlineChoiceField(FormField):
             else:
                 return False
         elif isinstance(event, MouseEvent) and event.pressed and event.button == 0:
-            marker = self.focus_marker()
-            value_column = getattr(self, "value_column", len(marker) + len(self.label) + 2)
-            option_x = self.x + max(value_column, len(marker) + len(self.label) + 2)
+            option_x = self._group_start_x(self.x, self.width)
             new_value = None
-            for index, option in enumerate(self.options):
-                part = f"[{option}]" if index == self._selected else f" {option} "
-                part = part.center(9)
+            for index, part in enumerate(self._parts()):
                 if option_x <= event.x < option_x + len(part):
                     new_value = index
                     break

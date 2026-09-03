@@ -509,8 +509,9 @@ class TestFormContainer:
     def test_inline_choice_mouse_selects_clicked_option(self):
         field = InlineChoiceField("Policy", options=["allow", "ask", "deny"], value=0)
         field.x, field.y, field.width, field.height = 0, 0, 60, 1
-        # The second option starts after the fixed-width first option.
-        assert field.handle_input(MouseEvent(23, 0, 0, True)) is True
+        # Options right-align: group = 3 x 9 = 27 wide, occupying x in [33, 60).
+        # "ask" (index 1) spans [42, 51).
+        assert field.handle_input(MouseEvent(45, 0, 0, True)) is True
         assert field.get_value() == "ask"
 
     def test_preferred_height_with_spacing(self):
@@ -542,7 +543,7 @@ class TestFormContainer:
             c.focus_next()
         assert c._scroll_offset > 0
 
-    def test_section_indents_children_and_aligns_choices(self):
+    def test_section_indents_children(self):
         first = InlineChoiceField("Read", options=["allow", "deny"], value=0)
         second = InlineChoiceField("Read outside repo", options=["allow", "deny"], value=1)
         section = FormSection("File policies:", [first, second])
@@ -554,8 +555,6 @@ class TestFormContainer:
 
         assert first.x == 2
         assert second.x == 2
-        assert first.value_column == second.value_column
-        assert first.value_column == len(second.label) + 4
 
     def test_section_children_participate_in_focus_order(self):
         first = ToggleField("First")

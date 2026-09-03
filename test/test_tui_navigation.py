@@ -152,7 +152,9 @@ def test_chat_screen_composes_tab_bar_workspace_and_focus_scope():
 
     assert screen.focus_scope is focus_scope
     assert screen.model is model
-    assert screen.root.children == [tab_bar, screen.workspace]
+    assert screen.root is screen.scaffold
+    assert screen.scaffold.top is tab_bar
+    assert screen.scaffold.bottom is screen.status_bar
     assert screen.workspace.children == [history, input_box]
     assert history.parent is screen.workspace
     assert input_box.parent is screen.workspace

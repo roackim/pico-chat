@@ -34,7 +34,7 @@ def test_vsplit_allocates_children_before_rendering():
     left = TextComponent("left")
     middle = TextComponent("middle")
     right = TextComponent("right")
-    root = Vsplit([left, middle, right], [10, 0.5, 0])
+    root = Vsplit([left, middle, right], [Fixed(10), 0.5, Fill()])
 
     root.set_layout(2, 3, 40, 8)
     root.layout()
@@ -47,7 +47,7 @@ def test_vsplit_allocates_children_before_rendering():
 def test_hsplit_uses_preferred_height_for_auto_children():
     header = TextComponent("header")
     body = TextComponent("one\ntwo\nthree")
-    root = Hsplit([header, body], ["auto", 0])
+    root = Hsplit([header, body], [Content(), Content()])
 
     root.set_layout(1, 2, 30, 10)
     root.layout()

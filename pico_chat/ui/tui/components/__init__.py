@@ -1,6 +1,6 @@
 from pico_chat.ui.tui.components.base import Component
 from pico_chat.ui.tui.components.text import Label, TextComponent
-from pico_chat.ui.tui.components.layout import EmptyLine, SeparatorLine
+from pico_chat.ui.tui.components.layout import EmptyLine, SeparatorLine, VerticalDivider
 from pico_chat.ui.tui.components.box import Box
 from pico_chat.ui.tui.components.button import Button
 from pico_chat.ui.tui.components.choice import Checkbox, RadioGroup
@@ -27,7 +27,7 @@ __all__ = [
     'Component',
     'TextComponent',
     'Label',
-    'EmptyLine', 'SeparatorLine',
+    'EmptyLine', 'SeparatorLine', 'VerticalDivider',
     'Box',
     'Button',
     'Checkbox', 'RadioGroup',

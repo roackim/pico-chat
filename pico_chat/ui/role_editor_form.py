@@ -38,7 +38,7 @@ class RoleEditorForm:
     policies = ["allow", "ask", "deny"]
     policy_colors = {"allow": theme.SUCCESS, "deny": theme.ERROR}
 
-    def __init__(self, editor: RoleEditorModel):
+    def __init__(self, editor: RoleEditorModel, on_prompt_submit=None):
         self.editor = editor
         draft = editor.draft
         role_names = editor.role_names()
@@ -49,7 +49,7 @@ class RoleEditorForm:
             ComponentField(SeparatorLine()),
             TextField(labels["description"], value=draft.description, highlight_label=True),
             TextAreaField(labels["role_prompt"], value=draft.prompt, min_lines=4,
-                          highlight_label=True),
+                          highlight_label=True, on_submit=on_prompt_submit),
             FormSection(
                 "Tools:",
                 [ToggleField(name, value=draft.policy_for(name).enabled)

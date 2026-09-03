@@ -28,6 +28,9 @@ from pico_chat.ui.tui.layout_utils import strip_ansi
 from pico_chat.ui.tui.focus import FocusScope
 from pico_chat.ui.tui.navigation import Navigator, ModalHost
 from pico_chat.ui.tui.chat_screen import ChatScreen
+from pico_chat.ui.tui.settings_screen import SettingsScreen
+from pico_chat.ui.tui.components.settings_panel import SettingsPanel, SettingsPage
+from pico_chat.ui.settings_pages import settings_pages
 
         # Setup logging to debug panel
 import logging
@@ -140,6 +143,8 @@ class chatTUI(ChatActionHandlers):
         self.debug_panel = DebugLogPanel(max_lines=1000, frame_color=theme.ERROR, content_color=theme.MUTED, left_pad=1, right_pad=0)
         self.debug_box = self.debug_panel
         self.show_debug = False
+        self.show_settings = False
+        self._settings_panel: Optional[SettingsPanel] = None
         self.popup = Popup()
         self.form_popup = FormPopup()
         self.confirmation_popup = FormPopup(
@@ -814,11 +819,13 @@ class chatTUI(ChatActionHandlers):
 
     def _show_chat_workspace(self):
         self.show_debug = False
+        self.show_settings = False
         self.input_component.hide_completions()
         self._install_chat_screen()
 
     def _open_debug_tab(self):
         self.input_component.hide_completions()
+        self.show_settings = False
         debug_index = self._debug_tab_index()
         if debug_index is None:
             debug_index = len(self._tabs)
@@ -835,6 +842,75 @@ class chatTUI(ChatActionHandlers):
         if debug_index is None:
             return
         self.tab_view.close(debug_index)
+
+    # ── settings tab ────────────────────────────────────────────
+
+    def _settings_tab_index(self) -> Optional[int]:
+        """Return the settings tab's position in the workspace tab list."""
+        for index, tab in enumerate(self._tabs):
+            if tab.kind == "settings":
+                return index
+        return None
+
+    def _build_settings_panel(self) -> SettingsPanel:
+        """Construct the master-detail settings panel with its pages."""
+        def notify(message: str, msg_type=SysMsg()):
+            self.chat_history_panel.add_message(message, msg_type=msg_type)
+
+        runtime = self._active_runtime()
+        agent = getattr(runtime, "agent", None) if runtime is not None else self.agent
+        if agent is None and runtime is not None:
+            agent = runtime.ensure_agent()
+        pages = settings_pages(
+            runtime=runtime,
+            agent=agent,
+            notify=notify,
+            on_role_change=self.refresh_status_bar,
+            history_panel=self.chat_history_panel,
+        )
+        return SettingsPanel(pages, content_indent=2)
+
+    def _open_settings_tab(self):
+        self.input_component.hide_completions()
+        settings_index = self._settings_tab_index()
+        if settings_index is None:
+            settings_index = len(self._tabs)
+            settings_state = ConversationState("settings", kind="settings")
+            self._tabs.append(settings_state)
+            self.tab_view.add("settings", "settings", settings_state, closeable=True)
+        if self._settings_panel is None:
+            self._settings_panel = self._build_settings_panel()
+        self.show_settings = True
+        self.tab_view.activate(settings_index)
+        self._install_settings_screen()
+
+    def _install_settings_screen(self):
+        """Install a SettingsScreen whose body is the settings panel."""
+        if self._settings_panel is None:
+            return
+        screen = SettingsScreen(
+            self.tab_bar,
+            self._settings_panel,
+            self._focus_scope,
+            self._tabs[self._active_tab_index] if self._tabs else None,
+            self.status_bar,
+        )
+        self.root = screen.root
+        if self.navigator is not None:
+            self.navigator.replace(screen)
+
+    def _close_settings_tab(self):
+        settings_index = self._settings_tab_index()
+        if settings_index is None:
+            return
+        self.tab_view.close(settings_index)
+
+    def toggle_settings_tab(self):
+        """Toggle the settings workspace tab."""
+        if self.show_settings:
+            self._close_settings_tab()
+            return
+        self._open_settings_tab()
 
     def show_popup(self, title: str, content: str, content_padding: int = 1):
         """Show a popup overlay with the given title and content."""
@@ -1055,9 +1131,9 @@ class chatTUI(ChatActionHandlers):
         if not self._tabs or index >= len(self._tabs):
             return
         tab = self._tabs[index]
-        if tab.kind == "debug":
+        if tab.kind in ("debug", "settings"):
             return
-        
+
         self._active_tab_index = index
         self._bind_runtime_panel(tab)
         self.tab_view.activate(index)
@@ -1070,7 +1146,10 @@ class chatTUI(ChatActionHandlers):
         if self._tabs[index].kind == "debug":
             self._open_debug_tab()
             return
-        if self.show_debug:
+        if self._tabs[index].kind == "settings":
+            self._open_settings_tab()
+            return
+        if self.show_debug or self.show_settings:
             self._show_chat_workspace()
         if index == self._active_tab_index:
             self.tab_view.activate(index)
@@ -1096,6 +1175,7 @@ class chatTUI(ChatActionHandlers):
         if index < 0 or index >= len(self._tabs):
             return
         closing_debug = self._tabs[index].kind == "debug"
+        closing_settings = self._tabs[index].kind == "settings"
         was_active = index == self._active_tab_index
         self._tabs.pop(index)
 
@@ -1103,7 +1183,9 @@ class chatTUI(ChatActionHandlers):
             self._active_tab_index -= 1
         elif was_active:
             new_index = min(index, len(self._tabs) - 1)
-            if closing_debug:
+            if closing_debug or closing_settings:
+                if closing_settings:
+                    self._settings_panel = None
                 self._show_chat_workspace()
             elif not self._tabs:
                 self._active_tab_index = 0
@@ -1132,7 +1214,7 @@ class chatTUI(ChatActionHandlers):
         # Save current tab first
         self._save_current_tab()
 
-        if self.show_debug:
+        if self.show_debug or self.show_settings:
             self._show_chat_workspace()
         
         # Generate name
@@ -1232,6 +1314,15 @@ class chatTUI(ChatActionHandlers):
         # Handle keyboard navigation between input and history
         if isinstance(event, (str, KeyEvent)):
             key = event.key if isinstance(event, KeyEvent) else event
+
+            # Settings tab owns the keyboard while visible.
+            if self.show_settings and self._settings_panel is not None:
+                if key == "\x1b":  # ESC returns to the chat workspace
+                    self._close_settings_tab()
+                    return True
+                self._settings_panel.handle_input(event)
+                return True
+
             if self._last_focus_id == "input" and self.input_component.has_active_completion():
                 if key in ('\x1b', '\x1b[A', '\x1b[B', '\t', '\r', '\n'):
                     return self.input_component.handle_input(event)
@@ -1272,6 +1363,11 @@ class chatTUI(ChatActionHandlers):
         
         # Handle mouse click focus changes
         if isinstance(event, MouseEvent):
+            # Settings tab consumes clicks within its panel.
+            if self.show_settings and self._settings_panel is not None:
+                if self._settings_panel.handle_input(event):
+                    return True
+
             # Ignore wheel scroll events for focus purposes — they shouldn't
             # change focus, only scroll the panel under the cursor.
             if event.pressed and event.button not in (64, 65):

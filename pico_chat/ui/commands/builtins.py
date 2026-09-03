@@ -225,6 +225,7 @@ from .debug import (
 
 
 from .permissions import PermissionsCommand
+from .settings import SettingsCommand
 
 class OpenRouterBalanceCommand(Command):
     def __init__(self):
@@ -358,6 +359,7 @@ COMMANDS: Dict[str, Command] = {
     "tools":       ToolsCommand(),
     "debug":       DebugCommand(),
     "permissions": PermissionsCommand(),
+    "settings":    SettingsCommand(),
     "roles":       RolesCommand(),
     "openrouter":  OpenRouterCommand(),
     "cd":          CdCommand(),
