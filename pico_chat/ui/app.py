@@ -6,7 +6,6 @@ import sys
 import os
 import asyncio
 import atexit
-from turtle import done
 from typing import Optional, Any
 
 from pico_chat.ui.tui.compositor import Compositor
