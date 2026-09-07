@@ -38,7 +38,15 @@ On first launch, pico starts with no server configured. Add one using the `/serv
 **Local llama.cpp server:**
 ```
 /server add llamacpp http://localhost:8080 my-local
-/server use my-local
+/model list
+/model <model>
+```
+
+**Ollama (local models):**
+```
+/server add ollama http://localhost:11434 my-ollama
+/model list
+/model llama3.1:8b
 ```
 
 **OpenRouter (cloud models):**
@@ -47,10 +55,10 @@ export OPENROUTER_API_KEY=sk-or-...
 ```
 ```
 /server add openrouter anthropic/claude-3.5-sonnet my-claude
-/server use my-claude
+/model anthropic/claude-3.5-sonnet
 ```
 
-Server configurations are saved to `~/.config/pico-chat/config.toml` and persist between sessions.
+Server configurations are saved to `~/.config/pico-chat/config.toml` and persist between sessions. Selecting a model with `/model` automatically switches to the server that serves it.
 
 ---
 
@@ -61,7 +69,7 @@ Server configurations are saved to `~/.config/pico-chat/config.toml` and persist
 | `/help` | List all available commands |
 | `/status` | Show server, model, context usage, and memory |
 | `/server` | Manage server configurations (see below) |
-| `/model` | Discover or select a model on the active endpoint |
+| `/model` | Discover or select a model (switches to its server) |
 | `/tools` | Show available agent tools and their permission levels |
 | `/permissions` | Show full permission configuration |
 | `/compact` | Summarize conversation history to free context space |
@@ -77,19 +85,21 @@ Server configurations are saved to `~/.config/pico-chat/config.toml` and persist
 ```
 /server add openrouter <model-id> [name] [provider]
 /server add llamacpp <url> [name]
+/server add ollama <url> [name]
 /server list
-/server use <name>
 /server remove <name>
 /model list
-/model use <model>
+/model <model>
 ```
 
 Examples:
 ```
 /server add openrouter deepseek/deepseek-v4-flash
 /server add llamacpp http://localhost:8080 local
+/server add ollama http://localhost:11434 ollama
 /server list
-/server use deepseek-v4-flash
+/model list
+/model llama3.1:8b
 ```
 
 ---

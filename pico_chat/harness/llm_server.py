@@ -442,19 +442,25 @@ class LLMServer(ABC):
         self._cached_context_window = self._model_context_windows.get(model_name)
 
     async def prewarm_model_name(self) -> None:
-        """Discover and cache the model name in the background.
+        """Probe the connection and cache model name/context in the background.
 
         Populates ``_cached_model_name`` (and context window) so the status bar
         can show the real model without waiting for the first message. Safe to
-        call at tab/conversation open; no-op if already known. Retries briefly
-        in case the server is momentarily slow at startup.
+        call at tab/conversation open or after selecting a model.
+
+        The connection is always probed — this is what turns the status bar
+        green. When a model is already known (``set_model`` / ``switch_model``
+        pre-populate ``_cached_model_name``), only the connection probe runs;
+        the model-name query is skipped. Without this, selecting a model would
+        never mark the endpoint online.
         """
-        if self._cached_model_name:
+        # No-op only when we already know both the model and that it's online.
+        if self._cached_model_name and self._connection_state == "ok":
             return
         self._model_name_pending = True
         self._connection_state = "checking"
         try:
-            # If the client was built against an unresolved .local URL (e.g.
+            # If the server was built against an unresolved .local URL (e.g.
             # resolution failed synchronously in __init__), re-resolve and
             # rebuild the client so the model query hits the routable IP.
             if self._hostname and self._hostname.endswith(".local"):
@@ -470,12 +476,17 @@ class LLMServer(ABC):
             if not diagnosis.ok:
                 self._connection_state = "error"
                 return
-            try:
-                await self.get_model_name()
+            if not self._cached_model_name:
+                try:
+                    await self.get_model_name()
+                    self._connection_state = "ok"
+                except Exception as e:
+                    logger.warning("prewarm model name failed: %s", e)
+                    self._connection_state = "error"
+            else:
+                # Model already selected — diagnostic probe already confirmed
+                # the connection, so mark it online.
                 self._connection_state = "ok"
-            except Exception as e:
-                logger.warning("prewarm model name failed: %s", e)
-                self._connection_state = "error"
             try:
                 await self.get_context_window()
             except Exception as e:
@@ -498,6 +509,14 @@ class LLMServer(ABC):
                 owned_by=model.get("owned_by"),
             ))
         return result
+
+    async def discover_models(self) -> list[ModelInfo]:
+        """Discover and cache the models exposed by this endpoint.
+
+        Subclasses may override to enrich metadata (e.g. Ollama). The base
+        implementation just delegates to :meth:`list_models`.
+        """
+        return await self.list_models()
     
     @abstractmethod
     async def query_model_name(self) -> str:
@@ -821,6 +840,49 @@ class OpenRouterServer(LLMServer):
             return self._selected_model
         raise RuntimeError("OpenRouter requires model to be configured")
     
+    def _enabled_ids(self) -> list[str]:
+        """Return the explicitly-enabled model ids.
+
+        All OpenRouter models are disabled unless explicitly enabled. The
+        allowlist is ``enabled_models``, falling back to the single ``model``.
+        """
+        if self.config.enabled_models:
+            return list(self.config.enabled_models)
+        if self.config.model:
+            return [self.config.model]
+        return []
+
+    async def discover_models(self) -> list[ModelInfo]:
+        """Return only the enabled models for this OpenRouter endpoint.
+
+        OpenRouter exposes thousands of models; we don't surface them all.
+        Only explicitly-enabled models are discoverable via /model.
+        """
+        enabled = self._enabled_ids()
+        if not enabled:
+            return []
+        import httpx
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "https://openrouter.ai/api/v1/models",
+                timeout=self.config.timeout,
+            )
+            if response.status_code != 200:
+                # Fall back to just the enabled ids (no context info).
+                return [ModelInfo(id=e) for e in enabled]
+        catalog = response.json().get("data", [])
+        by_id = {m.get("id"): m for m in catalog}
+        result = []
+        for eid in enabled:
+            info = by_id.get(eid) or {}
+            result.append(ModelInfo(
+                id=eid,
+                context_window=info.get("context_length"),
+                owned_by=info.get("owned_by"),
+                metadata=info,
+            ))
+        return result
+    
     async def query_context_window(self, model_name: str) -> int:
         """
         Query context window from OpenRouter API.
@@ -986,11 +1048,35 @@ class OllamaServer(LLMServer):
         return [
             ModelInfo(
                 id=model.get("name", model.get("model", "")),
+                context_window=model.get("context_length"),
                 metadata=model,
             )
             for model in data.get("models", [])
             if model.get("name", model.get("model"))
         ]
+
+    async def discover_models(self) -> list[ModelInfo]:
+        """Discover Ollama models, enriching each with its context window.
+
+        ``/api/tags`` returns rich per-model metadata (size, family, etc.) but
+        not the context window. We enrich each model with its context window
+        via ``/api/show`` so the catalog and status bar can display it.
+        """
+        models = await self.list_models()
+        enriched = []
+        for model in models:
+            try:
+                ctx = await self.query_context_window(model.id)
+                enriched.append(ModelInfo(
+                    id=model.id,
+                    context_window=ctx,
+                    owned_by=model.owned_by,
+                    metadata=model.metadata,
+                ))
+            except Exception as e:
+                logger.debug("Could not enrich context for %s: %s", model.id, e)
+                enriched.append(model)
+        return enriched
 
     async def query_model_name(self) -> str:
         if self._selected_model:

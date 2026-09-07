@@ -23,6 +23,60 @@ class ModelInfo:
     owned_by: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    # Convenience accessors for the most useful Ollama metadata fields.
+    @property
+    def size(self) -> int | None:
+        """Model size in bytes (Ollama ``size`` field), if known."""
+        return self.metadata.get("size")
+
+    @property
+    def family(self) -> str | None:
+        """Model family (Ollama ``family`` field), if known."""
+        return self.metadata.get("family")
+
+    @property
+    def modified_at(self) -> str | None:
+        """Last-modified timestamp (Ollama ``modified_at``), if known."""
+        return self.metadata.get("modified_at")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serializable form for the discovery catalog."""
+        return {
+            "id": self.id,
+            "context_window": self.context_window,
+            "owned_by": self.owned_by,
+            "metadata": self.metadata,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ModelInfo":
+        """Rebuild a ModelInfo from :meth:`to_dict` output."""
+        return cls(
+            id=data.get("id", ""),
+            context_window=data.get("context_window"),
+            owned_by=data.get("owned_by"),
+            metadata=data.get("metadata") or {},
+        )
+
+
+@dataclass(frozen=True)
+class ModelRef:
+    """A model addressable by ``(server, model)`` pair.
+
+    This is the unit of selection: picking a model implicitly selects the
+    server that serves it.
+    """
+
+    server: str
+    model: str
+
+    @property
+    def key(self) -> str:
+        return f"{self.server}::{self.model}"
+
+    def __str__(self) -> str:
+        return f"{self.model} [{self.server}]"
+
 
 @dataclass(frozen=True)
 class LLMTarget:
@@ -51,6 +105,9 @@ class LLMServerConfig:
     retry_attempts: int = 3  # Retry attempts for transient errors
     retry_delay: float = 2.0  # Initial retry delay in seconds
     provider: str | None = None  # OpenRouter: routing preference (e.g., "Anthropic", "DeepInfra")
+    # OpenRouter: the set of explicitly-enabled model ids. All others are
+    # hidden from /model (disabled by default). Falls back to ``model``.
+    enabled_models: list[str] = field(default_factory=list)
 
     @property
     def target(self) -> LLMTarget | None:
@@ -90,6 +147,7 @@ def _parse_server_dict(name: str, server_dict: dict) -> LLMServerConfig:
         retry_attempts=server_dict.get("retry_attempts", 3),
         retry_delay=server_dict.get("retry_delay", 2.0),
         provider=server_dict.get("provider"),
+        enabled_models=server_dict.get("enabled_models", []),
     )
 
 
@@ -106,8 +164,13 @@ def get_server_config() -> LLMServerConfig:
     if server_dict is None:
         return _DEFAULT_SERVER
     config = _parse_server_dict(pico_cfg.config.active_server, server_dict)
-    if pico_cfg.config.active_model is not None:
-        config.model = pico_cfg.config.active_model
+    # Prefer the per-server model selection, then the legacy active_model,
+    # then the per-server ``model`` default.
+    selected = pico_cfg.config.get_model_for_server(pico_cfg.config.active_server)
+    if selected is None and pico_cfg.config.active_model is not None:
+        selected = pico_cfg.config.active_model
+    if selected is not None:
+        config.model = selected
     return config
 
 

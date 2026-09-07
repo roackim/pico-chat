@@ -51,6 +51,13 @@ class Config:
         # Model selection is separate from the endpoint definition. The
         # legacy per-server ``model`` key remains a default for compatibility.
         self.active_model: Optional[str] = None
+        # Per-server model selection: server_name -> last-picked model id.
+        # Takes precedence over the legacy per-server ``model`` default.
+        self.model_selection: Dict[str, str] = {}
+        # Discovery catalog: server_name -> list of {id, context_window} dicts.
+        # Persisted so /model fuzzy completion works after a restart; refreshed
+        # by /model list and server add (discovery is fast).
+        self.models_by_server: Dict[str, list] = {}
 
         
         # UI settings
@@ -137,6 +144,15 @@ class Config:
                 self.active_server = data["settings"]["active_endpoint"]
             if "settings" in data and "active_model" in data["settings"]:
                 self.active_model = data["settings"]["active_model"]
+
+            # Per-server model selection + discovery catalog.
+            if "model_selection" in data:
+                self.model_selection = dict(data["model_selection"])
+            if "model_catalog" in data:
+                self.models_by_server = {
+                    server: [dict(m) for m in models]
+                    for server, models in data["model_catalog"].items()
+                }
             
             # Load UI settings
             if "ui" in data:
@@ -232,6 +248,46 @@ class Config:
             self.active_model = None
         with open(config_path, "w") as f:
             toml.dump(data, f)
+
+    def save_model_selection(self, server: str, model: Optional[str]) -> None:
+        """Persist the selected model for a specific server."""
+        config_path = get_config_path()
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        data = toml.load(config_path) if config_path.exists() else {"servers": {}, "settings": {}}
+        data.setdefault("model_selection", {})
+        if model:
+            data["model_selection"][server] = model
+            self.model_selection[server] = model
+        else:
+            data["model_selection"].pop(server, None)
+            self.model_selection.pop(server, None)
+        with open(config_path, "w") as f:
+            toml.dump(data, f)
+
+    def save_model_catalog(self) -> None:
+        """Persist the discovery catalog so /model completion works on restart."""
+        config_path = get_config_path()
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        data = toml.load(config_path) if config_path.exists() else {"servers": {}, "settings": {}}
+        data["model_catalog"] = {
+            server: [dict(m) for m in models]
+            for server, models in self.models_by_server.items()
+        }
+        with open(config_path, "w") as f:
+            toml.dump(data, f)
+
+    def get_model_for_server(self, server: str) -> Optional[str]:
+        """Return the effective model for a server.
+
+        Prefers the per-server selection, falling back to the legacy
+        per-server ``model`` default.
+        """
+        if server in self.model_selection:
+            return self.model_selection[server]
+        server_cfg = self.servers.get(server)
+        if server_cfg:
+            return server_cfg.get("model")
+        return None
 
     def get_active_server_config(self) -> Optional[Dict[str, Any]]:
         """Get the configuration for the currently active server."""

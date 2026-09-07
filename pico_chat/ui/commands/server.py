@@ -96,41 +96,6 @@ class ServerListCommand(Command):
         ui.chat_history_panel.add_message("\n".join(lines), msg_type=SysMsg())
 
 
-class ServerUseCommand(Command):
-    def __init__(self):
-        super().__init__("use", "Switch to a different server configuration",
-                         params=[Param("SERVER_NAME", completions=server_name_completions)])
-
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        if not args:
-            ui.chat_history_panel.add_message("Usage: /server use <name>", msg_type=SysMsgError())
-            return
-        from pico_chat.harness.server_service import ServerService
-        result = ServerService().switch_server(args[0])
-        if not result.ok:
-            ui.chat_history_panel.add_message(result.message, msg_type=SysMsgError())
-            return
-        try:
-            ui.agent.switch_server(result.new_config)
-            # Pre-warm the new server's model name so the status bar shows it
-            # (e.g. for llama.cpp) instead of "?" until the first message.
-            server = getattr(ui.agent, "server", None)
-            if server is not None:
-                from pico_chat.harness.llm_server import prewarm_local_resolution
-                prewarm_local_resolution(server._original_base_url)
-                import asyncio
-                async def _prewarm_and_refresh():
-                    await server.prewarm_model_name()
-                    if hasattr(ui, "refresh_status_bar"):
-                        ui.refresh_status_bar()
-                asyncio.ensure_future(_prewarm_and_refresh())
-            if hasattr(ui, "refresh_status_bar"):
-                ui.refresh_status_bar()
-            ui.chat_history_panel.add_message(result.message, msg_type=SysMsg())
-        except Exception as exc:
-            ui.chat_history_panel.add_message(f"Error switching server: {exc}", msg_type=SysMsgError())
-
-
 class ServerRemoveCommand(Command):
     def __init__(self):
         super().__init__("remove", "Remove a server configuration",
@@ -195,7 +160,7 @@ class ServerCommand(Command):
     def __init__(self):
         remove = ServerRemoveCommand()
         super().__init__("server", "Manage LLM server configurations", subcommands={
-            "add": ServerAddCommand(), "list": ServerListCommand(), "use": ServerUseCommand(),
+            "add": ServerAddCommand(), "list": ServerListCommand(),
             "info": ServerInfoCommand(), "remove": remove, "rm": remove,
             "diagnose": ServerDiagnoseCommand(),
         })
@@ -215,6 +180,6 @@ class ServerCommand(Command):
 
 __all__ = [
     "ServerCommand", "ServerAddCommand", "ServerListCommand",
-    "ServerUseCommand", "ServerRemoveCommand", "ServerInfoCommand",
+    "ServerRemoveCommand", "ServerInfoCommand",
     "ServerDiagnoseCommand",
 ]

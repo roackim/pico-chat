@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pico_chat.harness.llm_server_config import (
     LLMServerConfig,
+    ModelInfo,
     get_server_config_by_name,
 )
 
@@ -143,6 +144,10 @@ class ServerService:
             "base_url": "https://openrouter.ai/api/v1",
             "api_key_env": "OPENROUTER_API_KEY",
             "model": model_id,
+            # OpenRouter models are disabled by default: only the explicitly
+            # requested model is enabled. (A settings page will let users
+            # enable more later.)
+            "enabled_models": [model_id],
             "timeout": 30.0,
             "retry_attempts": 3,
             "retry_delay": 2.0,
@@ -168,7 +173,7 @@ class ServerService:
                 f"Type: OpenRouter\n"
                 f"Model: {model_id}{provider_msg}\n"
                 f"{warning}\n\n"
-                f"Use '/server use {server_name}' to activate"
+                f"Select a model with '/model <model>' to activate this server"
             ),
             server_name=server_name,
             server_type="openrouter",
@@ -252,7 +257,7 @@ class ServerService:
                 f"Model: {model_name}\n"
                 f"{context_msg}\n"
                 f"{warning}\n\n"
-                f"Use '/server use {server_name}' to activate"
+                f"Select a model with '/model <model>' to activate this server"
             ),
             server_name=server_name,
             server_type="llamacpp",
@@ -301,11 +306,13 @@ class ServerService:
         }
 
         # Model discovery is best-effort — it may time out if Ollama is offline.
+        # We cache the full catalog so /model fuzzy completion works immediately.
         selected = model
+        discovered: List[ModelInfo] = []
         if online:
             try:
-                models = await test_server.list_models()
-                selected = model or (models[0].id if models else None)
+                discovered = await test_server.discover_models()
+                selected = model or (discovered[0].id if discovered else None)
             except Exception as e:
                 logger.warning(f"Failed to list Ollama models for '{server_name}': {e}")
         if selected:
@@ -313,6 +320,9 @@ class ServerService:
 
         from pico_chat import pico_cfg
         pico_cfg.config.save_server(server_name, server_config, set_active=False)
+        if discovered:
+            pico_cfg.config.models_by_server[server_name] = [m.to_dict() for m in discovered]
+            pico_cfg.config.save_model_catalog()
         model_text = selected or "none discovered"
         warning = ""
         if not online:
@@ -329,7 +339,7 @@ class ServerService:
                 f"URL: {base_url}\n"
                 f"Model: {model_text}\n"
                 f"{warning}\n\n"
-                f"Use '/server use {server_name}' to activate"
+                f"Select a model with '/model <model>' to activate this server"
             ),
             server_name=server_name,
             server_type="ollama",
@@ -338,7 +348,11 @@ class ServerService:
         )
 
     async def list_models(self, endpoint_name: Optional[str] = None):
-        """Discover models from an endpoint without changing active state."""
+        """Discover models from an endpoint and cache the catalog.
+
+        Returns the discovered :class:`ModelInfo` list. The catalog is cached
+        in ``pico_cfg`` so /model fuzzy completion works without re-querying.
+        """
         from pico_chat import pico_cfg
         from pico_chat.harness.llm_server import create_server
         from pico_chat.harness.llm_server_config import get_server_config, get_server_config_by_name
@@ -346,12 +360,87 @@ class ServerService:
         config = get_server_config_by_name(endpoint_name) if endpoint_name else get_server_config()
         if config is None:
             raise ValueError(f"Endpoint '{endpoint_name}' not found")
-        return await create_server(config).list_models()
+        models = await create_server(config).discover_models()
+        pico_cfg.config.models_by_server[config.name] = [m.to_dict() for m in models]
+        pico_cfg.config.save_model_catalog()
+        return models
 
-    def select_model(self, model: str) -> None:
-        """Persist an active model independently of the endpoint definition."""
+    def select_model(self, model: str, server: Optional[str] = None) -> None:
+        """Persist the selected model for a specific server.
+
+        If ``server`` is omitted, uses the active server. This is per-server,
+        so switching away and back keeps each server's model choice. Selecting
+        a model also makes its server the active one, so the last-used model
+        is restored as the default on the next launch.
+        """
         from pico_chat import pico_cfg
+        server = server or pico_cfg.config.active_server
+        pico_cfg.config.save_model_selection(server, model)
+        # Make the serving server active in the config so the model is the
+        # default on restart.
+        if server != pico_cfg.config.active_server:
+            pico_cfg.config.active_server = server
+            self._set_active_server_in_toml(server)
+        # Keep the legacy global active_model in sync for backward compat.
         pico_cfg.config.save_active_model(model)
+
+    def resolve_model_servers(self, model: str) -> List[str]:
+        """Return the names of servers whose catalog contains ``model``.
+
+        Uses the cached discovery catalog. If the catalog is empty for a
+        server, falls back to its configured ``model`` default.
+        """
+        from pico_chat import pico_cfg
+        matches = []
+        for server, models in pico_cfg.config.models_by_server.items():
+            if any(m.get("id") == model for m in models):
+                matches.append(server)
+        if not matches:
+            for server, cfg in pico_cfg.config.servers.items():
+                if cfg.get("model") == model:
+                    matches.append(server)
+        return matches
+
+    def all_models(self) -> List[ModelInfo]:
+        """Return every discovered model across all servers, annotated by server.
+
+        Each :class:`ModelInfo` has its ``metadata`` augmented with the
+        serving server name so the UI can show what serves what.
+        """
+        from pico_chat import pico_cfg
+        result = []
+        for server, models in pico_cfg.config.models_by_server.items():
+            for m in models:
+                info = ModelInfo.from_dict(m)
+                info.metadata["_server"] = server
+                result.append(info)
+        return result
+
+    async def discover_all_models(self) -> List[ModelInfo]:
+        """Discover models live from every configured server.
+
+        Queries each reachable server and refreshes the cached catalog. Servers
+        that are offline or fail are skipped (their cached catalog, if any, is
+        kept). Returns the merged, server-annotated model list.
+        """
+        from pico_chat import pico_cfg
+        from pico_chat.harness.llm_server import create_server
+
+        for server_name in list(pico_cfg.config.servers.keys()):
+            config = get_server_config_by_name(server_name)
+            if config is None:
+                continue
+            try:
+                models = await create_server(config).discover_models()
+                pico_cfg.config.models_by_server[server_name] = [m.to_dict() for m in models]
+            except Exception as e:
+                logger.warning(f"Discovery failed for '{server_name}': {e}")
+        pico_cfg.config.save_model_catalog()
+        return self.all_models()
+
+    def model_completions(self) -> List[str]:
+        """Return model ids for /model fuzzy completion."""
+        return sorted({m.id for m in self.all_models()})
 
     # --- List / Info ---
 
@@ -420,7 +509,9 @@ class ServerService:
         # Update active server in TOML
         self._set_active_server_in_toml(server_name)
         pico_cfg.config.active_server = server_name
-        pico_cfg.config.active_model = pico_cfg.config.servers[server_name].get("model")
+        # Restore this server's per-server model selection (falls back to the
+        # legacy per-server ``model`` default).
+        pico_cfg.config.active_model = pico_cfg.config.get_model_for_server(server_name)
         pico_cfg.config.save_active_model(pico_cfg.config.active_model)
 
         new_config = get_server_config_by_name(server_name)
