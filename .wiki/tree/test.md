@@ -32,6 +32,7 @@ All tests use pytest. See [notes/testing.md](../notes/testing.md) for run instru
 | `test_token_estimation.py` | `token_estimation.py` | Heuristic token count accuracy |
 | `test_token_estimation_samples.py` | `token_estimation.py` | Regression tests on real code/text samples |
 | `test_ui_permission_submit.py` | `ui/app.py` | Input blocked during active permission prompt |
+| `test_ollama_server.py` | `harness/llm_server.py` | Ollama `/api/tags` discovery, context-window parsing, native chat adaptation |
 | `test_layout_primitives.py` | `ui/tui/container.py` | Layout, clipping, scrolling, and typed ScrollView navigation |
 | `test_tui_interactions.py` | `ui/app.py`, `ui/tui/components/` | Focus routing, tab lifecycle, debug/workspace replacement, and per-conversation state isolation |
 | `test_tui_navigation.py` | `ui/tui/navigation.py`, `ui/tui/compositor.py` | Screen navigation, modal lifecycle, and compositor shutdown handling |

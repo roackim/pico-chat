@@ -37,6 +37,7 @@ pytest test/test_permissions.py
 | `test_token_estimation.py` | Heuristic token counting (code ratio, language vs. prose) |
 | `test_token_estimation_samples.py` | Regression tests on real code/text samples |
 | `test_ui_permission_submit.py` | Input blocked while awaiting permission prompt |
+| `test_ollama_server.py` | Ollama backend adapter: `/api/tags` model discovery, context-window parsing, native chat response adaptation |
 
 ## Notes on `test_containerization.py`
 

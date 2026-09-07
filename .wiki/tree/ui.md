@@ -75,31 +75,31 @@ scrollable message component in `ChatScreen`.
 - `handle_edit_action` — expanded in-place editing: edits paused AI messages (thinking prefill), finalized `ThinkingMsg` (edit reasoning as prefill), finalized `PicoMsg` (finds preceding `ThinkingMsg`), and `UserMsg` (edit + wipe subsequent messages)
 - Retry (re-send last user message)
 
-### `commands.py`
-Slash command system with generic parameter schema.
+### `commands/` (package)
+Slash command system with generic parameter schema. The `commands/` package
+replaces the legacy single `commands.py`:
+
+- `commands/__init__.py` — public API re-exports (`Command`, `Param`, `COMMANDS`, `handle_command`, etc.) and preserves the historical `pico_chat.ui.commands` import path
+- `commands/builtins.py` — the canonical `COMMANDS` registry dict and top-level commands (help, clear, compact, exit, stop, resume, status, server, model, tools, debug, permissions, etc.)
+- `commands/base.py` — `Param` and `Command` base classes plus completion helpers
+- `commands/server.py` — `ServerAddCommand`, `ServerListCommand`, `ServerInfoCommand`, `ServerRemoveCommand`, `ServerDiagnoseCommand`
+- `commands/models.py` — `ModelCommand` (`/model <model>` + `/model list`)
+
+Base contracts:
 - `Param` dataclass: `name`, `completions` (static list or callable), `path` (filesystem scan), `required`
-- `Command` base class: `name`, `description`, `subcommands`, `params: List[Param]`, `execute(ui, args)`
+- `Command`: `name`, `description`, `subcommands`, `params: List[Param]`, `execute(ui, args)`
 - `Command.resolve_command(parts)` — walks subcommand tree, returns `(deepest_cmd, arg_offset)`
 - `Command.get_completions(arg_index)` — resolves completions from `Param` schema (static list, callable, or `path=True` filesystem scan)
-- `COMMANDS` dict — module-level registry; all top-level commands registered here
 - `handle_command(ui, text)` — strips `/`, looks up `COMMANDS`, dispatches
-- `get_command_list()` / `get_subcommand_list(cmd)` — used by input autocomplete
-- Commands with sub-operations pass a `subcommands` dict to the constructor (e.g. `ServerCommand`)
 - Commands starting with `_` are hidden from `/help`
-- Registered commands: `help`, `clear`, `compact`, `exit`, `stop`, `resume`, `prefill`, `status`, `server`, `tools`, `debug`, `permissions`, `openrouter`, `cd`, `pwd`, `conversation`, `tab`
-- Server management commands (`ServerAddCommand`, `ServerUseCommand`, etc.) use `Param` for server name completions (reads `pico_cfg.config.servers.keys()`)
-- `CdCommand` uses `Param("DIR", path=True)` for filesystem completion
-- `HelpCommand` renders output in a popup overlay via `ui.show_popup()` instead of chat history
-- `StatusCommand` renders in popup (async: shows "Checking..." placeholder, then updates with actual status)
-- `ModelCommand` provides `/model list` discovery and `/model use <model>` selection on the active endpoint
-- `ToolsCommand` renders in popup
-- `PermissionsCommand` renders in popup
-- The interactive no-argument permissions editor composes `ProfileList`,
-  `FormSectionTitle`, horizontal policy selectors, and container toggles.
-  Changes are persisted immediately through `ProfileEditorModel`; profile
-  selection is separate from widget focus.
-- `DebugCommand` (no args) renders subcommand help in popup
-- See [notes/ui.md](../notes/ui.md) for how to add a new command.
+
+**Server/model management:**
+- `/server` — add, list, info, diagnose, remove. The `use`/switch subcommand was **removed**; switching is done implicitly by selecting a model.
+- `/model <model>` — the single model-selection entry point. Resolves a model across all servers via `ServerService.resolve_model_servers()`, switches the harness to the serving server, and selects it. Accepts an explicit `server:model` form (the model id may itself contain colons, e.g. Ollama quantized tags). Model completions are fuzzy-filtered from the cached `model_catalog`.
+- `/model list` — discovers models live from every reachable server (via `discover_all_models`), annotated `[server]`.
+
+The input layer's `ArgumentCompletion` reads `Param.completions` to drive
+fuzzy argument completion for `/model <model>`. See [notes/ui.md](../notes/ui.md) for how to add a new command.
 
 ### `profile_editor_model.py`
 `ProfileEditorModel` — UI-independent state and persistence boundary for the

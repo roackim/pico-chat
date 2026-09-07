@@ -9,7 +9,7 @@ Pico is a terminal-based AI agent that connects to local (llama.cpp) or cloud (O
 ```
 ┌─────────────────────────────┐
 │         pico_chat/ui/       │  TUI — user input, chat display, commands
-│  app.py  ← commands.py      │
+│  app.py  ← commands/        │
 │  chat_history_panel.py      │
 │  chat_action_handlers.py    │
 └────────────┬────────────────┘
@@ -66,8 +66,7 @@ User types → InputComponent
 - **Streaming-first** — LLM output streams token-by-token to the buffer; no waiting for full response
 - **Permission gate** — every tool call goes through `PermissionGate` then `ToolPermissionsProfile` before execution; the UI can pause to ask the user
 - **Stateless tools** — tools are pure functions; harness owns all state
-- **Service layer** — server management and OpenRouter API calls are in `harness/server_service.py`; UI commands are thin adapters
-- **Thinking-tag parsing** — the thinking-tag state machine is in `harness/thinking_parser.py` for testability; handles both `<think>`/`</think>` and `<thinking>`/`</thinking>` across chunk boundaries;
+- **Service layer** — server management and OpenRouter API calls are in `harness/server_service.py`; UI commands are thin adapters- **Model selection is `(server, model)`** — the unit of selection is a server/model pair. `/model <model>` resolves a model across all servers, switches the harness to the serving server, and selects it. Per-server model choices persist in `[model_selection]`; the discovery catalog persists in `[model_catalog]`. OpenRouter models are disabled by default unless listed in `enabled_models`.- **Thinking-tag parsing** — the thinking-tag state machine is in `harness/thinking_parser.py` for testability; handles both `<think>`/`</think>` and `<thinking>`/`</thinking>` across chunk boundaries;
 
 ## Module Relationships
 
@@ -77,7 +76,7 @@ pico_chat/
     harness.py           ← Orchestrator (delegates to modules below)
     permission_gate.py   ← Tool permission checking + user-response queue
     thinking_parser.py   ← Thinking-tag state machine + metrics emission
-    server_service.py    ← Server config CRUD + OpenRouter API (used by commands.py)
+    server_service.py    ← Server config CRUD + model discovery/selection + OpenRouter API (used by commands/)
     tool_wrappers.py     ← Tool → OpenAI schema adapters
     tools.py             ← Tool implementations (read/write/patch/run/search)
     tool_permissions.py  ← Permission profiles
@@ -87,7 +86,7 @@ pico_chat/
     ...
 
   ui/
-    commands.py          ← Slash commands with Param-based schema + autocomplete
+    commands/            ← Slash commands package (builtins.py registry, server.py, models.py, ...)
     chat_action_handlers.py
     app.py               ← Main TUI class
     tui/

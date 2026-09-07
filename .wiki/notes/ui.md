@@ -483,15 +483,21 @@ Each action has a keyboard shortcut key and a label displayed in the box border:
 
 ---
 
-## Commands (`commands.py`)
+## Commands (`commands/` package)
 
-Slash commands typed by the user (e.g. `/server`, `/status`, `/tools`, `/help`).
+Slash commands typed by the user (e.g. `/server`, `/model`, `/status`, `/tools`, `/help`).
 
-Server management commands (`ServerAddCommand`, `ServerUseCommand`, etc.) are thin UI adapters — all business logic lives in `harness/server_service.py`. The commands call the service and render the results.
+The command system lives in the `pico_chat/ui/commands/` package (replacing the legacy single `commands.py`): `builtins.py` holds the `COMMANDS` registry, `base.py` defines `Param`/`Command`, and `server.py`/`models.py` hold the server and model commands. Server management commands are thin UI adapters — all business logic lives in `harness/server_service.py`. The commands call the service and render the results.
 
 ### Registered Commands
 
-`help`, `clear`, `compact`, `exit`, `stop`, `resume`, `prefill`, `status`, `server`, `tools`, `debug`, `permissions`, `openrouter`, `cd`, `pwd`
+`help`, `clear`, `compact`, `exit`, `stop`, `resume`, `prefill`, `status`, `server`, `model`, `tools`, `debug`, `permissions`, `openrouter`, `cd`, `pwd`
+
+### Server & model selection
+
+- `/server` — add, list, info, diagnose, remove. The `use`/switch subcommand was **removed**; switching is implicit via model selection.
+- `/model <model>` — the single selection entry point. Resolves a model across all servers (`ServerService.resolve_model_servers`), switches the harness to the serving server, and selects it. Supports an explicit `server:model` form where the model id may contain colons (e.g. Ollama quantized tags). Fuzzy completion is driven by `Param.completions` reading the cached `model_catalog`.
+- `/model list` — live discovery across every reachable server, annotated `[server]`.
 
 ### Structure
 
@@ -509,7 +515,7 @@ Commands with sub-operations (e.g. `/server add`, `/server remove`) pass a `subc
 
 ### How to Add a New Command
 
-1. **Define the class** in `pico_chat/ui/commands.py`:
+1. **Define the class** in `pico_chat/ui/commands/` (e.g. a new module, or `builtins.py`):
    ```python
    class MyCommand(Command):
        def __init__(self):
@@ -543,7 +549,7 @@ Commands with sub-operations (e.g. `/server add`, `/server remove`) pass a `subc
    - Listed by `/help` automatically
    - Available in the input autocomplete (fed by `get_command_list()`)
 
-For commands with subcommands, instantiate sub-command classes and pass them as a dict to the `subcommands` parameter. See `ServerCommand` in `commands.py` for an example.
+For commands with subcommands, instantiate sub-command classes and pass them as a dict to the `subcommands` parameter. See `ServerCommand` in `commands/server.py` for an example.
 
 ### Hiding a Command from `/help`
 
