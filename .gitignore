@@ -167,3 +167,8 @@ cython_debug/
 # pixi environments
 .pixi
 *.egg-info
+
+# Local scratch / session artifacts (not part of the project)
+convo.json
+.memories/
+tmp/

@@ -108,6 +108,11 @@ class LLMServerConfig:
     # OpenRouter: the set of explicitly-enabled model ids. All others are
     # hidden from /model (disabled by default). Falls back to ``model``.
     enabled_models: list[str] = field(default_factory=list)
+    # OpenRouter: per-model provider routing. Maps a model id to a
+    # ``{mode, providers}`` dict where mode is "whitelist" (only these
+    # providers) or "blacklist" (all except these). A model with no entry
+    # uses OpenRouter's default routing.
+    model_providers: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @property
     def target(self) -> LLMTarget | None:
@@ -148,6 +153,7 @@ def _parse_server_dict(name: str, server_dict: dict) -> LLMServerConfig:
         retry_delay=server_dict.get("retry_delay", 2.0),
         provider=server_dict.get("provider"),
         enabled_models=server_dict.get("enabled_models", []),
+        model_providers=server_dict.get("model_providers", {}),
     )
 
 

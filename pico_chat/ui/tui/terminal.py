@@ -80,12 +80,12 @@ class Terminal:
         sys.stdout.write(ANSI.SHOW_CURSOR)
         sys.stdout.flush()
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, _exc_val, _exc_tb):
         """Restore terminal state and ensure cursor visibility."""
         # Only clear screen if exiting normally (no exception)
         self.cleanup(clear_screen=(exc_type is None))
 
-    def _handle_resize(self, signum, frame):
+    def _handle_resize(self, _signum, _frame):
         self.resized = True
 
     def get_size(self) -> tuple[int, int]:

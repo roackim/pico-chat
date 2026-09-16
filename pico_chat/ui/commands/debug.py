@@ -114,9 +114,7 @@ class DebugCommand(Command):
             ui.chat_history_panel.add_message(f"Unknown subcommand: {args[0]}", msg_type=SysMsgError())
 
 
-from .builtins import ToolsCommand
-
 __all__ = [
-    "ToolsCommand", "DebugCommand", "DebugPanelCommand",
+    "DebugCommand", "DebugPanelCommand",
     "DebugGetContextCommand", "DebugLogCommand", "DebugSystemPromptCommand",
 ]

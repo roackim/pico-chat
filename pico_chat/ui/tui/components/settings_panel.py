@@ -10,7 +10,7 @@ a form popup does.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field as dc_field
+from dataclasses import dataclass
 from typing import Any, Callable, List, Optional
 
 from pico_chat.ui.tui.buffer import Buffer

@@ -401,6 +401,59 @@ class ServerService:
                     matches.append(server)
         return matches
 
+    # --- OpenRouter model / provider management ---------------------------
+
+    def openrouter_servers(self) -> List[str]:
+        """Return the names of configured OpenRouter servers."""
+        from pico_chat import pico_cfg
+        return [
+            name for name, cfg in pico_cfg.config.servers.items()
+            if cfg.get("type") == "openrouter"
+        ]
+
+    def get_openrouter_config(self, server: str) -> Optional[Dict[str, Any]]:
+        """Return the raw config dict for an OpenRouter server, or None."""
+        from pico_chat import pico_cfg
+        cfg = pico_cfg.config.servers.get(server)
+        if cfg is None or cfg.get("type") != "openrouter":
+            return None
+        return cfg
+
+    def set_enabled_models(self, server: str, models: List[str]) -> None:
+        """Replace the enabled-model allowlist for an OpenRouter server."""
+        from pico_chat import pico_cfg
+        cfg = pico_cfg.config.servers.get(server)
+        if cfg is None:
+            raise ValueError(f"Server '{server}' not found")
+        cfg["enabled_models"] = list(models)
+        pico_cfg.config.save_server(server, cfg, set_active=False)
+
+    def set_model_providers(self, server: str, model: str,
+                            mode: str, providers: List[str]) -> None:
+        """Set per-model provider routing (whitelist/blacklist) for a model."""
+        from pico_chat import pico_cfg
+        cfg = pico_cfg.config.servers.get(server)
+        if cfg is None:
+            raise ValueError(f"Server '{server}' not found")
+        providers = list(providers)
+        if mode not in ("whitelist", "blacklist"):
+            raise ValueError("mode must be 'whitelist' or 'blacklist'")
+        if not providers:
+            # Empty provider list means "use default routing" — drop the entry.
+            cfg.setdefault("model_providers", {}).pop(model, None)
+        else:
+            cfg.setdefault("model_providers", {})[model] = {
+                "mode": mode,
+                "providers": providers,
+            }
+        pico_cfg.config.save_server(server, cfg, set_active=False)
+
+    def get_model_providers(self, server: str, model: str) -> Dict[str, Any]:
+        """Return the provider routing entry for a model (may be empty)."""
+        from pico_chat import pico_cfg
+        cfg = pico_cfg.config.servers.get(server, {})
+        return cfg.get("model_providers", {}).get(model, {})
+
     def all_models(self) -> List[ModelInfo]:
         """Return every discovered model across all servers, annotated by server.
 
@@ -625,6 +678,28 @@ class ServerService:
             )
         except Exception as e:
             return False, f"Failed to fetch balance: {e}", None
+
+    async def fetch_openrouter_catalog(self) -> List[Dict[str, Any]]:
+        """Fetch the full OpenRouter model catalog.
+
+        Returns a list of model dicts, each with ``id``, ``context_length``,
+        ``owned_by``, and ``supported_providers`` (list of provider ids).
+        Returns an empty list on any network error.
+        """
+        import httpx
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    "https://openrouter.ai/api/v1/models",
+                    timeout=10.0,
+                )
+            if response.status_code != 200:
+                logger.warning(f"OpenRouter catalog fetch failed: HTTP {response.status_code}")
+                return []
+            return response.json().get("data", [])
+        except Exception as e:
+            logger.warning(f"OpenRouter catalog fetch failed: {e}")
+            return []
 
     # --- Private helpers ---
 

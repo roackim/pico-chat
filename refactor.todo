@@ -1,0 +1,227 @@
+Dedicated TODO for the big refactor / simplification pass.
+Source: REFACTOR_REPORT.md + design review notes.
+
+LEGEND
+	[P0] blocker / do first		[P1] high value		[P2] nice to have
+	(quick) < 1 session		(med) ~1 day		(large) multiple sessions
+	Order within each category = priority, then rapidity.
+
+============================================================
+SECTION A — STOP THE BLEEDING  (all [P0], all quick)
+Pure deletion + latent-crash fixes. Zero behaviour change intended.
+Do these before anything else; they unlock everything below.
+============================================================
+
+[x] Delete shadowed module + add guard
+	[x] [P0] (quick) delete pico_chat/ui/commands.py (1641 lines, never imported)
+	[x] [P0] (quick) add tests/test_no_shadowed_modules.py so it cannot come back
+	[x] [P0] (quick) verify import resolves to the package, run full pytest
+
+[x] Fix latent crashes / drift
+	[x] [P0] (quick) role_editor_model.ensure_tool() calls undefined ToolPolicy -> NameError
+	[x] [P0] (quick) commands/core.py imports PrefillCommand which no longer exists (dead shim)
+	[x] [P0] (quick) settings_pages() defined twice (line 190 & 194); first def is dead
+	[x] [P0] (quick) input/components/input/__init__.py has two concatenated __all__ blocks
+	[x] [P1] (quick) app.py TARGET_FPS snapshotted at import -> /set fps silently does nothing
+	[x] [P1] (quick) focus.py:150 unreachable code after return
+	[x] [P1] (quick) chat_history_panel.py unused box_w / box_h; app.py unused force_full
+	[x] [P1] (quick) settings_panel.py unused import dc_field (vulture)
+
+[x] Delete dead files
+	[-] [P0] (quick) ui/tui/example_screen.py — KEPT: it IS referenced by test_example_screen.py
+		(earlier grep excluded the test by filename; do not delete)
+	[x] [P1] (quick) ui/commands/core.py once builtins is the single source
+	[ ] [P2] (quick) audit scaffold.py + router.py — likely vestigial alongside example_screen
+
+[x] Repo hygiene
+	[x] [P0] (quick) remove stale build/ tree
+	[x] [P0] (quick) remove convo.json (207 KB session dump, untracked+ungitignored)
+	[x] [P0] (quick) remove hello.txt, .memories/, empty docs/ dir
+	[x] [P0] (quick) gitignore scratch (convo.json, .memories/, tmp/)
+	[ ] [P1] (quick) decide on tmp/mini-swe-agent/ (reference checkout — keep out of repo)
+	[-] [P1] (med) consolidate 5 contradicting TODO files + PROFILE_FORM_REFACTOR.md
+	[-] [P1] (med) merge .wiki/ (16 tracked) + notes/ into docs/ with one ROADMAP.md
+
+============================================================
+SECTION B — PRUNE TOWARD REAL MODULES  (Phase 1)
+Collapse shim theater, kill import cycles. Mostly [P1], mostly quick/med.
+============================================================
+
+[x] Command package
+	[x] [P1] (quick) collapse commands/ shims (registry, core, settings, __init__) into builtins+base
+		-> builtins.py DELETED; each domain now owns its module; registry.py is the sole assembler
+	[x] [P1] (med) stop builtins.py re-exporting from siblings; split by real domain instead
+		[x] server / model / conversation / debug / permissions as own modules
+		[x] also extracted core.py, tools.py, openrouter.py (were inline in builtins)
+	[x] [P1] (med) break the builtins <-> debug/server circular mid-file imports
+		-> HelpCommand now takes a registry callable; debug.py no longer imports builtins
+	[x] [P1] (quick) add import-linter (or AST test) to forbid the cycle
+		-> test/test_command_import_graph.py (AST-based, no new dependency)
+	[ ] [P2] (med) replace 35 Command classes with a (name, desc, params, handler) registry
+		[ ] keep classes only where subcommands + state are real (/server, /model, /debug)
+		NOTE: deferred — the class hierarchy is now cheap to keep; revisit if it grows
+
+[x] Input / completion
+	[x] [P1] (med) merge 7 completion modules into one completion engine
+		-> added completion.py (shared Completer base: suppression + menu lifecycle)
+		-> command_/subcommand_/context_/argument_completion now subclass it
+		-> DELETED path_completion.py + server_completion.py (303 lines, dead since
+		   ArgumentCompletion replaced them — only mentioned in a docstring)
+	[ ] [P2] (med) audit coordinate_mapper / cursor_renderer / scroll_manager / input_handlers
+
+[ ] Tools
+	[ ] [P1] (med) merge tools.py + tool_wrappers.py into one registry with a @tool decorator
+		(name, schema, permission, settings) in one definition site
+		NOTE: deferred to Section C — ToolPolicySpec is read by roles.py
+		(registered_tool_specs -> ToolPolicy defaults), so merging now would
+		entangle this with the role/permission unification. Revisit after C.
+
+============================================================
+SECTION C — UNIFY THE DOMAIN MODEL  (Phase 2, the core simplification)
+The change that actually "simplifies the product". [P1], med/large.
+============================================================
+
+[ ] Roles vs permission profiles — one model
+	[ ] [P1] (large) make Role the single source of truth (tools + policy + prompt)
+	[ ] [P1] (med) demote tool_permissions to serialization/validation helpers only
+	[ ] [P1] (med) delete Role.from_permission_profile / to_permission_profile translation layer
+	[ ] [P1] (med) delete ui/profile_editor_model.py (keep role_editor_model as the one model)
+	[ ] [P1] (med) collapse the two settings surfaces to one (settings tab + /permissions)
+	[ ] [P1] (quick) fix TODO complaints that fall out of this:
+		[ ] "role / permission is unclear"
+		[ ] "changing permission role: status bar not updated"
+		[ ] "deleting permission role not updated till input"
+
+[ ] Permissions — collapse four files into one question
+	[ ] [P1] (med) merge security.py + tool_permissions.py + permission_gate.py + role policy
+		-> single "may I run this?" decision point (~1100 lines today)
+	[ ] [P1] (med) retire the command allowlist as the security boundary
+		[ ] [P1] (quick) decide: container == allow, else ask
+		[ ] [P2] (quick) delete CMD_DEFAULT_ALLOW / _ASK / _DENY + CMD_DANGEROUS_PATTERNS
+		[ ] [P2] (quick) note: allowlist currently permits writes (cp/mv/mkdir/touch) and sed -i
+
+============================================================
+SECTION D — BUGFIXES  (from existing TODOs, still open)
+Small, independent, high user-visible value.
+============================================================
+
+[ ] [P0] (med) tool permission decisions should use typed results, not message parsing
+	(tool_wrappers -> permission_gate round-trips decisions through strings)
+[ ] [P0] (quick) permission prompts must never look like the app has frozen
+[ ] [P1] (quick) server command errors must always be shown in the chat
+[ ] [P1] (quick) long commands / tool args must stay readable in narrow windows
+[ ] [P1] (med) popups: some focus bugs; most popups missing horizontal padding
+[ ] [P1] (med) can't edit a message properly (boxes were removed) -> re-enable or drop editing
+[ ] [P2] (quick) output action should be reversible (click again = undo)
+[ ] [P2] (quick) tool output should not duplicate the command
+[ ] [P2] (med) notifier defaults to _noop_notify -> errors vanish silently when notify forgotten
+
+============================================================
+SECTION E — BREAK THE GOD OBJECTS  (Phase 3)
+Requires Section F (characterization tests) to move safely. [P1], large.
+============================================================
+
+[ ] Harness (1275 lines / 39 methods)
+	[ ] [P1] (large) extract StreamAssembler (SSE streaming + tool-call buffer)
+	[ ] [P1] (med) extract ToolExecutor
+	[ ] [P1] (med) extract Compactor
+	[ ] [P1] (med) extract SessionState (history, ids, usage)
+	[ ] [P1] (quick) return ONE TurnResult instead of 5 side-effect attributes
+		(_last_full_content, _last_full_reasoning, _last_tool_calls,
+		 _last_detected_thinking_tag, _active_tool_slot_by_index)
+	[ ] [P1] (quick) delete no-op "except Exception as e: raise e" handler
+	[ ] [P1] (quick) make per-token logging lazy (logger.debug("%s", x)) in hot path
+
+[ ] chatTUI (1506 lines / 73 methods)
+	[ ] [P1] (large) extract TabManager
+	[ ] [P1] (med) extract StreamPresenter (the ~240-line chunk -> message elif chain)
+	[ ] [P1] (med) extract PermissionPresenter, SettingsPresenter
+	[ ] [P1] (med) remove the legacy_runtime positional-arg reinterpretation shim
+
+[ ] ChatHistoryPanel (1272 lines)
+	[ ] [P1] (med) split rendering / selection / mouse hit-testing / actions
+	[ ] [P2] (med) unify hit-testing into one compositor hit_test(x, y) -> component
+
+============================================================
+SECTION F — MAKE THE REFACTOR SAFE
+Do BEFORE Section E. Tests are currently inverted (10.2k LOC, zero on riskiest files).
+============================================================
+
+[ ] [P0] (med) characterization tests around harness streaming before splitting it
+	(app.py, harness.py, llm_server.py, chat_history_panel.py have ZERO tests)
+[ ] [P1] (quick) guard test: no ui/commands.py shadow
+[ ] [P1] (quick) import-linter: no commands cycles, no ui -> harness private access
+[ ] [P2] (med) rebalance widget-heavy tests as custom widgets collapse
+
+============================================================
+SECTION G — CONFIG, COUPLING & INTERFACES
+Structural papercuts that keep causing regressions. [P1], quick/med.
+============================================================
+
+[ ] Configuration
+	[ ] [P1] (med) turn pico_cfg.config flat god object into nested dataclasses (cfg.ui.*)
+	[ ] [P1] (quick) stop import-time snapshots of config (TARGET_FPS and friends)
+
+[ ] Stop UI peeking at harness privates
+	[ ] [P1] (med) introduce explicit AgentView / ServerView protocol
+		(replaces server._original_base_url, _cached_context_window,
+		 _cached_model_name, _model_name_pending, _connection_state,
+		 agent._add_message_to_history)
+
+[ ] Kill hasattr duck-typing
+	[ ] [P1] (med) actually use ChatUIProtocol (or one concrete interface)
+	[ ] [P1] (quick) delete hasattr guards: stop_generation, clear_history, set_streaming_active
+
+[ ] Server / model conflation  ("not a fan of hardcoded models/servers")
+	[ ] [P1] (large) model as connection (endpoint+auth) + model (discovered): one /connect + /model
+	[ ] [P1] (med) drop models_by_server + legacy active_model sync (server_service.py 792 lines)
+	[ ] [P2] (med) use real token counts from server (llamacpp / ollama / openrouter)
+	[ ] [P2] (quick) remove token estimation once server counts are trusted
+
+============================================================
+SECTION H — UI / TUI TOOLKIT  (Phase 4 + cleanup)
+============================================================
+
+[ ] [P1] (med) decide: reusable toolkit or just app chrome? enforce the boundary
+	(settings_pages.py — app logic — currently leaks into the toolkit)
+[ ] [P1] (med) finish PROFILE_FORM_REFACTOR.md
+	[ ] adopt explicit InputResult (replace bool returns)
+	[ ] containers own sibling navigation; leaves own activation
+	[ ] delete ProfileListField / ProfileList special-casing (~400 lines)
+[ ] [P1] (med) reduce form layers: FormField + FieldModel + FormFieldSpec -> one abstraction
+[ ] [P1] (med) replace callback explosion with events/enum
+	(on_select/create/duplicate/rename/remove/submit/cancel/new_profile/role_change)
+[ ] [P1] (quick) remove _HistoryShim; notifications need one real sink
+[ ] [P2] (quick) check overlap: ascii_table.py vs table_view.py vs markdown tables
+[ ] [P2] (med) status line above input (copied-to-clipboard indicator, "+N messages")
+[ ] [P2] (med) move debug panel to its own conversation
+
+============================================================
+SECTION I — PRODUCT / NAMING  (cheap, high clarity)
+============================================================
+
+[ ] [P1] (quick) one name: pico_chat pkg / pico cli / ~/.config/pico-chat / "Pico-Chat" docs
+[ ] [P2] (quick) optional role prefix mode ("pico: " / "user: ")
+
+============================================================
+SECTION J — FEATURES CARRIED OVER  (open items from existing TODOs)
+Not refactor work, but tracked here so nothing is lost. Mostly [P2].
+============================================================
+
+[ ] [P2] (med) /subagents command
+	[ ] tab listing active + finished subagents
+	[ ] open the subagent conversation
+	[ ] close / shutdown a subagent
+	[ ] inherit safe tool permissions for nested subagents
+	[ ] show when a subagent is waiting for user input
+[ ] [P2] (med) SKILLS.md support  (!important)
+[ ] [P2] (med) AGENTS.md integration into system prompt
+[ ] [P2] (large) git integration (/git branch | commit | squash | rebase)
+[ ] [P2] (med) local per-project config override for pico cfg
+[ ] [P2] (large) containers: move bubblewrap -> podman (cf notes/cmd.md)
+[ ] [P2] (med) /theme command (runtime theme create/edit)
+[ ] [P2] (med) dynamic reasoning budget
+[ ] [P2] (med) validate saved roles/settings before loading; transactional import
+[ ] [P2] (med) prevent stale generation results after changing roles
+[ ] [P2] (med) do not let one tab's workspace change affect another tab
+[ ] [P2] (quick) /permissions ENTER-to-ok ergonomics — rethink (ENTER has many meanings)

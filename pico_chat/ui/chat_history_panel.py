@@ -765,7 +765,7 @@ class ChatHistoryPanel(TextComponent):
         if hasattr(buffer, 'clear_clip'):
             buffer.clear_clip()
 
-    def _render_selection(self, buffer: Buffer, msg, box, box_y: int, box_w: int, box_h: int):
+    def _render_selection(self, buffer: Buffer, msg, box, box_y: int, _box_w: int, _box_h: int):
         """Overlay a highlight on the selected range within a message box.
         
         Uses segment-level display_width for speed; only walks characters

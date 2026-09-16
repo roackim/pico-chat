@@ -12,10 +12,10 @@ from typing import TYPE_CHECKING, Dict, List, Optional
 if TYPE_CHECKING:
     from pico_chat.ui.commands import Command
 
-from pico_chat.ui.tui.components.menu import SelectionMenu
+from .completion import Completer
 
 
-class ArgumentCompletion:
+class ArgumentCompletion(Completer):
     """Provides fuzzy autocomplete for command arguments based on Param definitions.
 
     Works for both top-level commands and nested subcommands.  The caller
@@ -23,11 +23,9 @@ class ArgumentCompletion:
     completer (CommandCompletion, SubcommandCompletion) is not active.
     """
 
-    def __init__(self, menu: SelectionMenu, commands: Dict[str, Command]):
-        self.menu = menu
+    def __init__(self, menu, commands: Dict[str, Command]):
+        super().__init__(menu)
         self.commands = commands  # The COMMANDS registry
-        self.is_active = False
-        self.suppressed_word: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Parsing
@@ -105,11 +103,10 @@ class ArgumentCompletion:
             return
 
         # Suppression
-        if self.suppressed_word is not None:
-            if current_text.startswith(self.suppressed_word):
-                self.hide()
-                return
-            self.suppressed_word = None
+        self._refresh_suppression(current_text)
+        if self._is_suppressed(current_text):
+            self.hide()
+            return
 
         # Hide if exact match already typed
         if current_text in items:
@@ -117,8 +114,7 @@ class ArgumentCompletion:
             return
 
         # Fuzzy filter and show
-        self.menu.update(items, current_text, display_prefix="")
-        self.is_active = self.menu.is_visible
+        self._show(items, current_text)
 
     def accept_selection(self, text: str) -> Optional[str]:
         """Accept current selection, return completed text."""
@@ -159,24 +155,14 @@ class ArgumentCompletion:
         # Add trailing space if selection looks complete (for further args)
         return f"{prefix} {' '.join(all_args)} "
 
-    def hide(self):
-        """Deactivate and hide menu."""
-        self.menu.hide()
-        self.is_active = False
-
     def cancel(self, text: str, cursor_pos: int):
         """User pressed ESC — suppress menu for current word."""
         result = self._resolve(text)
         if result:
             _, _, current_text = result
-            if current_text:
-                self.suppressed_word = current_text
-        self.hide()
+            self._suppress(current_text)
+        else:
+            self.hide()
 
-    def navigate_up(self):
-        if self.is_active:
-            self.menu.action_up()
 
-    def navigate_down(self):
-        if self.is_active:
-            self.menu.action_down()
+__all__ = ["ArgumentCompletion"]

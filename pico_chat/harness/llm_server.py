@@ -691,9 +691,13 @@ class LLMServer(ABC):
                 payload["tools"] = tools
             if stream:
                 payload["stream_options"] = {"include_usage": True}
-            # OpenRouter provider routing.
-            if self.config.type == "openrouter" and self.config.provider:
-                payload["provider"] = {"order": [self.config.provider]}
+            # OpenRouter provider routing. Per-model routing (whitelist /
+            # blacklist) takes precedence; otherwise fall back to the legacy
+            # single ``provider`` preference.
+            if self.config.type == "openrouter":
+                provider_spec = self._provider_spec(model_name)
+                if provider_spec:
+                    payload["provider"] = provider_spec
 
             if logger.isEnabledFor(logging.DEBUG):
                 msg_summary = []
@@ -851,6 +855,25 @@ class OpenRouterServer(LLMServer):
         if self.config.model:
             return [self.config.model]
         return []
+
+    def _provider_spec(self, model_name: str) -> dict | None:
+        """Build the OpenRouter ``provider`` payload for a model.
+
+        Per-model routing (``model_providers``) takes precedence over the
+        legacy single ``provider``. Returns ``None`` to use OpenRouter's
+        default routing.
+        """
+        entry = self.config.model_providers.get(model_name)
+        if entry:
+            mode = entry.get("mode")
+            providers = entry.get("providers") or []
+            if mode == "whitelist" and providers:
+                return {"order": list(providers)}
+            if mode == "blacklist" and providers:
+                return {"exclude": list(providers)}
+        if self.config.provider:
+            return {"order": [self.config.provider]}
+        return None
 
     async def discover_models(self) -> list[ModelInfo]:
         """Return only the enabled models for this OpenRouter endpoint.

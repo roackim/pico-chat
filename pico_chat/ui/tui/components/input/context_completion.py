@@ -3,26 +3,25 @@
 Provides fuzzy file/folder completion with a configurable trigger prefix.
 """
 
-from typing import List, Optional, Callable
-from pico_chat.ui.tui.components.menu import SelectionMenu
+from typing import Callable, List, Optional
+
+from .completion import Completer
 
 
-class ContextCompletion:
+class ContextCompletion(Completer):
     """Manages file/folder completion with auto-show menu.
-    
+
     Args:
         menu: SelectionMenu instance for displaying completions
         get_items_callback: Callable returning list of available items
         trigger: Trigger prefix string (default: "./")
     """
-    
-    def __init__(self, menu: SelectionMenu, get_items_callback: Callable[[], List[str]], trigger: str = "./"):
-        self.menu = menu
+
+    def __init__(self, menu, get_items_callback: Callable[[], List[str]], trigger: str = "./"):
+        super().__init__(menu)
         self.get_items = get_items_callback
         self.trigger = trigger
         self.trigger_len = len(trigger)
-        self.is_active = False
-        self.suppressed_word: Optional[str] = None  # Word that user ESC'd
     
     def find_trigger_position(self, text: str, cursor_pos: int) -> Optional[int]:
         """Find the last trigger before cursor position."""
@@ -92,23 +91,13 @@ class ContextCompletion:
     
     def update(self, text: str, cursor_pos: int):
         """Auto-update menu based on current text and cursor position."""
-        # Get current word at cursor
         current_word = self.get_current_context_word(text, cursor_pos)
-        
-        # Clear suppression memory if we've moved to a different word
-        if self.suppressed_word and current_word:
-            # Only clear if current word doesn't start with suppressed prefix
-            if not current_word.startswith(self.suppressed_word):
-                self.suppressed_word = None
-        elif self.suppressed_word and not current_word:
-            # Moved away from context word entirely
-            self.suppressed_word = None
-        
-        # Don't show menu if current word starts with suppressed prefix
-        if current_word is not None and self.suppressed_word and current_word.startswith(self.suppressed_word):
+        self._refresh_suppression(current_word)
+
+        if self._is_suppressed(current_word):
             self.hide()
             return
-        
+
         # No trigger found
         if current_word is None:
             self.hide()
@@ -145,11 +134,11 @@ class ContextCompletion:
         # Update menu with fuzzy filtering. No display prefix: the items are
         # already relative paths (or bare names when drilling), so showing
         # "./" would be redundant.
-        self.menu.update(rest, search_term, display_prefix="")
+        self._show(rest, search_term)
         if has_parent:
             self.menu.items = self.menu.items + ["../"]
             self.menu.is_visible = len(self.menu.items) > 0
-        self.is_active = self.menu.is_visible
+            self.is_active = self.menu.is_visible
     
     def accept_selection(self, text: str, cursor_pos: int) -> Optional[tuple[str, int]]:
         """Accept current selection, return (new_text, new_cursor_pos)."""
@@ -188,25 +177,10 @@ class ContextCompletion:
         new_cursor_pos = trigger_pos + self.trigger_len + len(selected)
 
         return (new_text, new_cursor_pos)
-    
-    def hide(self):
-        """Deactivate and hide menu."""
-        self.menu.hide()
-        self.is_active = False
-    
+
     def cancel(self, text: str, cursor_pos: int):
         """User pressed ESC - suppress menu for current word prefix."""
-        current_word = self.get_current_context_word(text, cursor_pos)
-        if current_word is not None:
-            self.suppressed_word = current_word
-        self.hide()
-    
-    def navigate_up(self):
-        """Move selection up in menu."""
-        if self.is_active:
-            self.menu.action_up()
-    
-    def navigate_down(self):
-        """Move selection down in menu."""
-        if self.is_active:
-            self.menu.action_down()
+        self._suppress(self.get_current_context_word(text, cursor_pos))
+
+
+__all__ = ["ContextCompletion"]

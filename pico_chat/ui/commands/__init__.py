@@ -1,10 +1,14 @@
 """Command package public API.
 
-Concrete command implementations live in :mod:`pico_chat.ui.commands.builtins`.
-This module preserves the historical ``pico_chat.ui.commands`` import path.
+Concrete commands live in per-domain modules (``core``, ``server``,
+``models``, ``roles``, ``debug``, ``permissions``, ``settings``,
+``conversation``, ``tabs``, ``tools``, ``openrouter``). The registry in
+:mod:`pico_chat.ui.commands.registry` assembles them; this module is the
+public import path.
 """
 
-from .builtins import Command, Param, StatusCommand
+from .base import ChatUIProtocol, Command, Param
+from .core import StatusCommand
 from .registry import (
     COMMANDS,
     get_command_list,
@@ -14,6 +18,7 @@ from .registry import (
 
 __all__ = [
     "COMMANDS",
+    "ChatUIProtocol",
     "Command",
     "Param",
     "StatusCommand",

@@ -147,4 +147,3 @@ class FocusScope:
                     and widget.y <= y < widget.y + widget.height):
                 return self.manager.focus(index)
         return False
-        return False

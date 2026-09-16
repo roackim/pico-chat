@@ -190,19 +190,19 @@ class _HistoryShim:
 def settings_pages(runtime=None, agent=None, notify: Notify = _noop_notify,
                    on_role_change: Optional[Callable[[], None]] = None,
                    history_panel=None) -> list:
-    """Assemble the default settings pages (permissions, roles)."""
-def settings_pages(runtime=None, agent=None, notify: Notify = _noop_notify,
-                   on_role_change: Optional[Callable[[], None]] = None,
-                   history_panel=None) -> list:
     """Assemble the default settings pages.
 
-    A single **roles** page is the settings surface: a role already carries
-    every policy the old standalone permissions page offered (read/write/patch
-    inside + outside, unknown commands, command chains, container flags) plus
-    the role itself.  The permissions popup command is unchanged and still
-    delegates to its own builder.
+    Two pages:
+    - **roles** — a role carries every policy the old standalone permissions
+      page offered (read/write/patch inside + outside, unknown commands,
+      command chains, container flags) plus the role itself.
+    - **openrouter** — enable OpenRouter models and configure per-model
+      provider routing (whitelist / blacklist).
+    The permissions popup command is unchanged and still delegates to its own
+    builder.
     """
     from pico_chat.ui.tui.components.settings_panel import SettingsPage
+    from pico_chat.ui.openrouter_settings import build_openrouter_fields
 
     return [
         SettingsPage(
@@ -213,6 +213,13 @@ def settings_pages(runtime=None, agent=None, notify: Notify = _noop_notify,
             title="Roles",
             description="Conversation roles and their tool policies. "
                         "Switching a role applies it to the active conversation.",
+        ),
+        SettingsPage(
+            "openrouter",
+            lambda: build_openrouter_fields(notify=notify)[0],
+            title="OpenRouter",
+            description="Enable OpenRouter models and configure per-model "
+                        "provider routing (whitelist / blacklist).",
         ),
     ]
 

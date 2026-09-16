@@ -3,7 +3,7 @@ import json
 from types import SimpleNamespace
 
 from pico_chat.harness.roles import Role
-from pico_chat.ui.commands.builtins import ConversationExportCommand, ConversationImportCommand
+from pico_chat.ui.commands.conversation import ConversationExportCommand, ConversationImportCommand
 
 
 class FakeAgent:

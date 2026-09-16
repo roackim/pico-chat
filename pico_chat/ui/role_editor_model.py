@@ -5,7 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from pico_chat.harness import roles
-from pico_chat.harness.roles import Role
+from pico_chat.harness.roles import Role, ToolPolicy
 
 
 class RoleEditorModel:

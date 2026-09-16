@@ -180,16 +180,21 @@ def test_settings_pages_builders_produce_pages():
     from pico_chat.ui.settings_pages import settings_pages
 
     pages = settings_pages()
-    # Permissions were merged into the single roles page: a role already
-    # carries every permission policy.
-    assert [page.name for page in pages] == ["roles"]
+    # Roles carries every permission policy; the OpenRouter page manages
+    # model enablement and provider routing.
+    assert [page.name for page in pages] == ["roles", "openrouter"]
     assert pages[0].title == "Roles"
     fields = pages[0].build_fields()
     assert fields, "roles page produced no fields"
 
+    or_pages = [p for p in pages if p.name == "openrouter"]
+    assert or_pages and or_pages[0].title == "OpenRouter"
+    or_fields = or_pages[0].build_fields()
+    assert or_fields, "openrouter page produced no fields"
+
 
 def test_settings_command_registered():
-    from pico_chat.ui.commands.builtins import COMMANDS
+    from pico_chat.ui.commands import COMMANDS
     from pico_chat.ui.commands.settings import SettingsCommand
 
     assert isinstance(COMMANDS["settings"], SettingsCommand)

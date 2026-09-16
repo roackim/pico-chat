@@ -45,8 +45,6 @@ from pico_chat.ui.conversation_runtime import ConversationRuntime
 # Import chunks module for type checking
 from pico_chat.harness import chunks
 
-TARGET_FPS = pico_cfg.config.target_fps
-
 
 class _AppFocusTarget:
     """Adapter exposing an application focus target to the TUI focus API."""
@@ -1399,7 +1397,7 @@ class chatTUI(ChatActionHandlers):
         return False
 
 
-    def render(self, force_full=False):
+    def render(self, _force_full=False):
         if not self.compositor or self.compositor.width == 0 or self.compositor.height == 0:
             return
 
@@ -1442,7 +1440,9 @@ class chatTUI(ChatActionHandlers):
         )
         self._chat_workspace = chat_screen.workspace
         self.root = chat_screen.root  # Store root for global handler
-        self.compositor = Compositor(self.root, fps=TARGET_FPS, shutdown_event=self.shutdown_event)
+        # Read fps at construction time (not import time) so config changes apply.
+        self.compositor = Compositor(self.root, fps=pico_cfg.config.target_fps,
+                                     shutdown_event=self.shutdown_event)
         self.compositor.padding = pico_cfg.config.ui_app_global_padding  # Apply global padding from config
         self.modal_host = ModalHost(self.compositor)
         self._focus_scope.enter()
