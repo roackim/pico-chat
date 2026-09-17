@@ -78,6 +78,7 @@ class ModelUseCommand(Command):
             ui.chat_history_panel.add_message("Usage: /model <model>", msg_type=SysMsgError())
             return
 
+        from pico_chat import pico_cfg
         from pico_chat.harness.server_service import ServerService
         service = ServerService()
 
@@ -87,18 +88,53 @@ class ModelUseCommand(Command):
         # "metallama:Qwen3.8-27B-think:low"). We only split on the FIRST
         # occurrence of "<known-server>:"; otherwise the whole arg is a model.
         server_hint, model = _split_server_model(raw, service)
-        if server_hint is None:
-            servers = service.resolve_model_servers(model)
-            if not servers:
-                # Discovery is fast — bootstrap discovery so /model works
-                # immediately after /server add.
-                try:
-                    await service.discover_all_models()
-                    servers = service.resolve_model_servers(model)
-                except Exception:
-                    servers = service.resolve_model_servers(model)
-        else:
+
+        # Always refresh discovery before resolving. The cached catalog can be
+        # stale (a model may have been pulled/renamed, or moved to another
+        # server), and picking a stale server would send the request to an
+        # endpoint that no longer serves it.
+        discovery_warning = None
+        if server_hint is not None:
+            if server_hint not in pico_cfg.config.servers:
+                ui.chat_history_panel.add_message(
+                    f"Server '{server_hint}' not found.\n\n"
+                    "Use '/server list' to see configured servers.",
+                    msg_type=SysMsgError(), title="model")
+                return
+            try:
+                await service.list_models(server_hint)
+                catalog = {
+                    m.id for m in service.all_models()
+                    if m.metadata.get("_server") == server_hint
+                }
+                # Only enforce when the server actually reports a catalog; a
+                # server that cannot list models must not be blocked.
+                if catalog and model not in catalog:
+                    nearby = sorted(catalog)[:8]
+                    hint = ""
+                    if pico_cfg.config.servers.get(server_hint, {}).get("type") == "openrouter":
+                        hint = ("\n\nOpenRouter models are disabled until enabled "
+                                "in Settings \u2192 OpenRouter.")
+                    ui.chat_history_panel.add_message(
+                        f"Model '{model}' is not served by '{server_hint}'.\n\n"
+                        + "\n".join(f"  - {m}" for m in nearby) + hint,
+                        msg_type=SysMsgError(), title="model")
+                    return
+            except Exception as exc:
+                discovery_warning = (
+                    f"Could not refresh '{server_hint}' ({exc}); using the "
+                    "cached catalog."
+                )
             servers = [server_hint]
+        else:
+            try:
+                await service.discover_all_models()
+            except Exception as exc:
+                discovery_warning = f"Model discovery failed ({exc}); using the cached catalog."
+            servers = service.resolve_model_servers(model)
+
+        if discovery_warning:
+            ui.chat_history_panel.add_message(discovery_warning, msg_type=SysMsg(), title="model")
 
         if not servers:
             ui.chat_history_panel.add_message(

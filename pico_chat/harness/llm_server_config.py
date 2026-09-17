@@ -184,14 +184,20 @@ def get_server_config_by_name(name: str) -> LLMServerConfig | None:
     """
     Get a server configuration by name.
 
-    Returns None if the named server is not found in config.
+    Applies the per-server model selection so the returned config describes
+    the endpoint *and the model that was last selected on it*. Returns None if
+    the named server is not found in config.
     """
     from pico_chat import pico_cfg
 
     server_dict = pico_cfg.config.servers.get(name)
     if server_dict is None:
         return None
-    return _parse_server_dict(name, server_dict)
+    config = _parse_server_dict(name, server_dict)
+    selected = pico_cfg.config.get_model_for_server(name)
+    if selected is not None:
+        config.model = selected
+    return config
 
 
 # Global server configuration - call get_server_config() to get current config

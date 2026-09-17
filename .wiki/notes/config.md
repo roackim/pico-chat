@@ -40,7 +40,7 @@ The TOML file has three top-level sections; the in-memory `Config` object collap
 
 The `ui_` prefix is applied automatically: a TOML key `theme` under `[ui]` maps to `config.ui_theme`.
 
-`[model_selection]` records the **per-server** last-used model — the model you last picked for a given endpoint, independent of the endpoint definition. `[model_catalog]` caches the discovery catalog per server so `/model` fuzzy completion and `ModelInfo` metadata survive a restart without re-querying; it is refreshed by `/model list`, `server add`, and discovery.
+`[model_selection]` records the **per-server** last-used model — the model you last picked for a given endpoint, independent of the endpoint definition. `[model_catalog]` caches the discovery catalog per server so `/model` fuzzy completion and `ModelInfo` metadata survive a restart without re-querying; it is refreshed by `/model` (live, before resolving), `/model list`, `server add`, and discovery. Catalog entries are pruned when a server is removed and invalidated when an OpenRouter server's `enabled_models` changes, so stale models cannot be resolved to the wrong server.
 
 ### Key settings
 
@@ -64,7 +64,8 @@ model-aware context cache. Existing `[servers]` configs remain supported;
 via `/model` also sets that model's serving server as the active endpooint so
 the last-used model is restored as the default on the next launch.
 
-**Model selection resolution order** (`get_server_config`):
+**Model selection resolution order** (`get_server_config` and
+`get_server_config_by_name`, so switching servers restores each one's choice):
 1. per-server model choice in `config.model_selection`
 2. legacy global `config.active_model`
 3. per-server `model` default in the server config dict
@@ -73,7 +74,9 @@ the last-used model is restored as the default on the next launch.
 `enabled_models = ["provider/model", ...]`. OpenRouter models are **disabled
 by default** — only explicitly-enabled models are surfaced by `/model` and
 `discover_models`. `add_openrouter` stores the single model passed at add time
-in `enabled_models`. (A future settings page will edit this list.) A server
+in `enabled_models`. The Settings → OpenRouter page edits this list and
+per-model provider routing; saving drops the cached catalog and rebuilds the
+live server if it is the one the active conversation uses. A server
 config without `enabled_models` falls back to its `model` key. For Ollama
 endpoints, `model_catalog` entries carry the full `/api/tags` metadata (size,
 family, etc.) plus a resolved context window.

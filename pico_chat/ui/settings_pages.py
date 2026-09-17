@@ -203,10 +203,12 @@ def settings_pages(runtime=None, agent=None, notify: Notify = _noop_notify,
         ),
         SettingsPage(
             "openrouter",
-            lambda: build_openrouter_fields(notify=notify)[0],
+            lambda: build_openrouter_fields(
+                notify=notify, runtime=runtime, agent=agent)[0],
             title="OpenRouter",
             description="Enable OpenRouter models and configure per-model "
-                        "provider routing (whitelist / blacklist).",
+                        "provider routing (whitelist / blacklist). "
+                        "Changes apply to the active conversation immediately.",
         ),
     ]
 

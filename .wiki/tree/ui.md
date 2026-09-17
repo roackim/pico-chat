@@ -95,7 +95,7 @@ Base contracts:
 
 **Server/model management:**
 - `/server` — add, list, info, diagnose, remove. The `use`/switch subcommand was **removed**; switching is done implicitly by selecting a model.
-- `/model <model>` — the single model-selection entry point. Resolves a model across all servers via `ServerService.resolve_model_servers()`, switches the harness to the serving server, and selects it. Accepts an explicit `server:model` form (the model id may itself contain colons, e.g. Ollama quantized tags). Model completions are fuzzy-filtered from the cached `model_catalog`.
+- `/model <model>` — the single model-selection entry point. Refreshes discovery live (it does not trust the cached catalog), verifies the model is actually served by the chosen server, switches the harness to it, and selects it. Accepts an explicit `server:model` form (the model id may itself contain colons, e.g. Ollama quantized tags); if that server does not list the model, the command refuses instead of switching. Model completions are fuzzy-filtered from the cached `model_catalog`.
 - `/model list` — discovers models live from every reachable server (via `discover_all_models`), annotated `[server]`.
 
 The input layer's `ArgumentCompletion` reads `Param.completions` to drive

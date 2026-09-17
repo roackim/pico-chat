@@ -397,6 +397,11 @@ def is_local_resolution_pending(url: str) -> bool:
 class LLMServer(ABC):
     """Abstract base class for LLM server implementations."""
 
+    # Whether the endpoint honors a per-request ``model`` selection. Single-
+    # model servers (llama.cpp) ignore it and serve whatever is loaded, so the
+    # displayed/used model must be reconciled with the server's actual model.
+    supports_model_selection: bool = True
+
     def __init__(self, config: LLMServerConfig):
         """Initialize the server with configuration."""
         self.config = config
@@ -440,6 +445,18 @@ class LLMServer(ABC):
         self._selected_model = model_name
         self._cached_model_name = model_name
         self._cached_context_window = self._model_context_windows.get(model_name)
+        if not self.supports_model_selection:
+            # The endpoint serves a single loaded model and ignores the
+            # requested one. Drop the claim so the next probe/request resolves
+            # the real model instead of displaying a selection we don't honor.
+            self._cached_model_name = None
+            self._cached_context_window = None
+            self._connection_state = "unknown"
+            logger.warning(
+                "Endpoint '%s' serves a single model; the requested model '%s' "
+                "will be resolved to the served model.",
+                self.config.name, model_name,
+            )
 
     async def prewarm_model_name(self) -> None:
         """Probe the connection and cache model name/context in the background.
@@ -476,6 +493,22 @@ class LLMServer(ABC):
             if not diagnosis.ok:
                 self._connection_state = "error"
                 return
+            if not self.supports_model_selection:
+                # Reconcile the requested model with what the endpoint actually
+                # serves, so the status bar and the request agree.
+                try:
+                    actual = await self.query_model_name()
+                    if actual and actual != self._selected_model:
+                        logger.warning(
+                            "Endpoint '%s' serves '%s' (requested '%s'); using "
+                            "the served model.", self.config.name, actual,
+                            self._selected_model,
+                        )
+                    if actual:
+                        self._selected_model = actual
+                        self._cached_model_name = actual
+                except Exception as e:
+                    logger.warning("Could not resolve served model: %s", e)
             if not self._cached_model_name:
                 try:
                     await self.get_model_name()
@@ -795,8 +828,14 @@ class LLMServer(ABC):
 
 
 class LlamaCppServer(LLMServer):
-    """Implementation for llama.cpp server."""
-    
+    """Implementation for llama.cpp server.
+
+    A llama.cpp server loads exactly one model and ignores the request's
+    ``model`` field, so it cannot honor a runtime selection.
+    """
+
+    supports_model_selection = False
+
     async def query_model_name(self) -> str:
         """Query model name from llama.cpp server."""
         models = await self.list_models()

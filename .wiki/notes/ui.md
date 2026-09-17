@@ -496,7 +496,7 @@ The command system lives in the `pico_chat/ui/commands/` package (replacing the 
 ### Server & model selection
 
 - `/server` — add, list, info, diagnose, remove. The `use`/switch subcommand was **removed**; switching is implicit via model selection.
-- `/model <model>` — the single selection entry point. Resolves a model across all servers (`ServerService.resolve_model_servers`), switches the harness to the serving server, and selects it. Supports an explicit `server:model` form where the model id may contain colons (e.g. Ollama quantized tags). Fuzzy completion is driven by `Param.completions` reading the cached `model_catalog`.
+- `/model <model>` — the single selection entry point. Refreshes discovery live, resolves a model across all servers (`ServerService.resolve_model_servers`), switches the harness to the serving server, and selects it. An explicit `server:model` form (model id may contain colons, e.g. Ollama quantized tags) is verified against that server before switching. Fuzzy completion is driven by `Param.completions` reading the cached `model_catalog`.
 - `/model list` — live discovery across every reachable server, annotated `[server]`.
 
 ### Structure

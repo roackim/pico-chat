@@ -52,7 +52,8 @@ See [notes/security.md](../notes/security.md) and
 - OpenRouter model catalog validation, connection testing, and balance fetching
 - Model discovery: `discover_models()` (per endpoint), `discover_all_models()` (live, every reachable server), `list_models()` (cache the catalog)
 - Per-server model selection: `select_model(model, server)` persists the choice to `config.model_selection` and makes that server the active one
-- Catalog helpers for the UI: `all_models()` (server-annotated `ModelInfo`), `model_completions()` (fuzzy completion ids), `resolve_model_servers(model)` (which servers serve a model)
+- Catalog helpers for the UI: `all_models()` (server-annotated `ModelInfo`), `model_completions()` (fuzzy completion ids), `resolve_model_servers(model)` (which servers serve a model). These ignore servers no longer present in `config.servers`, and `remove_server`/`discover_all_models` prune their stale catalog entries.
+- `set_enabled_models()` invalidates the server's cached catalog so a changed OpenRouter allowlist is re-discovered (previously the old catalog lingered).
 - llama.cpp URL normalisation and connection testing
 - TOML config persistence (`_set_active_server_in_toml`, `save_server` dedup)
 - `add_ollama` discovers and caches the full catalog instead of hardcoding the first model
@@ -65,12 +66,13 @@ Transport is **raw httpx** (no `openai` SDK): one owned `httpx.AsyncClient` per 
 - `stream_chat(messages)` / `create_completion(...)` — yields `Chunk` objects from the LLM stream
 - `list_models()` — discovers models exposed by an endpoint via `GET /models`
 - `discover_models()` — like `list_models` but optionally enriches metadata. `OllamaServer.discover_models()` enriches each model with its context window via `/api/show`; `OpenRouterServer.discover_models()` returns **only explicitly-enabled models** (see `enabled_models`).
-- `set_model(model_name)` — changes the selected model without replacing the endpoint
-- `prewarm_model_name()` — probes the connection via `diagnose_connection()` so the status bar turns green, then caches model name/context. It no longer early-returns when a model is already cached; it always probes the endpoint so selecting a model marks it online.
+- `supports_model_selection` — class flag. `False` for `LlamaCppServer` because llama.cpp loads one model and ignores the request's `model` field.
+- `set_model(model_name)` — changes the selected model without replacing the endpoint. On a single-model endpoint this drops the cached claim so the next probe resolves the actually-served model instead of displaying a selection that is ignored.
+- `prewarm_model_name()` — probes the connection via `diagnose_connection()` so the status bar turns green, then caches model name/context. It no longer early-returns when a model is already cached; it always probes the endpoint so selecting a model marks it online. For single-model endpoints it reconciles the displayed/requested model with the model the server actually serves.
 - `_resolve_local_hostname(url)` — rewrites `.local` (mDNS) hostnames to a routable IP via `getent` (cached per-host for process lifetime); `invalidate_local_hostname()` drops a stale entry on connect failure so pico retries once against a fresh address. `_resolve_local_hostname_async`/`_resolve_local_hostname_await` are non-blocking variants used by `LLMServer.__init__` and `diagnose_connection()` so an offline `.local` host never blocks the event loop. See [notes/local-hostname-resolution.md](../notes/local-hostname-resolution.md).
 
 ### `llm_server_config.py`
-`LLMServerConfig` — dataclass for endpoint metadata: name, type, URL, credentials, legacy/default model selection, and `enabled_models` (OpenRouter allowlist — all models disabled unless explicitly listed). `ModelInfo` represents discovered model metadata (with `size`/`family`/`modified_at` accessors and `to_dict`/`from_dict` for the catalog), `ModelRef` is a `(server, model)` pair addressable for selection, and `LLMTarget` represents an endpoint/model pair. `get_server_config()` resolves the per-server model selection.
+`LLMServerConfig` — dataclass for endpoint metadata: name, type, URL, credentials, legacy/default model selection, and `enabled_models` (OpenRouter allowlist — all models disabled unless explicitly listed). `ModelInfo` represents discovered model metadata (with `size`/`family`/`modified_at` accessors and `to_dict`/`from_dict` for the catalog), `ModelRef` is a `(server, model)` pair addressable for selection, and `LLMTarget` represents an endpoint/model pair. `get_server_config()` and `get_server_config_by_name()` both resolve the per-server model selection, so switching to a server restores the model last selected on it.
 
 ### `usage.py`
 `TokenUsage` and normalization helpers convert OpenAI-compatible and Ollama

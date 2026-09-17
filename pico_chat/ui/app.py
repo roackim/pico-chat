@@ -204,10 +204,14 @@ class chatTUI(ChatActionHandlers):
             return
 
         config = server.config
+        # Prefer the model the server actually resolved (the one sent in the
+        # next request) over a requested selection that the endpoint may have
+        # ignored. ``_cached_model_name`` is set by ``set_model`` and by the
+        # connection probe, so this cannot show a model the request won't use.
         model = (
-            getattr(server, "selected_model", None)
+            getattr(server, "_cached_model_name", None)
+            or getattr(server, "selected_model", None)
             or config.model
-            or getattr(server, "_cached_model_name", None)
             or "?"
         )
         # Strip a leading path and common file suffix from a model id

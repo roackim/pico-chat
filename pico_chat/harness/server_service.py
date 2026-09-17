@@ -391,14 +391,18 @@ class ServerService:
         server, falls back to its configured ``model`` default.
         """
         from pico_chat import pico_cfg
-        matches = []
-        for server, models in pico_cfg.config.models_by_server.items():
-            if any(m.get("id") == model for m in models):
-                matches.append(server)
+        # Only consider servers that are still configured; a removed server's
+        # catalog may linger until the next discovery otherwise.
+        matches = [
+            server for server, models in pico_cfg.config.models_by_server.items()
+            if server in pico_cfg.config.servers
+            and any(m.get("id") == model for m in models)
+        ]
         if not matches:
-            for server, cfg in pico_cfg.config.servers.items():
-                if cfg.get("model") == model:
-                    matches.append(server)
+            matches = [
+                server for server, cfg in pico_cfg.config.servers.items()
+                if cfg.get("model") == model
+            ]
         return matches
 
     # --- OpenRouter model / provider management ---------------------------
@@ -427,6 +431,10 @@ class ServerService:
             raise ValueError(f"Server '{server}' not found")
         cfg["enabled_models"] = list(models)
         pico_cfg.config.save_server(server, cfg, set_active=False)
+        # The enabled set changed, so the cached catalog (and therefore /model
+        # completion) is stale — drop it and let the next discovery rebuild it.
+        pico_cfg.config.models_by_server.pop(server, None)
+        pico_cfg.config.save_model_catalog()
 
     def set_model_providers(self, server: str, model: str,
                             mode: str, providers: List[str]) -> None:
@@ -463,6 +471,8 @@ class ServerService:
         from pico_chat import pico_cfg
         result = []
         for server, models in pico_cfg.config.models_by_server.items():
+            if server not in pico_cfg.config.servers:
+                continue
             for m in models:
                 info = ModelInfo.from_dict(m)
                 info.metadata["_server"] = server
@@ -488,6 +498,9 @@ class ServerService:
                 pico_cfg.config.models_by_server[server_name] = [m.to_dict() for m in models]
             except Exception as e:
                 logger.warning(f"Discovery failed for '{server_name}': {e}")
+        # Drop catalogs for servers that are no longer configured.
+        for stale in [s for s in pico_cfg.config.models_by_server if s not in pico_cfg.config.servers]:
+            pico_cfg.config.models_by_server.pop(stale, None)
         pico_cfg.config.save_model_catalog()
         return self.all_models()
 
@@ -631,6 +644,10 @@ class ServerService:
             toml.dump(data, f)
 
         del pico_cfg.config.servers[server_name]
+        # Drop the server's discovery catalog so its models cannot linger in
+        # /model completion or resolution after the server is gone.
+        pico_cfg.config.models_by_server.pop(server_name, None)
+        pico_cfg.config.save_model_catalog()
 
         msg = f"Removed server '{server_name}'"
         if switched_to:

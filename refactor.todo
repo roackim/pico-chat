@@ -196,6 +196,18 @@ Structural papercuts that keep causing regressions. [P1], quick/med.
 	[ ] [P1] (quick) delete hasattr guards: stop_generation, clear_history, set_streaming_active
 
 [ ] Server / model conflation  ("not a fan of hardcoded models/servers")
+	[x] (med) fix stale /model selection (display vs. actual, stale catalog)
+		-> status bar now shows the model actually sent (_cached_model_name),
+		   not merely the requested selection.
+		-> /model <model> refreshes discovery live and refuses to switch to a
+		   server that does not list the model.
+		-> get_server_config_by_name applies the per-server model selection.
+		-> catalog entries pruned on server removal; filtered to configured
+		   servers; OpenRouter enabled_models changes invalidate the catalog.
+		-> OpenRouter settings save now actually persists + rebuilds the live
+		   server (the returned save callback was previously discarded).
+		-> single-model endpoints (llama.cpp) reconcile the requested model
+		   with the served model instead of displaying a selection it ignores.
 	[ ] [P1] (large) model as connection (endpoint+auth) + model (discovered): one /connect + /model
 	[ ] [P1] (med) drop models_by_server + legacy active_model sync (server_service.py 792 lines)
 	[ ] [P2] (med) use real token counts from server (llamacpp / ollama / openrouter)
