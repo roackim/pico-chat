@@ -1,4 +1,10 @@
-"""Conversation roles combining tool availability, policies, and instructions."""
+"""Conversation roles combining tool availability, policies, and instructions.
+
+``Role`` is the single source of truth for a conversation's operating mode:
+which tools are enabled, what each tool's permission policy is, and the
+role-specific prompt.  There is no parallel permission-profile model; the
+low-level policy primitives live in :mod:`pico_chat.harness.permissions`.
+"""
 
 from __future__ import annotations
 
@@ -9,12 +15,11 @@ from typing import Any
 
 import toml
 
-from pico_chat.harness import tool_permissions
-from pico_chat.harness.tool_permissions import (
-    FilePermissions,
+from pico_chat.harness.permissions import (
+    CMD_DEFAULT_ALLOW,
+    CMD_DEFAULT_ASK,
+    CMD_DEFAULT_DENY,
     Permission,
-    RunPermissions,
-    ToolPermissionsProfile,
 )
 
 
@@ -42,135 +47,164 @@ class Role:
     def policy_for(self, tool_name: str) -> ToolPolicy:
         return self.tools.get(tool_name, ToolPolicy(enabled=False, permission="deny"))
 
-    def to_permission_profile(self) -> ToolPermissionsProfile:
-        """Adapt role policies to the existing permission enforcement model."""
-        base = deepcopy(tool_permissions.permissive)
 
-        for tool_name in ("read", "write", "patch"):
-            policy = self.policy_for(tool_name)
-            inside = policy.settings.get("inside_repo", policy.permission)
-            outside = policy.settings.get("outside_repo", "deny")
-            permissions = FilePermissions(inside_repo=inside, outside_repo=outside)
-            setattr(base, tool_name, permissions if policy.enabled else FilePermissions("deny", "deny"))
+def _build_role(
+    name: str,
+    description: str,
+    prompt: str,
+    enabled_tools: set[str],
+    policies: dict[str, tuple[Permission, dict[str, Any]]],
+) -> Role:
+    """Construct a role from explicit policies, filling defaults for any
+    registered tool that is not listed."""
+    from pico_chat.harness.tools import registered_tool_specs
 
-        run_policy = self.policy_for("run_command")
-        if run_policy.enabled:
-            settings = run_policy.settings
-            base.run = RunPermissions(
-                allow=set(settings.get("allow", tool_permissions.CMD_DEFAULT_ALLOW)),
-                ask=set(settings.get("ask", tool_permissions.CMD_DEFAULT_ASK)),
-                deny=set(settings.get("deny", tool_permissions.CMD_DEFAULT_DENY)),
-                others=settings.get("others", run_policy.permission),
-                chain_policy=settings.get("chain_policy", "ask"),
-                use_container=bool(settings.get("use_container", False)),
-                container_network=bool(settings.get("container_network", False)),
-            )
-        else:
-            base.run = RunPermissions(allow=set(), ask=set(), deny=set(), others="deny")
-
-        search_policy = self.policy_for("search_web")
-        wiki_policy = self.policy_for("search_wiki")
-        base.search = (
-            search_policy.permission
-            if search_policy.enabled or wiki_policy.enabled
-            else "deny"
+    tools = {
+        tool_name: ToolPolicy(
+            enabled=tool_name in enabled_tools,
+            permission=permission,
+            settings=deepcopy(settings),
         )
-        base.name = self.name
-        return base
-
-    @classmethod
-    def from_permission_profile(
-        cls,
-        profile: ToolPermissionsProfile,
-        *,
-        description: str = "",
-        prompt: str = "",
-        enabled_tools: set[str] | None = None,
-    ) -> "Role":
-        """Create a role from a legacy permission profile."""
-        from pico_chat.harness.tool_wrappers import registered_tool_specs
-
-        tool_specs = registered_tool_specs()
-        enabled = set(tool_specs) if enabled_tools is None else set(enabled_tools)
-        policies = {
-            "read": ToolPolicy(
-                "read" in enabled,
-                profile.read.inside_repo,
-                {"inside_repo": profile.read.inside_repo, "outside_repo": profile.read.outside_repo},
+        for tool_name, (permission, settings) in policies.items()
+    }
+    for tool_name, spec in registered_tool_specs().items():
+        tools.setdefault(
+            tool_name,
+            ToolPolicy(
+                enabled=tool_name in enabled_tools,
+                permission=spec.default_permission,
+                settings=deepcopy(spec.default_settings),
             ),
-            "write": ToolPolicy(
-                "write" in enabled,
-                profile.write.inside_repo,
-                {"inside_repo": profile.write.inside_repo, "outside_repo": profile.write.outside_repo},
-            ),
-            "patch": ToolPolicy(
-                "patch" in enabled,
-                profile.patch.inside_repo,
-                {"inside_repo": profile.patch.inside_repo, "outside_repo": profile.patch.outside_repo},
-            ),
-            "run_command": ToolPolicy(
-                "run_command" in enabled,
-                profile.run.others,
-                {
-                    "allow": sorted(profile.run.allow),
-                    "ask": sorted(profile.run.ask),
-                    "deny": sorted(profile.run.deny),
-                    "others": profile.run.others,
-                    "chain_policy": profile.run.chain_policy,
-                    "use_container": profile.run.use_container,
-                    "container_network": profile.run.container_network,
-                },
-            ),
-            "search_web": ToolPolicy("search_web" in enabled, profile.search),
-            "search_wiki": ToolPolicy("search_wiki" in enabled, profile.search),
-            "subagent": ToolPolicy("subagent" in enabled, "ask"),
-            "wait_for_subagents": ToolPolicy("wait_for_subagents" in enabled, "ask"),
-        }
-        for tool_name, spec in tool_specs.items():
-            policies.setdefault(
-                tool_name,
-                ToolPolicy(
-                    tool_name in enabled,
-                    spec.default_permission,
-                    deepcopy(spec.default_settings),
-                ),
-            )
-        return cls(profile.name, description, prompt, policies)
-
-
-_ROLE_PATH = Path("~/.config/pico-chat/roles.toml").expanduser()
+        )
+    return Role(name=name, description=description, prompt=prompt, tools=tools)
 
 
 def default_role() -> Role:
-    role = Role.from_permission_profile(
-        deepcopy(tool_permissions.permissive),
+    """The permissive default role: all tools, safe defaults."""
+    return _build_role(
+        name="default",
         description="General coding assistant",
         prompt="",
+        enabled_tools={
+            "read", "write", "patch", "run_command", "search_web", "search_wiki",
+            "subagent", "wait_for_subagents",
+        },
+        policies={
+            "read": ("allow", {"inside_repo": "allow", "outside_repo": "ask"}),
+            "write": ("allow", {"inside_repo": "allow", "outside_repo": "deny"}),
+            "patch": ("allow", {"inside_repo": "allow", "outside_repo": "deny"}),
+            "run_command": (
+                "deny",
+                {
+                    "allow": sorted(CMD_DEFAULT_ALLOW),
+                    "ask": sorted(CMD_DEFAULT_ASK),
+                    "deny": sorted(CMD_DEFAULT_DENY),
+                    "others": "deny",
+                    "chain_policy": "ask",
+                    "use_container": True,
+                    "container_network": True,
+                },
+            ),
+            "search_web": ("allow", {}),
+            "search_wiki": ("allow", {}),
+            "subagent": ("ask", {}),
+            "wait_for_subagents": ("ask", {}),
+        },
     )
-    role.name = "default"
-    return role
 
 
 def builtin_roles() -> dict[str, Role]:
-    reviewer = Role.from_permission_profile(
-        deepcopy(tool_permissions.scaffolder),
+    """The built-in roles shipped with pico-chat."""
+    reviewer = _build_role(
+        name="reviewer",
         description="Read-only code review",
         prompt="Review code carefully. Do not modify files. Prioritize defects, regressions, and missing tests.",
         enabled_tools={"read", "search_web", "search_wiki", "subagent", "wait_for_subagents"},
+        policies={
+            "read": ("allow", {"inside_repo": "allow", "outside_repo": "deny"}),
+            "write": ("deny", {"inside_repo": "deny", "outside_repo": "deny"}),
+            "patch": ("deny", {"inside_repo": "deny", "outside_repo": "deny"}),
+            "run_command": (
+                "deny",
+                {
+                    "allow": [],
+                    "ask": [],
+                    "deny": [],
+                    "others": "deny",
+                    "chain_policy": "ask",
+                    "use_container": False,
+                    "container_network": False,
+                },
+            ),
+            "search_web": ("allow", {}),
+            "search_wiki": ("allow", {}),
+            "subagent": ("ask", {}),
+            "wait_for_subagents": ("ask", {}),
+        },
     )
-    reviewer.name = "reviewer"
-    researcher = Role.from_permission_profile(
-        deepcopy(tool_permissions.strict),
+    researcher = _build_role(
+        name="researcher",
         description="Research and summarize without making changes",
         prompt="Investigate the request, gather evidence, and report precise findings without modifying files.",
         enabled_tools={"read", "search_web", "search_wiki"},
+        policies={
+            "read": ("ask", {"inside_repo": "ask", "outside_repo": "deny"}),
+            "write": ("ask", {"inside_repo": "ask", "outside_repo": "deny"}),
+            "patch": ("ask", {"inside_repo": "ask", "outside_repo": "deny"}),
+            "run_command": (
+                "ask",
+                {
+                    "allow": [],
+                    "ask": [],
+                    "deny": [],
+                    "others": "ask",
+                    "chain_policy": "ask",
+                    "use_container": True,
+                    "container_network": True,
+                },
+            ),
+            "search_web": ("ask", {}),
+            "search_wiki": ("ask", {}),
+            "subagent": ("ask", {}),
+            "wait_for_subagents": ("ask", {}),
+        },
     )
-    researcher.name = "researcher"
     return {
         "default": default_role(),
         "reviewer": reviewer,
         "researcher": researcher,
     }
+
+
+def scaffolder_role() -> Role:
+    """Read-only role used by subagents to explore without side effects."""
+    return _build_role(
+        name="scaffolder",
+        description="Read-only scaffolding subagent",
+        prompt="",
+        enabled_tools={"read", "search_web", "search_wiki", "subagent", "wait_for_subagents"},
+        policies={
+            "read": ("allow", {"inside_repo": "allow", "outside_repo": "deny"}),
+            "write": ("deny", {"inside_repo": "deny", "outside_repo": "deny"}),
+            "patch": ("deny", {"inside_repo": "deny", "outside_repo": "deny"}),
+            "run_command": (
+                "deny",
+                {
+                    "allow": [],
+                    "ask": [],
+                    "deny": [],
+                    "others": "deny",
+                    "chain_policy": "ask",
+                    "use_container": False,
+                    "container_network": False,
+                },
+            ),
+            "search_web": ("allow", {}),
+            "search_wiki": ("allow", {}),
+            "subagent": ("ask", {}),
+            "wait_for_subagents": ("ask", {}),
+        },
+    )
 
 
 def _policy_to_dict(policy: ToolPolicy) -> dict[str, Any]:
@@ -190,7 +224,7 @@ def _role_to_dict(role: Role) -> dict[str, Any]:
 
 
 def _role_from_dict(name: str, data: dict[str, Any]) -> Role:
-    from pico_chat.harness.tool_wrappers import registered_tool_specs
+    from pico_chat.harness.tools import registered_tool_specs
 
     tools = {}
     for tool_name, values in data.get("tools", {}).items():
@@ -210,6 +244,9 @@ def _role_from_dict(name: str, data: dict[str, Any]) -> Role:
         prompt=data.get("prompt", ""),
         tools=tools,
     )
+
+
+_ROLE_PATH = Path("~/.config/pico-chat/roles.toml").expanduser()
 
 
 def save_role(role: Role) -> None:

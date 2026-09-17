@@ -7,13 +7,21 @@ Provides 4 core tools:
 - patch: Apply replace-block patch
 - run: Execute shell command (sandboxed)
 """
+import asyncio
+import inspect
 import subprocess
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from pico_chat.harness.patch_parser import parse_patch, apply_patch, PatchParseError
-from pico_chat.harness.security import SecurityChecker
-from pico_chat.harness.tool_permissions import ToolPermissionsProfile, permissions as default_permissions
+from pico_chat.harness.permissions import (
+    SecurityChecker,
+    ToolPermissionsProfile,
+    file_permission,
+    resolve_run_permissions,
+    permissions as default_permissions,
+)
 
 
 class ToolError(Exception):
@@ -121,7 +129,7 @@ class FileTools:
         target, is_inside = self._validate_path(path)
         
         # Check permissions
-        permission = self.permissions.get_read_permission(is_inside)
+        permission = file_permission(self.permissions, "read", is_inside)
         if permission == "deny":
             location = "inside repo" if is_inside else "outside repo"
             raise ToolError(f"Permission denied: read {location} is not allowed")
@@ -176,7 +184,7 @@ class FileTools:
         target, is_inside = self._validate_path(path)
         
         # Check permissions
-        permission = self.permissions.get_write_permission(is_inside)
+        permission = file_permission(self.permissions, "write", is_inside)
         if permission == "deny":
             location = "inside repo" if is_inside else "outside repo"
             raise ToolError(f"Permission denied: write {location} is not allowed")
@@ -268,7 +276,7 @@ class FileTools:
         
         # Check permissions before reading
         target, is_inside = self._validate_path(patch.filename)
-        permission = self.permissions.get_patch_permission(is_inside)
+        permission = file_permission(self.permissions, "patch", is_inside)
         if permission == "deny":
             location = "inside repo" if is_inside else "outside repo"
             raise ToolError(f"Permission denied: patch {location} is not allowed")
@@ -309,13 +317,14 @@ class ShellTool:
         """
         self.workspace = Path(workspace_path).resolve()
         self.permissions = permissions or default_permissions
-        
+        self.run_permissions = resolve_run_permissions(self.permissions)
+
         # Create security checker with permissions if not provided
         if security_checker:
             self.security_checker = security_checker
         else:
             self.security_checker = SecurityChecker(
-                permissions=self.permissions.run,
+                permissions=self.run_permissions,
                 confirmation_callback=confirmation_callback
             )
         
@@ -324,7 +333,7 @@ class ShellTool:
         
         # Check bwrap availability if containerization is enabled
         self._bwrap_available = None
-        if self.permissions.run.use_container:
+        if self.run_permissions.use_container:
             self._bwrap_available = self._check_bwrap_available()
     
     @staticmethod
@@ -403,7 +412,7 @@ class ShellTool:
         ])
         
         # Network access
-        if self.permissions.run.container_network:
+        if self.run_permissions.container_network:
             bwrap_args.append('--share-net')
         # Note: --unshare-all already includes --unshare-net
         
@@ -439,7 +448,7 @@ class ShellTool:
             raise ToolError(message)
         
         # Check containerization requirements
-        if self.permissions.run.use_container:
+        if self.run_permissions.use_container:
             if self._bwrap_available is False:
                 raise ToolError(
                     "Containerization enabled but bubblewrap (bwrap) is not available. "
@@ -459,7 +468,7 @@ class ShellTool:
             result = subprocess.run(
                 exec_args,
                 shell=shell_mode,
-                cwd=None if self.permissions.run.use_container else self.workspace,
+                cwd=None if self.run_permissions.use_container else self.workspace,
                 capture_output=True,
                 text=True,
                 timeout=timeout
@@ -497,7 +506,7 @@ class ShellTool:
         if not allowed:
             raise ToolError(message)
 
-        if self.permissions.run.use_container:
+        if self.run_permissions.use_container:
             if self._bwrap_available is False:
                 raise ToolError(
                     "Containerization enabled but bubblewrap (bwrap) is not available. "
@@ -862,3 +871,607 @@ class SearchTools:
             raise ToolError(f"Wikipedia search request failed: {e}")
         except Exception as e:
             raise ToolError(f"Wikipedia search error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Tool registry
+#
+# Each tool is declared once with the ``@tool`` decorator, which carries its
+# name, LLM-facing schema, permission policy and handler.  ``create_toolset``
+# binds those definitions to a :class:`ToolContext` and returns the
+# harness-facing objects.  There is no separate wrapper module anymore.
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class ToolPolicySpec:
+    """Policy metadata owned by a registered tool."""
+
+    profile_kind: str = "simple"
+    default_permission: str = "ask"
+    default_settings: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class ToolDefinition:
+    """A registered tool: schema, policy metadata and handler(s)."""
+
+    name: str
+    description: str
+    parameters: dict
+    policy: ToolPolicySpec
+    handler: Callable[["ToolContext", Any], Any]
+    async_handler: Optional[Callable[["ToolContext", Any], Any]] = None
+    is_blocking: bool = False
+    include: Optional[Callable[["ToolContext"], bool]] = None
+
+
+@dataclass
+class ToolContext:
+    """Shared resources and per-build state for tool instances."""
+
+    toolset: Optional[MinimalToolset] = None
+    workspace: Optional[Path] = None
+    depth: int = 0
+    pending_subagents: list = field(default_factory=list)
+    search_tools: Optional[SearchTools] = None
+    search_max_results: int = 3
+    search_limit: Optional[int] = None
+    state: dict[str, Any] = field(default_factory=dict)
+
+
+_REGISTRY: dict[str, ToolDefinition] = {}
+
+
+def tool(
+    *,
+    name: str,
+    description: str,
+    parameters: dict,
+    policy: Optional[ToolPolicySpec] = None,
+    async_handler: Optional[Callable] = None,
+    is_blocking: bool = False,
+    include: Optional[Callable[[ToolContext], bool]] = None,
+    key: Optional[str] = None,
+):
+    """Register a tool definition.  One decorator per tool — the single
+    definition site for its name, schema, permission and settings.
+
+    ``key`` lets the registry key differ from the LLM-facing ``name`` (e.g.
+    the ``run`` tool is registered as ``run_command``).
+    """
+
+    def decorator(handler):
+        _REGISTRY[key or name] = ToolDefinition(
+            name=name,
+            description=description,
+            parameters=parameters,
+            policy=policy or ToolPolicySpec(),
+            handler=handler,
+            async_handler=async_handler,
+            is_blocking=is_blocking,
+            include=include,
+        )
+        return handler
+
+    return decorator
+
+
+class RegisteredTool:
+    """A registry tool bound to a :class:`ToolContext`."""
+
+    def __init__(self, definition: ToolDefinition, context: ToolContext):
+        self._definition = definition
+        self._context = context
+        self.name = definition.name
+        self.description = definition.description
+        self.parameters = definition.parameters
+        self.is_blocking = definition.is_blocking
+        self.policy_spec = definition.policy
+        self.toolset = context.toolset
+
+    @property
+    def context(self) -> ToolContext:
+        """The resources and configuration this tool was bound to."""
+        return self._context
+
+    def get_schema(self) -> dict:
+        """Return the OpenAI function-calling schema."""
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.parameters,
+            },
+        }
+
+    def cancel_active_run(self) -> bool:
+        """Terminate the tool's active subprocess, if it owns one."""
+        cancel = getattr(self.toolset, "cancel_active_run", None)
+        return cancel() if callable(cancel) else False
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"<RegisteredTool {self.name}>"
+
+
+class _SyncTool(RegisteredTool):
+    def execute(self, **kwargs):
+        return self._definition.handler(self._context, **kwargs)
+
+
+class _AsyncTool(RegisteredTool):
+    async def execute(self, **kwargs):
+        return await self._definition.handler(self._context, **kwargs)
+
+
+class _AsyncCapableTool(_SyncTool):
+    async def execute_async(self, **kwargs):
+        return await self._definition.async_handler(self._context, **kwargs)
+
+
+def _build_tool(name: str, context: ToolContext) -> RegisteredTool:
+    definition = _REGISTRY[name]
+    if inspect.iscoroutinefunction(definition.handler):
+        return _AsyncTool(definition, context)
+    if definition.async_handler is not None:
+        return _AsyncCapableTool(definition, context)
+    return _SyncTool(definition, context)
+
+
+def registered_tool_specs() -> dict[str, ToolPolicySpec]:
+    """Return policy metadata for every registered tool."""
+    return {name: definition.policy for name, definition in _REGISTRY.items()}
+
+
+# --- Tool handlers ---------------------------------------------------------
+
+@tool(
+    name="read",
+    description=(
+        "Read all or part of a UTF-8 text file from the workspace. "
+        "Use offset/limit for large files or targeted inspection. Offset "
+        "is zero-based and limit is the number of lines. Use "
+        "include_line_numbers when you need stable references for a patch."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "File path relative to workspace (e.g., 'config.py' or 'src/main.py')",
+            },
+            "offset": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Optional zero-based first line to return (defaults to 0)",
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Optional number of lines to return",
+            },
+            "max_chars": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Optional maximum number of characters to return",
+            },
+            "include_line_numbers": {
+                "type": "boolean",
+                "description": "Prefix each returned line with its source line number",
+            },
+        },
+        "required": ["path"],
+    },
+    policy=ToolPolicySpec("file", "allow", {"outside_repo": "deny"}),
+)
+def _read_tool(
+    ctx: ToolContext,
+    path: str,
+    offset: int = 0,
+    limit: int | None = None,
+    max_chars: int | None = None,
+    include_line_numbers: bool = False,
+) -> str:
+    try:
+        return ctx.toolset.read(
+            path,
+            offset=offset,
+            limit=limit,
+            max_chars=max_chars,
+            include_line_numbers=include_line_numbers,
+        )
+    except ToolError as e:
+        return str(e)
+
+
+@tool(
+    name="write",
+    description="Write content to a file in the workspace (creates or overwrites)",
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File path relative to workspace"},
+            "content": {"type": "string", "description": "Content to write to the file"},
+        },
+        "required": ["path", "content"],
+    },
+    policy=ToolPolicySpec("file", "allow", {"outside_repo": "deny"}),
+)
+def _write_tool(ctx: ToolContext, path: str, content: str) -> str:
+    try:
+        return ctx.toolset.write(path, content)
+    except ToolError as e:
+        return str(e)
+
+
+@tool(
+    name="patch",
+    description=(
+        "Modify an existing file by replacing one exact code block. "
+        "Preferred format: provide path + search + replace. "
+        "Use write only for creating new files or full rewrites."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "File path relative to workspace"},
+            "search": {
+                "type": "string",
+                "description": "Exact existing text block to replace (include enough context to be unique)",
+            },
+            "replace": {"type": "string", "description": "Replacement text block"},
+            "patch_content": {
+                "type": "string",
+                "description": "Legacy replace-block format (backward compatible)",
+            },
+        },
+        "required": ["path", "search", "replace"],
+    },
+    policy=ToolPolicySpec("file", "allow", {"outside_repo": "deny"}),
+)
+def _patch_tool(
+    ctx: ToolContext,
+    path: str = None,
+    search: str = None,
+    replace: str = None,
+    patch_content: str = None,
+) -> str:
+    try:
+        return ctx.toolset.patch(path=path, search=search, replace=replace, patch_content=patch_content)
+    except ToolError as e:
+        return str(e)
+
+
+async def _run_tool_async(ctx: ToolContext, command: str) -> str:
+    try:
+        return await ctx.toolset.run_async(command)
+    except ToolError as e:
+        return str(e)
+
+
+@tool(
+    name="run",
+    description=(
+        "Execute a shell command in the workspace. "
+        "Supports pipes (|), command chaining (&&, ||, ;). "
+        "Safe commands are auto-allowed. Some commands require user confirmation. "
+        "Blocked commands will be rejected."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "command": {
+                "type": "string",
+                "description": "Shell command to execute (e.g., 'ls -la', 'cat file.txt | grep pattern')",
+            }
+        },
+        "required": ["command"],
+    },
+    policy=ToolPolicySpec(
+        "run",
+        "deny",
+        {"others": "deny", "chain_policy": "ask", "use_container": False, "container_network": False},
+    ),
+    async_handler=_run_tool_async,
+    key="run_command",
+)
+def _run_tool(ctx: ToolContext, command: str) -> str:
+    try:
+        return ctx.toolset.run(command)
+    except ToolError as e:
+        return str(e)
+
+
+@tool(
+    name="search_web",
+    description=(
+        "Search the web using DuckDuckGo. Returns top search results with titles, URLs, and snippets. "
+        "Use this for: library documentation, API references, recent news, troubleshooting, "
+        "technical queries, comparisons, and general web searches. "
+        "Prefer this over search_wiki for most queries unless searching for a specific entity or concept."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Search query (e.g., 'python asyncio tutorial', 'rust error handling best practices')",
+            },
+            "time_range": {
+                "type": "string",
+                "enum": ["day", "week", "month", "year"],
+                "description": "Optional: filter results by recency (useful for news or recent library updates)",
+            },
+        },
+        "required": ["query"],
+    },
+    policy=ToolPolicySpec("search", "allow"),
+)
+def _search_web_tool(ctx: ToolContext, query: str, time_range: Optional[str] = None) -> str:
+    limit = ctx.search_limit
+    if limit is not None and ctx.state.get("search_web_count", 0) >= limit:
+        return f"[search_web] Rate limit reached ({limit} searches per session)"
+    ctx.state["search_web_count"] = ctx.state.get("search_web_count", 0) + 1
+    try:
+        return ctx.search_tools.search_web(query, max_results=ctx.search_max_results, time_range=time_range)
+    except ToolError as e:
+        return f"[search_web] {str(e)}"
+
+
+@tool(
+    name="search_wiki",
+    description=(
+        "Search Wikipedia for encyclopedic information. Returns top results with titles, URLs, and snippets. "
+        "Use this for: named entities (people, places, organizations), concepts with canonical definitions, "
+        "historical events, scientific concepts, algorithms, data structures, and programming paradigms. "
+        "NOT recommended for library-specific documentation or recent news."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Search query (e.g., 'Python programming language', 'Binary search algorithm')",
+            }
+        },
+        "required": ["query"],
+    },
+    policy=ToolPolicySpec("search", "allow"),
+)
+def _search_wiki_tool(ctx: ToolContext, query: str) -> str:
+    limit = ctx.search_limit
+    if limit is not None and ctx.state.get("search_wiki_count", 0) >= limit:
+        return f"[search_wiki] Rate limit reached ({limit} searches per session)"
+    ctx.state["search_wiki_count"] = ctx.state.get("search_wiki_count", 0) + 1
+    try:
+        return ctx.search_tools.search_wiki(query, max_results=ctx.search_max_results)
+    except ToolError as e:
+        return f"[search_wiki] {str(e)}"
+
+
+class _SubagentContextError(Exception):
+    def __init__(self, tokens: int):
+        self.tokens = tokens
+
+
+async def _run_subagent(ctx: ToolContext, task: str) -> str:
+    from pico_chat import pico_cfg
+    from pico_chat.harness.harness import Harness
+    from pico_chat.harness import chunks as chunk_types
+
+    timeout = pico_cfg.config.subagent_timeout
+    max_context = pico_cfg.config.subagent_max_context
+
+    sub = Harness(workspace_path=str(ctx.workspace), depth=ctx.depth + 1)
+
+    result_parts = []
+    cumulative_tokens = 0
+    last_call_tokens = 0
+    in_assistant_turn = False
+
+    async def _collect():
+        nonlocal cumulative_tokens, last_call_tokens, in_assistant_turn
+        async for chunk in sub.chat(task):
+            if isinstance(chunk, chunk_types.MessageStart):
+                if chunk.role == "assistant":
+                    if in_assistant_turn:
+                        cumulative_tokens += last_call_tokens
+                        last_call_tokens = 0
+                    in_assistant_turn = True
+            elif isinstance(chunk, chunk_types.Content):
+                result_parts.append(chunk.content)
+            elif isinstance(chunk, chunk_types.GenerationMetrics):
+                last_call_tokens = chunk.tokens
+                if max_context and (cumulative_tokens + last_call_tokens) > max_context:
+                    raise _SubagentContextError(cumulative_tokens + last_call_tokens)
+
+    try:
+        await asyncio.wait_for(_collect(), timeout=timeout)
+    except asyncio.TimeoutError:
+        return f"[subagent timed out after {timeout}s]"
+    except _SubagentContextError as e:
+        return f"[subagent aborted: context limit exceeded ({e.tokens} > {max_context} tokens)]"
+
+    return "".join(result_parts) or "[subagent returned no response]"
+
+
+def _subagent_available(ctx: ToolContext) -> bool:
+    from pico_chat import pico_cfg
+
+    return ctx.depth < pico_cfg.config.subagent_max_depth
+
+
+@tool(
+    name="subagent",
+    description=(
+        "Spawn a read-only scaffolding subagent to explore the codebase and return findings. "
+        "The subagent can only read files — it cannot write, patch, or run commands. "
+        "Set background=true to queue multiple subagents in parallel; "
+        "collect their results with wait_for_subagents. "
+        "Returns the subagent's complete text response (foreground) or a queue confirmation (background)."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "task": {
+                "type": "string",
+                "description": "The task for the subagent. Be explicit — it has no conversation history.",
+            },
+            "background": {
+                "type": "boolean",
+                "description": "If true, run in background and return immediately. Collect results with wait_for_subagents.",
+            },
+        },
+        "required": ["task"],
+    },
+    policy=ToolPolicySpec("simple", "ask"),
+    include=_subagent_available,
+)
+async def _subagent_tool(ctx: ToolContext, task: str, background: bool = False) -> str:
+    from pico_chat import pico_cfg
+
+    if ctx.depth >= pico_cfg.config.subagent_max_depth:
+        return f"[subagent] Depth limit reached ({pico_cfg.config.subagent_max_depth})."
+
+    if not background:
+        return await _run_subagent(ctx, task)
+
+    index = len(ctx.pending_subagents)
+    future = asyncio.create_task(_run_subagent(ctx, task))
+    ctx.pending_subagents.append({"index": index, "task": task, "future": future})
+    return f"[subagent:{index}] Queued in background."
+
+
+@tool(
+    name="wait_for_subagents",
+    description=(
+        "Wait for all background subagents to finish and return their results. "
+        "Call this after launching subagents with background=true."
+    ),
+    parameters={"type": "object", "properties": {}, "required": []},
+    policy=ToolPolicySpec("simple", "ask"),
+)
+async def _wait_for_subagents_tool(ctx: ToolContext) -> str:
+    if not ctx.pending_subagents:
+        return "[wait_for_subagents] No pending subagents."
+
+    pending = list(ctx.pending_subagents)
+    futures = [p["future"] for p in pending]
+    results = await asyncio.gather(*futures, return_exceptions=True)
+    ctx.pending_subagents.clear()
+
+    parts = []
+    for p, result in zip(pending, results):
+        if isinstance(result, Exception):
+            parts.append(f"[subagent:{p['index']}] Error: {result}")
+        else:
+            parts.append(f"[subagent:{p['index']}] Task: {p['task']}\n{result}")
+
+    return "\n\n".join(parts)
+
+
+# --- Public factories (kept for direct construction/tests) -----------------
+
+def RunTool(toolset: MinimalToolset) -> RegisteredTool:
+    """Build the run tool bound to a toolset."""
+    return _build_tool("run_command", ToolContext(toolset=toolset))
+
+
+def SearchWebTool(search_tools: SearchTools, max_results: int = 3,
+                  search_limit: Optional[int] = None) -> RegisteredTool:
+    """Build the search_web tool bound to a search backend."""
+    return _build_tool("search_web", ToolContext(
+        search_tools=search_tools, search_max_results=max_results, search_limit=search_limit,
+    ))
+
+
+def SearchWikiTool(search_tools: SearchTools, max_results: int = 3,
+                   search_limit: Optional[int] = None) -> RegisteredTool:
+    """Build the search_wiki tool bound to a search backend."""
+    return _build_tool("search_wiki", ToolContext(
+        search_tools=search_tools, search_max_results=max_results, search_limit=search_limit,
+    ))
+
+
+def SubagentTool(workspace_path, depth: int, pending_subagents: list) -> RegisteredTool:
+    """Build the subagent tool."""
+    return _build_tool("subagent", ToolContext(
+        workspace=Path(workspace_path).resolve() if workspace_path else None,
+        depth=depth,
+        pending_subagents=pending_subagents,
+    ))
+
+
+def WaitForSubagentsTool(pending_subagents: Optional[list] = None) -> RegisteredTool:
+    """Build the wait_for_subagents tool."""
+    return _build_tool("wait_for_subagents", ToolContext(
+        pending_subagents=pending_subagents if pending_subagents is not None else [],
+    ))
+
+
+def create_toolset(
+    workspace_path: str | Path,
+    confirmation_callback: Optional[Callable[[str], bool]] = None,
+    permissions=None,
+    depth: int = 0,
+    pending_subagents: Optional[list] = None,
+) -> dict[str, RegisteredTool]:
+    """
+    Create the registered toolset with harness-compatible wrappers.
+
+    Args:
+        workspace_path: Root directory for all operations
+        confirmation_callback: Function to prompt user for command confirmation
+        permissions: Role or ToolPermissionsProfile to use (defaults to global)
+        depth: Current subagent depth (0 = top-level harness)
+        pending_subagents: Shared list for background subagent tracking
+
+    Returns:
+        Dict of tool name to registered tool
+    """
+    toolset = MinimalToolset(workspace_path, confirmation_callback, permissions=permissions)
+
+    if depth > 0:
+        # Subagent: more results per search, but limited number of searches
+        search_max_results = 10
+        search_limit = 3
+    else:
+        # Main agent: fewer results per search, unlimited searches
+        search_max_results = 3
+        search_limit = None
+
+    context = ToolContext(
+        toolset=toolset,
+        workspace=Path(workspace_path).resolve(),
+        depth=depth,
+        pending_subagents=pending_subagents if pending_subagents is not None else [],
+        search_tools=SearchTools(),
+        search_max_results=search_max_results,
+        search_limit=search_limit,
+    )
+
+    return {
+        name: _build_tool(name, context)
+        for name, definition in _REGISTRY.items()
+        if definition.include is None or definition.include(context)
+    }
+
+
+__all__ = [
+    "ToolError",
+    "FileTools",
+    "ShellTool",
+    "MinimalToolset",
+    "SearchTools",
+    "ToolPolicySpec",
+    "ToolContext",
+    "RegisteredTool",
+    "tool",
+    "registered_tool_specs",
+    "create_toolset",
+    "RunTool",
+    "SearchWebTool",
+    "SearchWikiTool",
+    "SubagentTool",
+    "WaitForSubagentsTool",
+]

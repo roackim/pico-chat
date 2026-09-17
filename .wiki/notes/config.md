@@ -112,19 +112,19 @@ All other settings are read-only at runtime — no save mechanism exists for UI 
 
 ---
 
-## System 2 — `tool_permissions` (permission policies)
+## System 2 — roles (tool policies)
 
-**File:** `pico_chat/harness/tool_permissions.py`
+**Files:** `pico_chat/harness/roles.py`, `pico_chat/harness/permissions.py`
 
-Permission policies (`ALLOW` / `ASK` / `DENY`) for tool operations are a separate system, not stored in the main TOML file and not part of `Config`. They live in `tool_permissions.py` as a standalone `permissions` object.
+Tool policies (`ALLOW` / `ASK` / `DENY`) are a separate system, not stored in the main TOML file and not part of `Config`. They live on a `Role` (`roles.py`); the low-level execution primitives and the single decision point live in `permissions.py`.
 
-Permission checking is handled by `PermissionGate` (`harness/permission_gate.py`), which owns the user-response queue and delegates to `ToolPermissionsProfile`.
+Permission checking is handled by `PermissionGate` (`harness/permissions.py`), which owns the user-response queue and checks the active role's policies.
 
 In practice this means:
-- Permission policies cannot be set via `config.toml`. They can be edited through `/permissions` and named profiles are persisted in `~/.config/pico-chat/permission-profiles.toml`.
-- The no-argument `/permissions` popup is a live editor: selecting, creating,
-  duplicating, renaming, removing, or changing a policy applies the active
-  profile immediately and persists edits through `ProfileEditorModel`.
+- Permission policies cannot be set via `config.toml`. They are edited through `/permissions` (or the settings tab), and roles persist in `~/.config/pico-chat/roles.toml`.
+- The no-argument `/permissions` popup is a live role editor: selecting,
+  creating, duplicating, renaming, removing, or changing a policy applies the
+  active role immediately through `RoleEditorModel`.
 - For permission architecture details, see [notes/security.md](./security.md) and [notes/tools-and-permissions.md](./tools-and-permissions.md)
 
 ---
@@ -136,4 +136,4 @@ In practice this means:
 | Server definitions | `pico_cfg.Config.servers` | Yes |
 | UI settings | `pico_cfg.Config.ui_*` | Yes |
 | General settings | `pico_cfg.Config.*` | Yes |
-| Tool permissions | `tool_permissions.py` / `permission-profiles.toml` | Via `/permissions`, not `config.toml` |
+| Tool permissions | `roles.py` / `roles.toml` | Via `/permissions`, not `config.toml` |

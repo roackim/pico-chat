@@ -50,6 +50,6 @@ Requires a running LLM server (or the `FakeServer` fixture from `conftest.py`). 
 ## Adding Tests
 
 - Place new test files in `test/`
-- Mirror the module being tested: `harness/security.py` → `test/test_security.py` (use existing naming convention)
+- Mirror the module being tested: `harness/permissions.py` → `test/test_permissions.py` (use existing naming convention)
 - Use pytest fixtures from `conftest.py` where possible; avoid global state
 - Prefer shared stubs (`NoopDebugStream`, `StubReadTool`) over inline duplicates

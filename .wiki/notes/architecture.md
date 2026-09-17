@@ -18,8 +18,8 @@ Pico is a terminal-based AI agent that connects to local (llama.cpp) or cloud (O
 │      pico_chat/harness/     │  Agent core — LLM loop, tools, security
 │  harness.py (main loop)     │
 │  llm_server.py              │
-│  tools.py + tool_permissions│
-│  security.py                │
+│  tools.py (registry)        │
+│  permissions.py             │
 └────────────┬────────────────┘
              │ HTTP / websocket
 ┌────────────▼────────────────┐
@@ -51,7 +51,7 @@ User types → InputComponent
            → Harness.run_iteration()
            → LLMServer.stream_chat()
            → chunks yielded → UI renders streaming tokens
-           → tool call detected → ToolPermissionsProfile checks policy
+           → tool call detected → PermissionGate checks the active Role policy
            → tool executed → result appended to history
            → next iteration until IDLE
 ```
@@ -64,7 +64,7 @@ User types → InputComponent
 
 - **Custom TUI** — no curses or third-party TUI library; full control over rendering pipeline
 - **Streaming-first** — LLM output streams token-by-token to the buffer; no waiting for full response
-- **Permission gate** — every tool call goes through `PermissionGate` then `ToolPermissionsProfile` before execution; the UI can pause to ask the user
+- **Permission gate** — every tool call goes through `PermissionGate` (`permissions.py`), which checks the active `Role` policy before execution; the UI can pause to ask the user
 - **Stateless tools** — tools are pure functions; harness owns all state
 - **Service layer** — server management and OpenRouter API calls are in `harness/server_service.py`; UI commands are thin adapters- **Model selection is `(server, model)`** — the unit of selection is a server/model pair. `/model <model>` resolves a model across all servers, switches the harness to the serving server, and selects it. Per-server model choices persist in `[model_selection]`; the discovery catalog persists in `[model_catalog]`. OpenRouter models are disabled by default unless listed in `enabled_models`.- **Thinking-tag parsing** — the thinking-tag state machine is in `harness/thinking_parser.py` for testability; handles both `<think>`/`</think>` and `<thinking>`/`</thinking>` across chunk boundaries;
 
@@ -74,13 +74,11 @@ User types → InputComponent
 pico_chat/
   harness/
     harness.py           ← Orchestrator (delegates to modules below)
-    permission_gate.py   ← Tool permission checking + user-response queue
+    permissions.py       ← Single decision point: PermissionGate, SecurityChecker, policy primitives
     thinking_parser.py   ← Thinking-tag state machine + metrics emission
     server_service.py    ← Server config CRUD + model discovery/selection + OpenRouter API (used by commands/)
-    tool_wrappers.py     ← Tool → OpenAI schema adapters
-    tools.py             ← Tool implementations (read/write/patch/run/search)
-    tool_permissions.py  ← Permission profiles
-    security.py          ← SecurityChecker (chain + dangerous pattern detection)
+    tools.py             ← Tool implementations + @tool registry (read/write/patch/run/search/subagent)
+    roles.py             ← Role/ToolPolicy (single source of truth for tool policy)
     llm_server.py        ← LLMServer ABC + concrete impls (llama.cpp, OpenRouter, OpenAI)
     llm_server_config.py ← LLMServerConfig dataclass + config loading
     ...

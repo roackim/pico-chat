@@ -1,12 +1,11 @@
-from pico_chat.harness import tool_wrappers
-from pico_chat.harness.permission_gate import PermissionGate
-from pico_chat.harness.roles import Role
-from pico_chat.harness.tool_permissions import permissive
+from pico_chat.harness import tools as tool_wrappers
+from pico_chat.harness.permissions import PermissionGate
+from pico_chat.harness.roles import default_role
 
 
 def test_registered_tool_metadata_covers_role_policy_entries():
     specs = tool_wrappers.registered_tool_specs()
-    role = Role.from_permission_profile(permissive)
+    role = default_role()
 
     assert set(role.tools) == set(specs)
     assert specs["read"].profile_kind == "file"
@@ -20,7 +19,7 @@ def test_new_registered_tool_gets_default_role_policy(monkeypatch):
     )
     monkeypatch.setattr(tool_wrappers, "registered_tool_specs", lambda: specs)
 
-    role = Role.from_permission_profile(permissive, enabled_tools=set())
+    role = default_role()
 
     assert role.tools["future_tool"].enabled is False
     assert role.tools["future_tool"].permission == "deny"
@@ -28,13 +27,10 @@ def test_new_registered_tool_gets_default_role_policy(monkeypatch):
 
 
 def test_permission_gate_reads_enabled_and_simple_policies_from_role(tmp_path):
-    role = Role.from_permission_profile(
-        permissive,
-        enabled_tools={"search_web", "subagent"},
-    )
+    role = default_role()
+    role.tools["search_wiki"].enabled = False
     gate = PermissionGate(
         str(tmp_path),
-        permissions=role.to_permission_profile(),
         enabled_tools=role.enabled_tool_names(),
         role=role,
     )
@@ -45,12 +41,11 @@ def test_permission_gate_reads_enabled_and_simple_policies_from_role(tmp_path):
 
 
 def test_permission_gate_reads_file_settings_from_role(tmp_path):
-    role = Role.from_permission_profile(permissive)
+    role = default_role()
     role.tools["read"].settings["inside_repo"] = "deny"
     role.tools["read"].settings["outside_repo"] = "allow"
     gate = PermissionGate(
         str(tmp_path),
-        permissions=None,
         enabled_tools=role.enabled_tool_names(),
         role=role,
     )
@@ -60,13 +55,12 @@ def test_permission_gate_reads_file_settings_from_role(tmp_path):
 
 
 def test_permission_gate_reads_run_settings_from_role(tmp_path):
-    role = Role.from_permission_profile(permissive)
+    role = default_role()
     role.tools["run_command"].settings.update(
         {"allow": ["echo"], "ask": [], "deny": [], "others": "deny"}
     )
     gate = PermissionGate(
         str(tmp_path),
-        permissions=None,
         enabled_tools=role.enabled_tool_names(),
         role=role,
     )

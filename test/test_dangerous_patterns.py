@@ -9,7 +9,7 @@ This prevents accidental execution of dangerous operations like:
 """
 import pytest
 from pico_chat.harness.tools import MinimalToolset, ToolError
-from pico_chat.harness.tool_permissions import ToolPermissionsProfile, FilePermissions, RunPermissions
+from pico_chat.harness.permissions import ToolPermissionsProfile, FilePermissions, RunPermissions
 
 
 class TestFindDangerousPatterns:

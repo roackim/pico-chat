@@ -128,10 +128,10 @@ single semantic action path for Enter, Space, and left mouse click.
 controls. A leaf returns a focus intent only when it reaches a local edge;
 the nearest `FormContainer` performs the sibling move.
 
-`profile_editor_model.py` provides `ProfileEditorModel`, the persistence and
-selection boundary used by the permissions editor. It isolates drafts,
-immediately applies and saves edits, and exposes profile lifecycle operations
-without requiring a TUI or widget.
+`role_editor_model.py` provides `RoleEditorModel`, the persistence and
+selection boundary used by the role editor (the single policy surface). It
+isolates drafts, immediately applies and saves edits, and exposes role
+lifecycle operations without requiring a TUI or widget.
 
 ### `field_models.py`
 Standalone form value models independent of rendering and layout.

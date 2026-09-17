@@ -3,7 +3,7 @@
 import asyncio
 import pytest
 from pico_chat.harness.tools import ShellTool, MinimalToolset, ToolError
-from pico_chat.harness.tool_permissions import (
+from pico_chat.harness.permissions import (
     ToolPermissionsProfile, FilePermissions, RunPermissions,
 )
 

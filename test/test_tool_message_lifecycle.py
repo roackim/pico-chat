@@ -99,7 +99,7 @@ def test_harness_stop_tool_kills_run(tmp_path):
     import asyncio
     from pico_chat.harness.harness import Harness
     from pico_chat.harness.tools import MinimalToolset, ShellTool
-    from pico_chat.harness.tool_permissions import (
+    from pico_chat.harness.permissions import (
         ToolPermissionsProfile, FilePermissions, RunPermissions,
     )
 
@@ -132,7 +132,7 @@ def test_harness_stop_tool_kills_run(tmp_path):
 
 def test_run_tool_schema_name_is_run():
     """The LLM-facing tool name is 'run' (not 'run_command')."""
-    from pico_chat.harness.tool_wrappers import RunTool
+    from pico_chat.harness.tools import RunTool
     from pico_chat.harness.tools import MinimalToolset
     import tempfile, os
 

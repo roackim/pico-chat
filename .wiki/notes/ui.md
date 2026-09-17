@@ -209,9 +209,9 @@ navigation into one field:
 
 1. **Model** — owns domain state, validation, and persistence. UI callbacks
      should call public model methods and receive a safe, already-updated value.
-     For permission profiles this is `ProfileEditorModel`, which owns the active
-     profile draft and operations such as `select()`, `create()`, `rename()`,
-     `duplicate()`, `remove()`, and `update_permissions()`.
+     For roles this is `RoleEditorModel`, which owns the active role draft and
+     operations such as `select()`, `create()`, `rename()`, `duplicate()`,
+     `remove()`, and `update()`.
 2. **Fields/components** — own local value editing and rendering. Compose
      `FormField` implementations for scalar values, and compose `ProfileRow`
      and `Button` instances for repeated interactive content. Keep selection,
@@ -223,9 +223,9 @@ navigation into one field:
 #### Recommended composition pattern
 
 ```python
-model = ProfileEditorModel()
+model = RoleEditorModel()
 fields = [
-        ProfileList("Profiles", options=model.profile_names(), value=0,
+        ProfileList("Roles", options=model.role_names(), value=0,
                                 on_select=load_profile, on_create=create_profile,
                                 on_rename=rename_profile, on_duplicate=duplicate_profile,
                                 on_remove=remove_profile),
@@ -242,8 +242,8 @@ The exact callbacks are application-specific, but the flow should remain:
 - `on_select` calls `model.select(name)` and copies the returned draft into
     the controls with `set_value()`.
 - Scalar field `on_change` callbacks construct a complete draft from the
-    fields and call `model.update_permissions(draft)`; do not mutate the
-    profile store directly from a widget.
+    fields and call `model.update(draft)`; do not mutate the role store
+    directly from a widget.
 - Create/duplicate/rename/remove callbacks update the model first, then
     refresh the profile-list options and selected index. Rebuild the list's
     rows after changing its options.

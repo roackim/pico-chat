@@ -13,7 +13,7 @@ import pytest
 
 from pico_chat.harness.harness import Harness
 from pico_chat.harness.llm_status import AgentState
-from pico_chat.harness.permission_gate import PermissionGate
+from pico_chat.harness.permissions import PermissionGate
 
 
 # ---------------------------------------------------------------------------

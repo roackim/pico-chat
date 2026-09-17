@@ -7,20 +7,21 @@ Subagents are lightweight, read-only `Harness` instances spawned by the main age
 ## Architecture
 
 ```
-Harness (depth=0)          ← main agent, full permissions
-    └─ SubagentTool.execute()
-           └─ Harness (depth=1)   ← subagent, scaffolder permissions
+Harness (depth=0)          ← main agent, full role
+    └─ subagent tool execute()
+           └─ Harness (depth=1)   ← subagent, scaffolder role
                   ↳ chat(task) → stream chunks → collect text → return
 ```
 
-`SubagentTool` and `WaitForSubagentsTool` live in `tool_wrappers.py`.  
-The child `Harness` is created inside `_run_subagent()` with `depth=self.depth + 1`.
+The `subagent` and `wait_for_subagents` tools are registered in `tools.py`
+(public factories `SubagentTool` / `WaitForSubagentsTool`).
+The child `Harness` is created inside `_run_subagent()` with `depth=ctx.depth + 1`.
 
 ---
 
 ## Permissions
 
-Subagents always use the **`scaffolder`** permission profile (defined in `tool_permissions.py`):
+Subagents always use the **`scaffolder`** built-in role (defined in `roles.py`; a matching low-level `scaffolder` profile exists in `permissions.py`):
 
 | Operation | Inside repo | Outside repo |
 |-----------|-------------|--------------|
@@ -30,7 +31,9 @@ Subagents always use the **`scaffolder`** permission profile (defined in `tool_p
 | run       | deny (others=deny, allow=∅) | deny |
 | memory    | deny        | —            |
 
-The parent harness detects `depth > 0` at construction time and sets `self._tool_permissions = scaffolder`. This also means no `confirmation_callback` is wired up — subagents never prompt the user.
+The parent harness detects `depth > 0` at construction time and assigns
+`self.role = scaffolder_role()`. This also means no `confirmation_callback` is
+wired up — subagents never prompt the user.
 
 `subagent` and `wait_for_subagents` tool calls use the active role's delegation
 policy. The default role asks for approval, while a child harness remains

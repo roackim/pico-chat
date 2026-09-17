@@ -11,7 +11,7 @@ import pytest
 import subprocess
 from pathlib import Path
 from pico_chat.harness.tools import ShellTool, ToolError
-from pico_chat.harness.tool_permissions import ToolPermissionsProfile, FilePermissions, RunPermissions
+from pico_chat.harness.permissions import ToolPermissionsProfile, FilePermissions, RunPermissions
 
 
 # Check if bwrap is available
@@ -255,7 +255,7 @@ class TestContainerWithChainPolicy:
         def approve_callback(cmd):
             return True
         
-        from pico_chat.harness.security import SecurityChecker
+        from pico_chat.harness.permissions import SecurityChecker
         checker = SecurityChecker(permissions.run, confirmation_callback=approve_callback)
         
         tool = ShellTool(tmp_path, security_checker=checker, permissions=permissions)

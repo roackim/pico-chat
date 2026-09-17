@@ -7,8 +7,8 @@ permission enforcement, and rate limiting for subagents.
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from pico_chat.harness.tools import SearchTools, ToolError
-from pico_chat.harness.tool_wrappers import SearchWebTool, SearchWikiTool
-from pico_chat.harness.tool_permissions import (
+from pico_chat.harness.tools import SearchWebTool, SearchWikiTool
+from pico_chat.harness.permissions import (
     ToolPermissionsProfile,
     FilePermissions,
     RunPermissions,
@@ -288,26 +288,26 @@ class TestSearchPermissions:
     
     def test_search_allowed_in_permissive_profile(self):
         """Test that search is allowed in permissive profile."""
-        from pico_chat.harness.tool_permissions import permissive
+        from pico_chat.harness.permissions import permissive
         
         assert permissive.get_search_permission() == "allow"
     
     def test_search_denied_in_locked_profile(self):
         """Test that search is denied in locked profile."""
-        from pico_chat.harness.tool_permissions import locked
+        from pico_chat.harness.permissions import locked
         
         assert locked.get_search_permission() == "deny"
     
     def test_search_allowed_in_scaffolder_profile(self):
         """Test that search is allowed in scaffolder (subagent) profile."""
-        from pico_chat.harness.tool_permissions import scaffolder
+        from pico_chat.harness.permissions import scaffolder
         
         # Subagents can search for library docs
         assert scaffolder.get_search_permission() == "allow"
     
     def test_search_ask_in_strict_profile(self):
         """Test that search requires confirmation in strict profile."""
-        from pico_chat.harness.tool_permissions import strict
+        from pico_chat.harness.permissions import strict
         
         assert strict.get_search_permission() == "ask"
     
@@ -330,19 +330,20 @@ class TestSearchIntegration:
     
     def test_search_tools_in_create_minimal_tools(self, tmp_path):
         """Test that search tools are included in minimal toolset."""
-        from pico_chat.harness.tool_wrappers import create_toolset
+        from pico_chat.harness.tools import create_toolset
         
         # Main agent (depth=0)
         tools = create_toolset(workspace_path=tmp_path, depth=0)
         
         assert "search_web" in tools
         assert "search_wiki" in tools
-        assert isinstance(tools["search_web"], SearchWebTool)
-        assert isinstance(tools["search_wiki"], SearchWikiTool)
+        assert tools["search_web"].name == "search_web"
+        assert tools["search_wiki"].name == "search_wiki"
+        assert tools["search_web"].policy_spec.profile_kind == "search"
     
     def test_search_tools_main_agent_config(self, tmp_path):
         """Test that main agent gets correct search configuration."""
-        from pico_chat.harness.tool_wrappers import create_toolset
+        from pico_chat.harness.tools import create_toolset
         
         # Main agent (depth=0)
         tools = create_toolset(workspace_path=tmp_path, depth=0)
@@ -351,14 +352,14 @@ class TestSearchIntegration:
         search_wiki = tools["search_wiki"]
         
         # Main agent: max_results=3, no rate limit
-        assert search_web.max_results == 3
-        assert search_web.search_limit is None
-        assert search_wiki.max_results == 3
-        assert search_wiki.search_limit is None
+        assert search_web.context.search_max_results == 3
+        assert search_web.context.search_limit is None
+        assert search_wiki.context.search_max_results == 3
+        assert search_wiki.context.search_limit is None
     
     def test_search_tools_subagent_config(self, tmp_path):
         """Test that subagent gets correct search configuration."""
-        from pico_chat.harness.tool_wrappers import create_toolset
+        from pico_chat.harness.tools import create_toolset
         
         # Subagent (depth=1)
         tools = create_toolset(workspace_path=tmp_path, depth=1)
@@ -367,14 +368,14 @@ class TestSearchIntegration:
         search_wiki = tools["search_wiki"]
         
         # Subagent: max_results=10, rate limit=3
-        assert search_web.max_results == 10
-        assert search_web.search_limit == 3
-        assert search_wiki.max_results == 10
-        assert search_wiki.search_limit == 3
+        assert search_web.context.search_max_results == 10
+        assert search_web.context.search_limit == 3
+        assert search_wiki.context.search_max_results == 10
+        assert search_wiki.context.search_limit == 3
     
     def test_search_tool_schema_generation(self, tmp_path):
         """Test that search tools generate proper OpenAI schemas."""
-        from pico_chat.harness.tool_wrappers import create_toolset
+        from pico_chat.harness.tools import create_toolset
         
         tools = create_toolset(workspace_path=tmp_path, depth=0)
         

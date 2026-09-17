@@ -12,13 +12,13 @@ from pico_chat.harness import chunks
 from pico_chat.harness.harness import Harness
 from pico_chat.harness.llm_status import AgentState
 from pico_chat.harness.tools import MinimalToolset, ToolError
-from pico_chat.harness.tool_permissions import (
+from pico_chat.harness.permissions import (
     ToolPermissionsProfile,
     FilePermissions,
     RunPermissions,
 )
-from pico_chat.harness.permission_gate import PermissionGate
-import pico_chat.harness.tool_permissions as tool_permissions_module
+from pico_chat.harness.permissions import PermissionGate
+import pico_chat.harness.permissions as tool_permissions_module
 
 
 def test_run_permission_prompt_preserves_full_command():
@@ -71,36 +71,8 @@ def test_role_change_history_preserves_notice_after_other_messages():
 from conftest import NoopDebugStream, StubReadTool, run_harness_tool_call
 
 
-def test_permission_profile_round_trip(tmp_path, monkeypatch):
-    profile_path = tmp_path / "permission-profiles.toml"
-    monkeypatch.setattr(tool_permissions_module, "_PROFILE_PATH", profile_path)
-    profile = tool_permissions_module.ToolPermissionsProfile(
-        name="custom",
-        read=FilePermissions(inside_repo="ask", outside_repo="deny"),
-        write=FilePermissions(inside_repo="allow", outside_repo="deny"),
-        patch=FilePermissions(inside_repo="allow", outside_repo="deny"),
-        search="allow",
-        run=RunPermissions(
-            allow={"ls"}, ask={"git"}, deny={"sudo"}, others="ask",
-            chain_policy="deny", use_container=True, container_network=False,
-        ),
-    )
-
-    tool_permissions_module.save_profile(profile.name, profile)
-    loaded = tool_permissions_module.load_profile("custom")
-
-    assert tool_permissions_module.list_profiles() == ["custom"]
-    assert loaded.read.inside_repo == "ask"
-    assert loaded.run.allow == {"ls"}
-    assert loaded.run.chain_policy == "deny"
-
-    tool_permissions_module.apply_profile(loaded)
-    assert tool_permissions_module.permissions.name == "custom"
-    assert tool_permissions_module.permissions.run.use_container is True
-
-
 def _build_harness_stub(tmp_path, read_tool):
-    from pico_chat.harness.permission_gate import PermissionGate
+    from pico_chat.harness.permissions import PermissionGate
     harness = Harness.__new__(Harness)
     harness.debug_stream = NoopDebugStream()
     harness.state = AgentState.IDLE
@@ -634,7 +606,7 @@ class TestPermissionProfiles:
     
     def test_strict_profile_denies_outside_operations(self, tmp_path):
         """Strict profile should deny operations outside repo."""
-        from pico_chat.harness.tool_permissions import strict
+        from pico_chat.harness.permissions import strict
         
         workspace = tmp_path / "workspace"
         workspace.mkdir()
@@ -651,7 +623,7 @@ class TestPermissionProfiles:
     
     def test_unrestricted_profile_allows_all(self, tmp_path):
         """Unrestricted profile should allow all operations."""
-        from pico_chat.harness.tool_permissions import unrestricted
+        from pico_chat.harness.permissions import unrestricted
         
         workspace = tmp_path / "workspace"
         workspace.mkdir()
@@ -672,7 +644,7 @@ class TestPermissionProfiles:
     
     def test_locked_profile_denies_all(self, tmp_path):
         """Locked profile should deny all operations."""
-        from pico_chat.harness.tool_permissions import locked
+        from pico_chat.harness.permissions import locked
         
         test_file = tmp_path / "test.txt"
         test_file.write_text("data")
@@ -780,7 +752,7 @@ class TestHarnessRunPermissionFlow:
 
     def test_auto_allow_benign_command(self, tmp_path, monkeypatch):
         """Benign commands in ALLOW list should auto-approve."""
-        from pico_chat.harness.tool_permissions import CMD_DEFAULT_ALLOW
+        from pico_chat.harness.permissions import CMD_DEFAULT_ALLOW
         
         profile = ToolPermissionsProfile(
             name="test",
@@ -803,7 +775,7 @@ class TestHarnessRunPermissionFlow:
         harness.history = []
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
-        from pico_chat.harness.permission_gate import PermissionGate
+        from pico_chat.harness.permissions import PermissionGate
         harness._permission_gate = PermissionGate(workspace=str(tmp_path), permissions=None)
         harness._tool_permissions = None
         
@@ -831,7 +803,7 @@ class TestHarnessRunPermissionFlow:
 
     def test_auto_ask_dangerous_pattern(self, tmp_path, monkeypatch):
         """Commands with dangerous patterns should require user confirmation."""
-        from pico_chat.harness.tool_permissions import CMD_DEFAULT_ALLOW
+        from pico_chat.harness.permissions import CMD_DEFAULT_ALLOW
         
         profile = ToolPermissionsProfile(
             name="test",
@@ -854,7 +826,7 @@ class TestHarnessRunPermissionFlow:
         harness.history = []
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
-        from pico_chat.harness.permission_gate import PermissionGate
+        from pico_chat.harness.permissions import PermissionGate
         harness._permission_gate = PermissionGate(workspace=str(tmp_path), permissions=None)
         harness._tool_permissions = None
         harness.set_user_response("yes")
@@ -882,7 +854,7 @@ class TestHarnessRunPermissionFlow:
 
     def test_auto_ask_command_in_ask_list(self, tmp_path, monkeypatch):
         """Commands in ASK list should require user confirmation."""
-        from pico_chat.harness.tool_permissions import CMD_DEFAULT_ASK
+        from pico_chat.harness.permissions import CMD_DEFAULT_ASK
         
         profile = ToolPermissionsProfile(
             name="test",
@@ -905,7 +877,7 @@ class TestHarnessRunPermissionFlow:
         harness.history = []
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
-        from pico_chat.harness.permission_gate import PermissionGate
+        from pico_chat.harness.permissions import PermissionGate
         harness._permission_gate = PermissionGate(workspace=str(tmp_path), permissions=None)
         harness._tool_permissions = None
         harness.set_user_response("allow")
@@ -933,7 +905,7 @@ class TestHarnessRunPermissionFlow:
 
     def test_auto_deny_blocked_command(self, tmp_path, monkeypatch):
         """Commands in DENY list should auto-deny."""
-        from pico_chat.harness.tool_permissions import CMD_DEFAULT_DENY
+        from pico_chat.harness.permissions import CMD_DEFAULT_DENY
         
         profile = ToolPermissionsProfile(
             name="test",
@@ -956,7 +928,7 @@ class TestHarnessRunPermissionFlow:
         harness.history = []
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
-        from pico_chat.harness.permission_gate import PermissionGate
+        from pico_chat.harness.permissions import PermissionGate
         harness._permission_gate = PermissionGate(workspace=str(tmp_path), permissions=None)
         harness._tool_permissions = None
         
@@ -983,7 +955,7 @@ class TestHarnessRunPermissionFlow:
 
     def test_user_deny_blocks_execution(self, tmp_path, monkeypatch):
         """User denying permission should block execution."""
-        from pico_chat.harness.tool_permissions import CMD_DEFAULT_ASK
+        from pico_chat.harness.permissions import CMD_DEFAULT_ASK
         
         profile = ToolPermissionsProfile(
             name="test",
@@ -1006,7 +978,7 @@ class TestHarnessRunPermissionFlow:
         harness.history = []
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
-        from pico_chat.harness.permission_gate import PermissionGate
+        from pico_chat.harness.permissions import PermissionGate
         harness._permission_gate = PermissionGate(workspace=str(tmp_path), permissions=None)
         harness._tool_permissions = None
         harness.set_user_response("no")
@@ -1034,7 +1006,7 @@ class TestHarnessRunPermissionFlow:
 
     def test_chain_command_requires_ask(self, tmp_path, monkeypatch):
         """Command chains should require user confirmation."""
-        from pico_chat.harness.tool_permissions import CMD_DEFAULT_ALLOW
+        from pico_chat.harness.permissions import CMD_DEFAULT_ALLOW
         
         profile = ToolPermissionsProfile(
             name="test",
@@ -1058,7 +1030,7 @@ class TestHarnessRunPermissionFlow:
         harness.history = []
         harness.workspace = str(tmp_path)
         harness.tools_map = {"run": run_tool}
-        from pico_chat.harness.permission_gate import PermissionGate
+        from pico_chat.harness.permissions import PermissionGate
         harness._permission_gate = PermissionGate(workspace=str(tmp_path), permissions=None)
         harness._tool_permissions = None
         harness.set_user_response("yes")

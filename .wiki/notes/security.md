@@ -10,12 +10,13 @@ Pico runs shell commands and reads/writes files on behalf of an LLM agent. The s
 - Shell commands may contain dangerous operators (pipes, `&&`, `;`) or escalation patterns (`find -exec`, `awk system()`, `sed /e`)
 - Chained commands can smuggle privileged operations inside benign-looking calls
 
-## SecurityChecker (`security.py`)
+## SecurityChecker (`permissions.py`)
 
-`SecurityChecker.check_command(cmd)` evaluates a shell command before execution:
+`SecurityChecker` evaluates a shell command before execution:
 1. Parses operator structure — detects `;`, `&&`, `||`, `|` chains
-2. Matches against known dangerous pattern list (regex-based)
-3. Returns a `CommandCheck` result: `ALLOW`, `ASK`, or `DENY`
+2. Matches against known dangerous pattern list
+3. `classify(cmd)` returns a typed `CommandAction` (`ALLOW` / `ASK` / `DENY`)
+   without prompting; `check_chain(cmd)` keeps the interactive confirmation path
 
 Dangerous patterns include (non-exhaustive):
 - `find -exec` / `find -execdir`
@@ -24,9 +25,11 @@ Dangerous patterns include (non-exhaustive):
 - `eval`, `exec`, backtick substitution in specific contexts
 - Commands writing outside the repo root
 
-## ToolPermissionsProfile (`tool_permissions.py`)
+## Policy primitives (`permissions.py`)
 
-Defines per-tool policies: `ALLOW` / `ASK` / `DENY`.
+`Role` is the source of truth for a conversation's tool policies. Low-level
+`ToolPermissionsProfile` / `FilePermissions` / `RunPermissions` remain as
+execution helpers and defaults. Policies are `ALLOW` / `ASK` / `DENY`.
 
 - `ASK` — the UI pauses and shows a permission prompt to the user before executing
 - `ALLOW` — executes without prompting

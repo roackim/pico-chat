@@ -14,7 +14,7 @@ will trigger chain detection. This is acceptable as a security trade-off.
 import pytest
 from pathlib import Path
 from pico_chat.harness.tools import MinimalToolset, ToolError
-from pico_chat.harness.tool_permissions import ToolPermissionsProfile, FilePermissions, RunPermissions
+from pico_chat.harness.permissions import ToolPermissionsProfile, FilePermissions, RunPermissions
 
 
 class TestChainPolicyDeny:

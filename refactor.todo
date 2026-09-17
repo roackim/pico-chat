@@ -67,35 +67,57 @@ Collapse shim theater, kill import cycles. Mostly [P1], mostly quick/med.
 		-> command_/subcommand_/context_/argument_completion now subclass it
 		-> DELETED path_completion.py + server_completion.py (303 lines, dead since
 		   ArgumentCompletion replaced them — only mentioned in a docstring)
-	[ ] [P2] (med) audit coordinate_mapper / cursor_renderer / scroll_manager / input_handlers
+	[x] [P2] (med) audit coordinate_mapper / cursor_renderer / scroll_manager / input_handlers
+		-> audit done: all four are live internals of input.py and directly
+		   tested (test_basic_inputs, test_tui_interactions, test_buffer);
+		   not vestigial, so no merge/deletion.
 
-[ ] Tools
-	[ ] [P1] (med) merge tools.py + tool_wrappers.py into one registry with a @tool decorator
+[x] Tools
+	[x] [P1] (med) merge tools.py + tool_wrappers.py into one registry with a @tool decorator
 		(name, schema, permission, settings) in one definition site
-		NOTE: deferred to Section C — ToolPolicySpec is read by roles.py
-		(registered_tool_specs -> ToolPolicy defaults), so merging now would
-		entangle this with the role/permission unification. Revisit after C.
+		-> tool_wrappers.py DELETED; tools.py now owns an @tool registry
+		   (ToolDefinition/ToolContext/RegisteredTool). run is registered under
+		   key run_command with LLM name run. Public factories (RunTool,
+		   SearchWebTool, SearchWikiTool, SubagentTool, WaitForSubagentsTool)
+		   kept for direct construction.
 
 ============================================================
 SECTION C — UNIFY THE DOMAIN MODEL  (Phase 2, the core simplification)
 The change that actually "simplifies the product". [P1], med/large.
 ============================================================
 
-[ ] Roles vs permission profiles — one model
-	[ ] [P1] (large) make Role the single source of truth (tools + policy + prompt)
-	[ ] [P1] (med) demote tool_permissions to serialization/validation helpers only
-	[ ] [P1] (med) delete Role.from_permission_profile / to_permission_profile translation layer
-	[ ] [P1] (med) delete ui/profile_editor_model.py (keep role_editor_model as the one model)
-	[ ] [P1] (med) collapse the two settings surfaces to one (settings tab + /permissions)
-	[ ] [P1] (quick) fix TODO complaints that fall out of this:
-		[ ] "role / permission is unclear"
-		[ ] "changing permission role: status bar not updated"
-		[ ] "deleting permission role not updated till input"
+[x] Roles vs permission profiles — one model
+	[x] [P1] (large) make Role the single source of truth (tools + policy + prompt)
+		-> builtin/default/scaffolder roles are now constructed directly in
+		   roles.py; no Role<->profile round-trip.
+	[x] [P1] (med) demote tool_permissions to serialization/validation helpers only
+		-> tool_permissions.py DELETED; low-level policy primitives now live in
+		   the unified harness/permissions.py and are only execution helpers.
+	[x] [P1] (med) delete Role.from_permission_profile / to_permission_profile translation layer
+		-> both methods deleted. Tools/gate consume a Role or a low-level
+		   profile through the adapters in permissions.py (file_permission,
+		   resolve_run_permissions, search_permission).
+	[x] [P1] (med) delete ui/profile_editor_model.py (keep role_editor_model as the one model)
+		-> DELETED along with the /permissions profile subcommands and the
+		   permission-profiles.toml store.
+	[x] [P1] (med) collapse the two settings surfaces to one (settings tab + /permissions)
+		-> /permissions now builds the same role fields as the settings tab via
+		   settings_pages.build_roles_fields; build_permission_fields removed.
+	[x] [P1] (quick) fix TODO complaints that fall out of this:
+		[x] "role / permission is unclear"
+		[x] "changing permission role: status bar not updated"
+		[x] "deleting permission role not updated till input"
 
-[ ] Permissions — collapse four files into one question
-	[ ] [P1] (med) merge security.py + tool_permissions.py + permission_gate.py + role policy
+[x] Permissions — collapse four files into one question
+	[x] [P1] (med) merge security.py + tool_permissions.py + permission_gate.py + role policy
 		-> single "may I run this?" decision point (~1100 lines today)
+		-> security.py + tool_permissions.py + permission_gate.py DELETED;
+		   merged into harness/permissions.py (command checks, policy
+		   primitives, PermissionGate). Gate now classifies commands with a
+		   typed SecurityChecker.classify() instead of parsing messages.
 	[ ] [P1] (med) retire the command allowlist as the security boundary
+		-> DEFERRED BY DECISION: this pass unifies the code but keeps current
+		   allowlist semantics so the permission suite stays valid.
 		[ ] [P1] (quick) decide: container == allow, else ask
 		[ ] [P2] (quick) delete CMD_DEFAULT_ALLOW / _ASK / _DENY + CMD_DANGEROUS_PATTERNS
 		[ ] [P2] (quick) note: allowlist currently permits writes (cp/mv/mkdir/touch) and sed -i
@@ -105,8 +127,9 @@ SECTION D — BUGFIXES  (from existing TODOs, still open)
 Small, independent, high user-visible value.
 ============================================================
 
-[ ] [P0] (med) tool permission decisions should use typed results, not message parsing
+[x] [P0] (med) tool permission decisions should use typed results, not message parsing
 	(tool_wrappers -> permission_gate round-trips decisions through strings)
+	-> SecurityChecker.classify() returns CommandAction; PermissionGate uses it.
 [ ] [P0] (quick) permission prompts must never look like the app has frozen
 [ ] [P1] (quick) server command errors must always be shown in the chat
 [ ] [P1] (quick) long commands / tool args must stay readable in narrow windows

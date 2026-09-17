@@ -2,7 +2,7 @@
 
 The agent backbone. Manages the LLM conversation loop, tool execution, security checks, context construction, and server management.
 
-Key internal modules: `permission_gate.py` (permission checking), `thinking_parser.py` (thinking-tag state machine), `server_service.py` (server config operations). The `Harness` class in `harness.py` delegates to these.
+Key internal modules: `permissions.py` (the single permission decision point), `thinking_parser.py` (thinking-tag state machine), `server_service.py` (server config operations). The `Harness` class in `harness.py` delegates to these.
 
 See [notes/architecture.md](../notes/architecture.md), [notes/tools-and-permissions.md](../notes/tools-and-permissions.md), and [notes/reasoning-traces.md](../notes/reasoning-traces.md) for conceptual details.
 
@@ -17,19 +17,29 @@ See [notes/architecture.md](../notes/architecture.md), [notes/tools-and-permissi
 - `_execute_tool_calls()` — delegates permission checking to `PermissionGate`
 - `_auto_wait_subagents()` — drains pending background subagents after the main loop ends
 Key state: `AgentState` enum, message history list, active server, tool profile, `_pending_subagents` list, `_abort_subagents_event`, and thinking steering state (`_current_reasoning`, `_pending_thinking_prefill`, `_last_detected_thinking_tag`) initialized during construction.
-Subagents: instantiated with `depth > 0`; use the `scaffolder` permissions profile automatically.
+Subagents: instantiated with `depth > 0`; use the `scaffolder` built-in role automatically.
 See [notes/subagents.md](../notes/subagents.md) for the full subagent lifecycle.
 
-### `permission_gate.py`
-`PermissionGate` — extracted from `Harness`. Encapsulates:
-- File-path inside/outside workspace resolution (deduped from 3 read/write/patch branches)
-- Permission checking against the active `ToolPermissionsProfile`
-- Direct role-owned enforcement for file inside/outside settings and shell run settings when an active `Role` is present; legacy profile enforcement remains the fallback
-- Permission prompt building (`build_prompt()`)
-- Async user-response queue for interactive prompts
-- Retains the active `Role` so availability and simple/search policies are
-	checked from role-owned entries; the converted profile remains for legacy
-	file/run enforcement during migration.
+### `permissions.py`
+The single "may I run this?" decision point. Merges the former `security.py`,
+`tool_permissions.py` and `permission_gate.py`.
+- `PermissionGate` — extracted from `Harness`. Resolves file-path inside/outside
+  workspace, checks the active `Role` (or a low-level `ToolPermissionsProfile`
+  fallback), builds permission prompts (`build_prompt()`), and owns the async
+  user-response queue. The active `Role` is authoritative; no Role↔profile
+  translation layer exists.
+- `SecurityChecker` — quote-aware command-chain parsing and allowlist checks.
+  `classify(command)` returns a typed `CommandAction` (used by the gate), while
+  `check_chain()` keeps the interactive-confirmation path for direct execution.
+- Policy primitives: `Permission`, `FilePermissions`, `RunPermissions`,
+  `ToolPermissionsProfile`, command lists (`CMD_DEFAULT_*`,
+  `CMD_DANGEROUS_PATTERNS`) and predefined low-level profiles (`strict`,
+  `permissive`, `unrestricted`, `locked`, `TESTING`, `scaffolder`).
+- Adapters (`file_permission`, `resolve_run_permissions`, `search_permission`)
+  let tools and the gate consume either a `Role` or a profile without a
+  Role↔profile conversion method.
+See [notes/security.md](../notes/security.md) and
+[notes/tools-and-permissions.md](../notes/tools-and-permissions.md).
 
 ### `thinking_parser.py`
 `ThinkingTagParser` — extracted from `Harness._stream_llm_response`. Handles two input paths:
@@ -70,67 +80,52 @@ usage counters into provider-neutral prompt/completion/total token data.
 `AgentState` enum: `UNCONNECTED`, `IDLE`, `THINKING`, `ANSWERING`.
 
 ### `tools.py`
-Tool classes: `MinimalToolset` (read/list), `FileTools` (+ write/patch), `ShellTool` (run_command), `SearchTools` (search_web/search_wiki).
-`SearchTools` — web search via DuckDuckGo HTML and Wikipedia MediaWiki API. Returns formatted results (title/URL/snippet). Supports time range filtering for DDG.
-Pure functions — no internal state. See [notes/tools-and-permissions.md](../notes/tools-and-permissions.md).
+Low-level tool implementations plus the tool registry.
+- `MinimalToolset` (read/list), `FileTools` (+ write/patch), `ShellTool` (run_command), `SearchTools` (search_web/search_wiki).
+- `SearchTools` — web search via DuckDuckGo HTML and Wikipedia MediaWiki API. Returns formatted results (title/URL/snippet). Supports time range filtering for DDG.
+- `ToolError` — raised by tool functions on failure.
 
 `FileTools.read()` supports optional 1-based inclusive line ranges, character
 limits with an explicit truncation marker, and source line-number prefixes.
 
-### `tool_wrappers.py`
-`*ToolWrapper` classes — adapt tool functions to the OpenAI function-calling JSON schema.
+**Tool registry** — each tool is declared once with the `@tool` decorator,
+which carries its name, LLM-facing schema, `ToolPolicySpec` (permission +
+settings) and handler. There is no separate `tool_wrappers.py`.
+- `ToolDefinition` / `ToolContext` / `RegisteredTool` — registry records and
+	bound instances. `get_schema()` returns the OpenAI function schema;
+	`execute()` / `execute_async()` dispatch to the handler.
+- `registered_tool_specs()` — canonical policy registry view consumed when role
+	policy entries are created.
+- `create_toolset(depth)` — factory that binds registered tools to a context.
+	Registers: `read`, `write`, `patch`, `run_command` (LLM name `run`),
+	`search_web`, `search_wiki`, `subagent` (depth-permitting),
+	`wait_for_subagents`.
+- Public factories `RunTool`, `SearchWebTool`, `SearchWikiTool`,
+	`SubagentTool`, `WaitForSubagentsTool` remain for direct construction/tests.
 
-- Each wrapper owns `ToolPolicySpec` metadata describing its policy category,
-	default permission, and default settings; `registered_tool_specs()` is the canonical registry view
-	consumed when role policy entries are created.
-- `get_schema()` — returns function schema for the LLM
-- `execute(args)` — parses LLM args and calls the underlying tool
+Search tools: main agent 3 results/search, unlimited searches. Subagents
+10 results/search, max 3 searches. Subagent tool spawns a read-only child
+`Harness` (foreground or background) and enforces depth/timeout/context limits;
+`wait_for_subagents` gathers and clears the pending queue.
 
-Individual wrappers: `ReadTool`, `WriteTool`, `PatchTool`, `RunTool`, `SearchWebTool`, `SearchWikiTool`, `SubagentTool`, `WaitForSubagentsTool`.
-
-`create_toolset(depth)` — factory that builds the active tool dict. Only registers: `read`, `write`, `patch`, `run_command`, `search_web`, `search_wiki`, `subagent`, `wait_for_subagents`. (Iteration/memory tools are no longer registered here.)
-
-Search wrappers:
-- `SearchWebTool` — DuckDuckGo web search with rate limiting
-- `SearchWikiTool` — Wikipedia search with rate limiting
-Main agent: 3 results/search, unlimited searches. Subagents: 10 results/search, max 3 searches.
-
-Subagent wrappers:
-- `SubagentTool` — spawns a read-only child `Harness`; foreground or background mode; enforces depth limit, timeout, and context cap
-- `WaitForSubagentsTool` — `asyncio.gather` over all pending background tasks; clears the list on completion
-The main permission gate prompts before starting or waiting for delegated work when the active profile requires approval.
-
-### `tool_permissions.py`
-`ToolPermissionsProfile` — per-tool policy configuration (`ALLOW` / `ASK` / `DENY`).
-`Permission` Literal type; `FilePermissions` and `RunPermissions` dataclasses.
-`CMD_DEFAULT_ALLOW` / `CMD_DEFAULT_ASK` / `CMD_DEFAULT_DENY` — command classification sets.
-Predefined profiles: `strict`, `permissive`, `unrestricted`, `locked`, `TESTING`, `scaffolder`.
-Global `permissions` singleton (defaults to `permissive`).
-`get_search_permission()` — returns search operation policy (default: `ALLOW` in permissive/scaffolder profiles).
+See [notes/tools-and-permissions.md](../notes/tools-and-permissions.md).
 
 ### `roles.py`
-`Role` — conversation-owned operating mode combining enabled tools, tool policies,
-and role-specific prompt instructions. Built-in roles include `default`,
-`reviewer`, and `researcher`; saved roles use `~/.config/pico-chat/roles.toml`.
+`Role` — the single source of truth for a conversation's operating mode:
+enabled tools, tool policies, and role-specific prompt. Built-in roles include
+`default`, `reviewer`, `researcher`, and the read-only `scaffolder` used by
+subagents; saved roles use `~/.config/pico-chat/roles.toml`.
 - Consecutive role changes are represented by one system history notice; a new
 	role notice replaces the previous one until another conversation message is added.
 - Role policy entries are derived from registered tool metadata rather than a
-	hard-coded `ALL_TOOLS` list; newly registered tools receive a disabled policy
-	entry with metadata-owned default settings when loading or constructing a role.
+	hard-coded list; newly registered tools receive a disabled policy entry with
+	metadata-owned default settings.
+- No `from_permission_profile` / `to_permission_profile` translation layer
+	exists; the permission primitives adapt to a `Role` directly.
 Saved definitions with a built-in name override that built-in in place, while
 rename and delete operations still reject built-in names.
 `ToolPolicy` describes one tool's availability, default permission, and
-tool-specific settings. Roles adapt to the existing `ToolPermissionsProfile`
-while the permission system is migrated.
-
-### `security.py`
-`SecurityChecker` — evaluates shell commands before execution.
-`CommandCheck` result: `ALLOW`, `ASK`, `DENY`.
-`CommandAction` — the enum behind `CommandCheck.action`.
-`parse_operators(command)` — quote-aware command chain splitting (`|`, `&&`, `||`, `;`).
-`check_command(command, permissions)` — single-command check with dangerous-pattern escalation.
-`SecurityChecker.check_chain(command)` — uses quote-aware `parse_operators` to detect chains; respects `chain_policy`.
-See [notes/security.md](../notes/security.md).
+tool-specific settings.
 
 ### `context_builder.py`
 `build_harness_context()` — constructs the context injected alongside the system prompt.

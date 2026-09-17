@@ -15,8 +15,8 @@ from unittest.mock import patch
 
 import pytest
 
-from pico_chat.harness.tool_wrappers import SubagentTool, WaitForSubagentsTool
-from pico_chat.harness.tool_permissions import scaffolder
+from pico_chat.harness.tools import SubagentTool, WaitForSubagentsTool
+from pico_chat.harness.permissions import scaffolder
 import pico_chat.pico_cfg as pico_cfg_module
 
 
@@ -333,14 +333,15 @@ class TestHarnessSubagentIntegration:
     """Test that Harness correctly sets up subagent context and abort mechanism."""
 
     def test_subagent_uses_scaffolder_permissions(self, tmp_path):
-        """A Harness at depth > 0 should use the scaffolder profile."""
+        """A Harness at depth > 0 should use the scaffolder role."""
         from pico_chat.harness.harness import Harness
-        from pico_chat.harness import tool_permissions
 
         with patch("pico_chat.harness.harness.create_server"):
             h = Harness(workspace_path=str(tmp_path), depth=1)
 
-        assert h._tool_permissions is tool_permissions.scaffolder
+        assert h.role.name == "scaffolder"
+        assert h.role.policy_for("write").enabled is False
+        assert h.role.policy_for("run_command").enabled is False
 
     def test_clear_history_resets_provider_usage(self, tmp_path):
         """/clear must drop the accumulated provider usage so the status bar
@@ -450,24 +451,22 @@ class TestHarnessSubagentIntegration:
     def test_subagent_role_isolated_from_parent_role(self, tmp_path):
         """A child harness keeps scaffolder policy even when a parent role is supplied."""
         from pico_chat.harness.harness import Harness
-        from pico_chat.harness import tool_permissions
-        from pico_chat.harness.roles import Role
+        from pico_chat.harness.roles import default_role
 
-        parent_role = Role.from_permission_profile(tool_permissions.permissive)
+        parent_role = default_role()
         with patch("pico_chat.harness.harness.create_server"):
             h = Harness(workspace_path=str(tmp_path), depth=1, role=parent_role)
 
         assert h.role.name == "scaffolder"
-        assert h._tool_permissions is tool_permissions.scaffolder
 
-    def test_root_harness_uses_global_permissions(self, tmp_path):
-        """A Harness at depth 0 should use None (global permissions)."""
+    def test_root_harness_uses_default_role(self, tmp_path):
+        """A Harness at depth 0 defaults to the permissive default role."""
         from pico_chat.harness.harness import Harness
 
         with patch("pico_chat.harness.harness.create_server"):
             h = Harness(workspace_path=str(tmp_path), depth=0)
 
-        assert h._tool_permissions is None
+        assert h.role.name == "default"
 
     def test_abort_subagents_sets_event(self, tmp_path):
         from pico_chat.harness.harness import Harness

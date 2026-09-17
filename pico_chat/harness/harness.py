@@ -14,12 +14,12 @@ from pico_chat.harness.system_prompt import get_system_message
 from pico_chat.harness import chunks
 from pico_chat.harness.llm_server import create_server, LLMServer
 from pico_chat.harness.llm_server_config import get_server_config
-from pico_chat.harness.permission_gate import PermissionGate
+from pico_chat.harness.permissions import PermissionGate
 from pico_chat.harness.thinking_parser import ThinkingTagParser, MetricsState, THINKING_TAGS
 from pico_chat.harness.usage import TokenUsage, usage_from_response
 
 # Import the minimal toolset
-from pico_chat.harness.tool_wrappers import create_toolset
+from pico_chat.harness.tools import create_toolset
 
 import os
 
@@ -43,25 +43,15 @@ class Harness:
         import os
         self.workspace = workspace_path or os.getcwd()
 
-        # Subagents use scaffolder (read-only) permissions
-        from pico_chat.harness.roles import Role, default_role
-        from pico_chat.harness.tool_permissions import scaffolder
-        requested_role = role
+        # Subagents use a read-only scaffolder role
+        from pico_chat.harness.roles import default_role, scaffolder_role
         if depth > 0:
-            role = Role.from_permission_profile(scaffolder, enabled_tools={
-                "read", "search_web", "search_wiki", "subagent", "wait_for_subagents",
-            })
-            role.name = "scaffolder"
+            role = scaffolder_role()
         self.role = role or default_role()
-        tool_permissions = scaffolder if depth > 0 else (
-            self.role.to_permission_profile() if requested_role is not None else None
-        )
-        self._tool_permissions = tool_permissions  # used by PermissionGate
 
         # Permission gate owns the user-response queue and path resolution
         self._permission_gate = PermissionGate(
             workspace=self.workspace,
-            permissions=tool_permissions,
             enabled_tools=self.role.enabled_tool_names(),
             role=self.role,
         )
@@ -70,7 +60,7 @@ class Harness:
             workspace_path=self.workspace,
             # Subagents are read-only; they never need to ask the user for approval.
             confirmation_callback=None if depth > 0 else self._request_user_confirmation,
-            permissions=tool_permissions,
+            permissions=self.role,
             depth=depth,
             pending_subagents=self._pending_subagents,
         )
@@ -122,16 +112,15 @@ class Harness:
             raise TypeError("role must be a Role")
         previous_name = getattr(self, "role", role).name
         self.role = role
-        self._tool_permissions = role.to_permission_profile()
         self._permission_gate.set_policy(
-            self._tool_permissions,
+            None,
             role.enabled_tool_names(),
             role=role,
         )
         self.tools_map = create_toolset(
             workspace_path=self.workspace,
             confirmation_callback=None if self.depth > 0 else self._request_user_confirmation,
-            permissions=self._tool_permissions,
+            permissions=role,
             depth=self.depth,
             pending_subagents=self._pending_subagents,
         )

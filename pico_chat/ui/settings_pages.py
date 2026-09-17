@@ -1,14 +1,14 @@
 """Reusable builders for settings pages.
 
 Each builder wires an editor model to form fields and returns the field list
-plus a save callback.  They are shared by the ``/permissions`` and ``/roles``
-popup commands and the settings tab, so both surfaces stay behaviorally
-identical.
+plus a save callback.  ``build_roles_fields`` is the single role-editor
+surface, shared by the ``/permissions`` popup command and the settings tab so
+the two cannot drift.
 """
 
 from __future__ import annotations
 
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 from pico_chat.ui.tui.msg_types import SysMsg, SysMsgError
 
@@ -18,17 +18,6 @@ Notify = Callable[[str, object], None]
 
 def _noop_notify(message: str, msg_type=SysMsg()):
     pass
-
-
-def build_permission_fields(notify: Notify = _noop_notify
-                            ) -> Tuple[list, Callable[[], None]]:
-    """Build the permission-profile fields plus their save callback.
-
-    Re-exported from the commands package so hosts have one import site for
-    settings page builders.
-    """
-    from pico_chat.ui.commands.permissions import build_permission_fields
-    return build_permission_fields(notify=notify)
 
 
 def build_roles_fields(runtime, agent, notify: Notify = _noop_notify,
@@ -193,13 +182,11 @@ def settings_pages(runtime=None, agent=None, notify: Notify = _noop_notify,
     """Assemble the default settings pages.
 
     Two pages:
-    - **roles** — a role carries every policy the old standalone permissions
-      page offered (read/write/patch inside + outside, unknown commands,
-      command chains, container flags) plus the role itself.
+    - **roles** — a role carries every tool policy (read/write/patch inside +
+      outside, unknown commands, command chains, container flags) plus the
+      role itself.  The same fields back the ``/permissions`` popup command.
     - **openrouter** — enable OpenRouter models and configure per-model
       provider routing (whitelist / blacklist).
-    The permissions popup command is unchanged and still delegates to its own
-    builder.
     """
     from pico_chat.ui.tui.components.settings_panel import SettingsPage
     from pico_chat.ui.openrouter_settings import build_openrouter_fields
@@ -224,4 +211,4 @@ def settings_pages(runtime=None, agent=None, notify: Notify = _noop_notify,
     ]
 
 
-__all__ = ["build_permission_fields", "build_roles_fields", "settings_pages"]
+__all__ = ["build_roles_fields", "settings_pages"]

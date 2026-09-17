@@ -22,67 +22,65 @@ The default call remains a complete, unnumbered file read for compatibility.
 
 Tools are pure functions — no internal state. The `Harness` owns all state and passes it in.
 
-## Tool Wrappers (`tool_wrappers.py`)
+## Tool Registry (`tools.py`)
 
-Each tool class has a corresponding `*ToolWrapper` that adapts it to the OpenAI function-calling schema:
-- Generates the JSON schema for the LLM to invoke
-- Parses the LLM's tool call arguments
-- Calls the underlying tool function
-- Returns a formatted result string
+Each tool is declared once with the `@tool` decorator, which carries its name,
+OpenAI function schema, `ToolPolicySpec` metadata (policy category, default
+permission, default settings) and its handler:
 
-Individual wrappers: `ReadTool`, `WriteTool`, `PatchTool`, `RunTool`, `SearchWebTool`, `SearchWikiTool`, `SubagentTool`, `WaitForSubagentsTool`.
+- `ToolDefinition` / `ToolContext` / `RegisteredTool` — registry record and the
+  bound instance returned to the harness.
+- `get_schema()` — returns the function schema for the LLM.
+- `execute()` / `execute_async()` — dispatch to the handler (async tools expose
+  a coroutine `execute`; cancellable tools add `execute_async`).
 
-`create_toolset(depth)` — factory that builds the active tool dict. Only registers: `read`, `write`, `patch`, `run`, `search_web`, `search_wiki`, `subagent`, `wait_for_subagents`. (Iteration/memory tools are no longer registered.)
+`registered_tool_specs()` is the canonical policy registry view consumed when
+role policy entries are created.
 
-This adapter layer keeps `tools.py` decoupled from any specific LLM API format.
+`create_toolset(depth)` — factory that binds registered tools to a context.
+Registers: `read`, `write`, `patch`, `run_command` (LLM name `run`),
+`search_web`, `search_wiki`, `subagent` (depth permitting),
+`wait_for_subagents`. Public factories `RunTool`, `SearchWebTool`,
+`SearchWikiTool`, `SubagentTool`, `WaitForSubagentsTool` remain for direct
+construction.
 
 ## Permission Flow
 
 ```
 LLM generates tool call
         ↓
-ToolWrapper.parse_call()
+Harness._execute_tool_calls()
         ↓
-ToolPermissionsProfile.check(tool, args)
+PermissionGate.check(tool, args)          ← the single decision point
         ↓
-SecurityChecker.check_command()   ← for shell commands
+  role policy (or profile fallback); shell commands via SecurityChecker.classify()
         ↓
   DENY → blocked, error returned to LLM
   ASK  → UI shows permission prompt, awaits user response
-  ALLOW→ tool.execute(args)
+  ALLOW→ RegisteredTool.execute(args)
         ↓
 result appended to conversation history
 ```
 
-## ToolPermissionsProfile (`tool_permissions.py`)
+## Roles and policy (`roles.py`, `permissions.py`)
 
-Configuration object specifying the default policy per tool type. Policies: `ALLOW`, `ASK`, `DENY`.
+`Role` is the single source of truth for a conversation's enabled tools, tool
+policies, and prompt. Policies: `ALLOW`, `ASK`, `DENY`.
 
-Predefined profiles: `strict`, `permissive` (default global singleton), `unrestricted`, `locked`, `TESTING`, `scaffolder` (used by subagents).
+Low-level `ToolPermissionsProfile` / `FilePermissions` / `RunPermissions`
+remain in `permissions.py` as execution helpers and defaults, with predefined
+profiles: `strict`, `permissive` (default global singleton), `unrestricted`,
+`locked`, `TESTING`, `scaffolder`.
 
-### Interactive profile editor
+### Role editor
 
-`ProfileEditorModel` (`pico_chat/ui/profile_editor_model.py`) is the UI-safe
-boundary for profile lifecycle changes. It keeps the selected profile name and
-an isolated draft separate from TUI focus state and exposes:
-
-- `profile_names()` — selected/active name followed by saved profile names
-- `select(name)` — load a saved or predefined profile and apply it immediately
-- `create()` — create, save, select, and apply a complete conservative default
-- `duplicate(name)` — copy a profile under a unique name, then select/apply it
-- `rename(new_name, old_name=None)` — rename saved profiles or persist an
-        initially unsaved active profile under its new name
-- `remove(name=None)` — remove the active saved profile and select a remaining
-        profile, or create a safe replacement when none remain
-- `update_permissions(profile)` — replace the selected profile draft, save it,
-        and apply it immediately
-
-The `/permissions` interactive form uses a dynamic `ProfileList` for profile
-rows and regular fields for policy values. Each policy/toggle change builds a
-complete `ToolPermissionsProfile` and calls `update_permissions()` rather
-than writing profile storage from a widget callback. The command-line
-`/permissions list|load|save|rename` operations remain separate compatibility
-commands.
+`RoleEditorModel` (`pico_chat/ui/role_editor_model.py`) is the UI-safe boundary
+for role lifecycle changes, and `RoleEditorForm`
+(`pico_chat/ui/role_editor_form.py`) wires it to the form fields. The settings
+tab (`settings_pages.build_roles_fields`) and the `/permissions` popup command
+build the *same* fields, so the two surfaces cannot drift. The old
+permission-profile editor (`ProfileEditorModel`) and the
+`permission-profiles.toml` store have been removed — roles are the only model.
 
 Dangerous pattern detection can upgrade `ALLOW` → `ASK`. It never downgrades `DENY`.
 
@@ -92,16 +90,18 @@ See [notes/security.md](./security.md) for the security layer details.
 
 **Removed.** Previously provided `loop`, `loop_next`, `loop_itr_done` — was dead code and has been deleted.
 
-## Subagent Tools (`tool_wrappers.py`)
+## Subagent Tools (`tools.py`)
 
-`SubagentTool` spawns a read-only child `Harness` to explore the codebase and return findings.
-`WaitForSubagentsTool` collects results from all queued background subagents.
+The `subagent` registry tool spawns a read-only child `Harness` to explore the
+codebase and return findings.
+`wait_for_subagents` collects results from all queued background subagents.
 
-Subagents always run under the **`scaffolder`** profile: read-only inside the repo, deny everything else. The main agent's permission profile is not inherited.
+Subagents always run under the **`scaffolder`** built-in role: read-only inside
+the repo, deny everything else. The main agent's role is not inherited.
 
 See [notes/subagents.md](./subagents.md) for the full lifecycle, depth limit, timeout, and config reference.
 
-## Search Tools (`tools.py`, `tool_wrappers.py`)
+## Search Tools (`tools.py`)
 
 `SearchTools` provides two web search operations:
 
@@ -114,7 +114,7 @@ See [notes/subagents.md](./subagents.md) for the full lifecycle, depth limit, ti
 - Returns structured JSON results from Wikipedia search
 - Use for: named entities, concepts, algorithms, historical events
 
-**Rate limiting** (enforced in wrappers):
+**Rate limiting** (enforced in the registered search tools):
 - Main agent (depth=0): 3 results per search, unlimited searches
 - Subagents (depth>0): 10 results per search, max 3 searches
 

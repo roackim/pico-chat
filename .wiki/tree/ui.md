@@ -101,11 +101,13 @@ Base contracts:
 The input layer's `ArgumentCompletion` reads `Param.completions` to drive
 fuzzy argument completion for `/model <model>`. See [notes/ui.md](../notes/ui.md) for how to add a new command.
 
-### `profile_editor_model.py`
-`ProfileEditorModel` — UI-independent state and persistence boundary for the
-interactive permissions editor. It isolates the active draft, applies profile
-selection immediately, and exposes create, rename, duplicate, remove, and
-update operations without requiring a rendered form.
+### `role_editor_model.py` / `role_editor_form.py`
+`RoleEditorModel` — UI-independent state and persistence boundary for the
+interactive role editor (the single policy surface). It isolates the active
+draft, applies role selection immediately, and exposes create, rename,
+duplicate, remove, and update operations without requiring a rendered form.
+`RoleEditorForm` wires the model to the form fields. There is no separate
+permission-profile editor.
 
 ### Shell Commands (`$` prefix)
 - `$ <command>` — Execute shell command directly (not visible to LLM)

@@ -1,6 +1,6 @@
 """Tests for conversation roles and their permission integration."""
 
-from pico_chat.harness.permission_gate import PermissionGate
+from pico_chat.harness.permissions import PermissionGate
 from pico_chat.harness.roles import (
     Role,
     ToolPolicy,
@@ -63,7 +63,7 @@ def test_reviewer_role_combines_tools_permissions_and_prompt():
         "read", "search_web", "search_wiki", "subagent", "wait_for_subagents",
     }
     assert reviewer.prompt
-    assert reviewer.to_permission_profile().write.inside_repo == "deny"
+    assert reviewer.policy_for("write").settings["inside_repo"] == "deny"
 
 
 def test_permissions_role_selection_applies_to_active_conversation():
@@ -93,8 +93,8 @@ def test_disabled_tool_is_denied_before_permission_prompt():
     )
     gate = PermissionGate(
         ".",
-        permissions=role.to_permission_profile(),
         enabled_tools=role.enabled_tool_names(),
+        role=role,
     )
 
     assert gate.check("read", {"path": "README.md"}) == "allow"

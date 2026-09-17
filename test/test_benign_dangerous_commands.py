@@ -8,7 +8,7 @@ import pytest
 from pathlib import Path
 
 from pico_chat.harness.tools import MinimalToolset
-from pico_chat.harness.tool_permissions import (
+from pico_chat.harness.permissions import (
     ToolPermissionsProfile,
     FilePermissions,
     RunPermissions,
@@ -214,7 +214,7 @@ class TestBenignDangerousCommands:
     
     def test_find_permissive_profile(self, tmp_path):
         """Test find with permissive profile specifically."""
-        from pico_chat.harness.tool_permissions import permissive
+        from pico_chat.harness.permissions import permissive
         
         tools = MinimalToolset(tmp_path, permissions=permissive)
         
@@ -229,7 +229,7 @@ class TestBenignDangerousCommands:
     
     def test_find_name_permissive_profile(self, tmp_path):
         """Test find with -name in permissive profile."""
-        from pico_chat.harness.tool_permissions import permissive
+        from pico_chat.harness.permissions import permissive
         
         tools = MinimalToolset(tmp_path, permissions=permissive)
         
@@ -239,7 +239,7 @@ class TestBenignDangerousCommands:
     
     def test_awk_permissive_profile(self, tmp_path):
         """Test awk without system() in permissive profile."""
-        from pico_chat.harness.tool_permissions import permissive
+        from pico_chat.harness.permissions import permissive
         
         def approve_callback(cmd):
             # Approve pipe chain
@@ -254,7 +254,7 @@ class TestBenignDangerousCommands:
     
     def test_sed_permissive_profile(self, tmp_path):
         """Test sed without /e flag in permissive profile."""
-        from pico_chat.harness.tool_permissions import permissive
+        from pico_chat.harness.permissions import permissive
         
         def approve_callback(cmd):
             # Approve pipe chain
