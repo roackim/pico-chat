@@ -269,6 +269,16 @@ class Compositor:
                 for x, y, width, height in dirty_rects
                 if width > 0 and height > 0
             ]
+            # Dirty rects propagate up through every ancestor, so the same
+            # rectangle is collected many times. Deduplicate to avoid repainting
+            # it once per ancestor.
+            seen = set()
+            deduped = []
+            for rect in valid_dirty_rects:
+                if rect not in seen:
+                    seen.add(rect)
+                    deduped.append(rect)
+            valid_dirty_rects = deduped
 
             # If a repaint was explicitly requested but no valid dirty rects exist
             # (e.g. before first stable layout), fall back to a full redraw.

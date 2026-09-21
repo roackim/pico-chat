@@ -1,0 +1,10 @@
+[ ] add deepseek provider
+[x] fix input box problem where no max height, and it takes whole heigh if paste long content, and no scroll
+[x] fix focus message error
+[x] redo /model to a modal list selector/
+[x] fix reading model context window from server (shows 32k for deepseek despite being like 1M)
+[ ] interpolate streaming for much smoother experience 
+    [ ] based on actual throughput -> start very fine grained interp, if we too slow for streaming, catch up with coarser grainsI 
+    
+[ ] better markdown interpreting (bold sucks)/con
+[ ] copy to clipboard from ssh

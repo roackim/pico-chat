@@ -87,15 +87,19 @@ class ChatHistoryPanel(TextComponent):
         self.compositor = compositor
 
     def mark_changed(self, rect: Optional[tuple[int, int, int, int]] = None):
-        """Mark panel dirty and wake compositor for immediate repaint."""
-        super().mark_changed(rect)
+        """Mark the whole panel dirty and wake the compositor.
+
+        The panel always repaints its full area (background fill + blit of every
+        visible message), so it must report its full bounds as the dirty rect.
+        Propagating a smaller child rect would make the compositor clip to the
+        child's stale (pre-growth) size and leave newly revealed rows unpainted.
+        """
+        super().mark_changed((self.x, self.y, self.width, self.height))
         if self.compositor and hasattr(self.compositor, 'request_render'):
             self.compositor.request_render()
 
     def _request_repaint(self):
         self.mark_changed((self.x, self.y, self.width, self.height))
-        if self.compositor and hasattr(self.compositor, 'request_render'):
-            self.compositor.request_render()
     
     def set_focused_message(self, index: Optional[int]):
         """Set the focused message by index.

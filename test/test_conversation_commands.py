@@ -136,6 +136,34 @@ def test_conversation_import_handles_tool_call_only_assistant(tmp_path):
     assert "Import failed" not in "\n".join(m.text for m in ui.chat_history_panel.messages)
 
 
+def test_conversation_import_keeps_assistant_reply_in_one_message(tmp_path):
+    """A plain assistant reply must be one PicoMsg, not split by the tag parser.
+
+    ``ThinkingTagParser.feed`` holds back the last ``_MAX_TAG_LEN`` chars (a
+    possible partial thinking tag); ``flush`` then emits them as a separate
+    segment. Import used to turn each segment into its own message, splitting
+    the final ~10 characters into a second PicoMsg (rendered as a mid-word
+    break with the inter-message gap in between).
+    """
+    from pico_chat.ui.tui.msg_types import PicoMsg
+
+    ui = FakeUI()
+    content = "If you tell me what you're looking for, I can narrow it down."
+    history = [
+        {"role": "user", "content": "3 death metal albums"},
+        {"role": "assistant", "content": content},
+    ]
+    filename = tmp_path / "music.json"
+    filename.write_text(json.dumps({"role": "default", "history": history}))
+
+    asyncio.run(ConversationImportCommand().execute(ui, [str(filename)]))
+
+    assistant = [m for m in ui.chat_history_panel.messages
+                 if isinstance(m.type, PicoMsg)]
+    assert len(assistant) == 1
+    assert assistant[0].text == content
+
+
 def test_conversation_import_rejects_malformed_envelope(tmp_path):
     ui = FakeUI()
     filename = tmp_path / "malformed.json"

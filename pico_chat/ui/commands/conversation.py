@@ -162,10 +162,22 @@ class ConversationImportCommand(Command):
                 # content may be None for tool-call-only assistant messages.
                 content = content or ""
                 parser = ThinkingTagParser()
-                segments = parser.feed(content) + parser.flush()
-                for segment in segments:
+                raw_segments = parser.feed(content) + parser.flush()
+                # ``feed`` holds back up to _MAX_TAG_LEN characters (a possible
+                # partial thinking tag) and ``flush`` emits them as a separate
+                # segment. Coalesce adjacent same-kind segments so import does
+                # not split one assistant reply into multiple messages (which
+                # showed up as a mid-word split separated by the inter-message
+                # gap, e.g. "narro" / "w it down.").
+                segments = []
+                for segment in raw_segments:
                     if not segment.text:
                         continue
+                    if segments and segments[-1].is_thinking == segment.is_thinking:
+                        segments[-1].text += segment.text
+                    else:
+                        segments.append(segment)
+                for segment in segments:
                     if segment.is_thinking:
                         ui.chat_history_panel.add_message(
                             segment.text, msg_type=ThinkingMsg(), harness_message_ids=ids)
