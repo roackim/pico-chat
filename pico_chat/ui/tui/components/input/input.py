@@ -307,8 +307,13 @@ class InputComponent(Component):
         screen_width = getattr(compositor, "width", self.x + self.width)
         screen_height = getattr(compositor, "height", self.y + self.height)
 
-        menu_width = min(max(self.width, 20), screen_width)
-        menu_x = max(0, min(trigger_x, screen_width - menu_width))
+        if getattr(menu, "fill_width", False):
+            # File picker: span the full screen width (simpler, shows long paths).
+            menu_x = 0
+            menu_width = screen_width
+        else:
+            menu_width = min(max(self.width, 20), screen_width)
+            menu_x = max(0, min(trigger_x, screen_width - menu_width))
 
         space_above = max(0, trigger_y)
         space_below = max(0, screen_height - trigger_y - 1)

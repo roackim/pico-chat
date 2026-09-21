@@ -27,16 +27,30 @@ class SelectionMenu(Component):
         self.selected_index = 0
         self.frame_color = frame_color if frame_color is not None else theme.DEFAULT
         self.content_color = content_color if content_color is not None else self.frame_color
+        # Color of the selected row (falls back to the frame color).
+        self.highlight_color = theme.USER
         self.bg = theme.get_bg()
         self.left_pad = left_pad
         self.right_pad = right_pad
         self.max_height = max_height
         self.is_visible = False
         self.display_prefix = ""  # Prefix to show (e.g., "/" for commands)
+        # When True, use the full available width instead of shrinking to the
+        # longest item (used by the @ file picker for long paths).
+        self.fill_width = False
         
         # Compositor integration for auto-registration
         self.compositor = compositor
         self._registered_with_compositor = False
+
+    def set_highlight_color(self, color):
+        self.highlight_color = color
+        self.mark_changed()
+
+    def set_fill_width(self, fill_width: bool):
+        if self.fill_width != fill_width:
+            self.fill_width = fill_width
+            self.mark_changed()
 
     def set_compositor(self, compositor):
         """Set compositor for auto-registration when menu is shown/hidden."""
@@ -71,7 +85,7 @@ class SelectionMenu(Component):
             # Fuzzy search
             results = fuzzy_search(search_term, all_items, threshold=0.01)
             self.items = [res[0] for res in results]
-        
+
         # Show menu if we have items
         self.is_visible = len(self.items) > 0
         
@@ -80,6 +94,18 @@ class SelectionMenu(Component):
             self.selected_index = 0
         
         # Auto-register with compositor
+        self._update_compositor_registration()
+
+    def set_items(self, items: List[str], display_prefix: str = ""):
+        """Replace items with an already-filtered/ranked list.
+
+        Unlike :meth:`update`, no fuzzy filtering is applied.
+        """
+        self.display_prefix = display_prefix
+        self.items = list(items)
+        self.is_visible = len(self.items) > 0
+        if self.selected_index >= len(self.items):
+            self.selected_index = 0
         self._update_compositor_registration()
     
     def hide(self):
@@ -108,70 +134,75 @@ class SelectionMenu(Component):
         if not self.is_visible or not self.items:
             return
 
-        # Calculate menu dimensions
-        max_raw_len = max(len(self.display_prefix) + len(item) for item in self.items)
-        menu_width = max_raw_len + self.left_pad + self.right_pad + 2  # +2 for borders
-        menu_width = max(menu_width, 15)
-        menu_width = min(menu_width, self.width)  # Respect parent width
-        
-        # Use max_height to limit visible items
-        visible_count = min(
-            len(self.items),
-            self.max_height - 2,
-            max(0, self.height - 2),
-        )  # -2 for borders
+        if self.fill_width:
+            # Use the available width rather than shrinking to the longest
+            # item, so long paths have room to breathe.
+            menu_width = max(15, min(self.width, buffer.width - self.x))
+        else:
+            max_raw_len = max(len(self.display_prefix) + len(item) for item in self.items)
+            menu_width = max(15, max_raw_len + self.left_pad + self.right_pad + 2)
+            menu_width = min(menu_width, self.width, buffer.width - self.x)
+
+        # Visible rows from the height, capped by max_height.
+        max_visible = max(1, min(self.max_height - 2, max(0, self.height - 2)))
+        visible_count = min(len(self.items), max_visible)
+
+        # Scroll window that keeps the selection visible.
+        first = 0
+        if self.selected_index >= visible_count:
+            first = self.selected_index - visible_count + 1
+        first = max(0, min(first, len(self.items) - visible_count))
+
         menu_height = visible_count + 2  # +2 for top and bottom borders
-        
+
         # Draw the box with background
         buffer.set(self.x, self.y, "┌", fg=self.frame_color, bg=self.bg)
         for i in range(1, menu_width - 1):
             buffer.set(self.x + i, self.y, "─", fg=self.frame_color, bg=self.bg)
         buffer.set(self.x + menu_width - 1, self.y, "┐", fg=self.frame_color, bg=self.bg)
-        
-        # Render items
-        for i in range(visible_count):
-            item = self.items[i]
-            curr_y = self.y + 1 + i
-            
-            # Draw left border
+
+        inner_width = menu_width - 2  # Minus borders
+        content_area = max(0, inner_width - self.left_pad - self.right_pad)
+
+        # Render visible items (windowed around the selection).
+        for row in range(visible_count):
+            idx = first + row
+            item = self.items[idx]
+            curr_y = self.y + 1 + row
+
             buffer.set(self.x, curr_y, "│", fg=self.frame_color, bg=self.bg)
-            
-            is_selected = (i == self.selected_index)
-            
-            # Add display prefix to item
+
+            is_selected = (idx == self.selected_index)
             display_text = f"{self.display_prefix}{item}"
-            
-            # Calculate available width for content
-            inner_width = menu_width - 2  # Minus borders
-            content_area = inner_width - self.left_pad - self.right_pad
-            padded_text = display_text.ljust(content_area)[:content_area]  # Pad and clip
-            
-            # Render left padding
+            padded_text = display_text.ljust(content_area)[:content_area]
+
             for p in range(self.left_pad):
-                buffer.set(self.x + 1 + p, curr_y, " ", bg=self.bg, reverse=is_selected)
-            
-            # Render content
-            if is_selected:
-                # Use reverse video for highlighting
-                buffer.write_str(self.x + 1 + self.left_pad, curr_y, padded_text, 
-                               fg=self.content_color, bg=self.bg, reverse=True)
-            else:
-                buffer.write_str(self.x + 1 + self.left_pad, curr_y, padded_text, 
-                               fg=self.content_color, bg=self.bg)
-            
-            # Render right padding
+                buffer.set(self.x + 1 + p, curr_y, " ", bg=self.bg)
+
+            content_x = self.x + 1 + self.left_pad
+            selected_fg = self.highlight_color or self.frame_color
+            buffer.write_str(content_x, curr_y, padded_text,
+                             fg=selected_fg if is_selected else self.content_color,
+                             bg=self.bg, bold=is_selected)
             for p in range(self.right_pad):
-                buffer.set(self.x + 1 + self.left_pad + content_area + p, curr_y, " ", 
-                         bg=self.bg, reverse=is_selected)
-            
-            # Draw right border
+                buffer.set(self.x + 1 + self.left_pad + content_area + p, curr_y, " ",
+                           bg=self.bg)
+
             buffer.set(self.x + menu_width - 1, curr_y, "│", fg=self.frame_color, bg=self.bg)
-        
+
         # Draw bottom border
         buffer.set(self.x, self.y + menu_height - 1, "└", fg=self.frame_color, bg=self.bg)
         for i in range(1, menu_width - 1):
             buffer.set(self.x + i, self.y + menu_height - 1, "─", fg=self.frame_color, bg=self.bg)
         buffer.set(self.x + menu_width - 1, self.y + menu_height - 1, "┘", fg=self.frame_color, bg=self.bg)
+
+        # Scroll indicator: "n/m" when there are more items than fit.
+        if len(self.items) > visible_count:
+            counter = f" {self.selected_index + 1}/{len(self.items)} "
+            cx = self.x + menu_width - 1 - len(counter)
+            if cx > self.x:
+                buffer.write_str(cx, self.y + menu_height - 1, counter,
+                                 fg=theme.MUTED, bg=self.bg)
 
 
     def action_up(self):

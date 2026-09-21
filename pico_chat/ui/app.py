@@ -164,11 +164,12 @@ class chatTUI(ChatActionHandlers):
         # is selected, otherwise the status bar is mounted there.
         self.action_bar = ActionBar(
             id="actions",
-            style=BarStyle(theme.DEFAULT, theme.get_bg(), theme.FOCUSED, padding=0),
+            style=BarStyle(theme.MUTED, theme.get_bg(), theme.MUTED, padding=0),
         )
         self._mode_hint_default = "↑↓ move · esc back"
         self.action_bar.set_hint(self._mode_hint_default)
         self.action_bar.set_top_pad(True)
+        self.action_bar.set_align_right(True)
         self._hint_flash_until = 0.0
         self.chat_history_panel.on_selection_changed = self._update_mode_line
         self.input_component.on_change = self._update_action_strip
@@ -733,10 +734,10 @@ class chatTUI(ChatActionHandlers):
                            callback=lambda a=action, m=message: self._handle_message_action(m, a))
                 for action in actions
             ])
-            self.action_bar.set_prefix("▌ ")
+            self.action_bar.set_prefix("")
             self.action_bar.set_hint(self._mode_hint_default)
             self._hint_flash_until = 0.0
-            self.action_bar.set_focused(True)
+            self.action_bar.set_focused(False)
             self.action_bar.set_expanded(True)
         elif self._last_focus_id == "input":
             # Subtle right-aligned reminder of the input prefixes and the

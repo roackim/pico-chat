@@ -12,7 +12,7 @@ from pico_chat.ui.tui.colors import theme
 SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 class Box(Component):
-    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None, parent_msg=None, compact_when_unfocused: bool = False, padding: int = 0, padding_y: Optional[int] = None, focus_in_padding: bool = False, focus_color=None, thread_mode: bool = False, gutter: str = "▸", gutter_color=None, lines_only: bool = False, title_provider: Optional[callable] = None, color_provider: Optional[callable] = None):
+    def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None, parent_msg=None, compact_when_unfocused: bool = False, padding: int = 0, padding_y: Optional[int] = None, focus_in_padding: bool = False, focus_color=None, thread_mode: bool = False, gutter: str = "▸", gutter_color=None, lines_only: bool = False, title_provider: Optional[callable] = None, color_provider: Optional[callable] = None, content_pad_left: int = 0, content_pad_right: int = 0, full_height_gutter: bool = False):
         super().__init__(id)
         self.child = child
         self.child.parent = self
@@ -37,6 +37,13 @@ class Box(Component):
         self.thread_mode = thread_mode
         self.gutter = gutter
         self.gutter_color = gutter_color
+        # Thread mode: horizontal padding applied to the content once, inside
+        # the box (content components render unpadded).
+        self.content_pad_left = max(0, content_pad_left)
+        self.content_pad_right = max(0, content_pad_right)
+        # Thread mode: draw the gutter glyph on every row (a full-height bar),
+        # not just the first line.
+        self.full_height_gutter = full_height_gutter
         
         if self.bg is None: self.bg = theme.get_bg()
         if self.fg is None: self.fg = theme.DEFAULT
@@ -91,19 +98,23 @@ class Box(Component):
         # actions, the child is one row shorter so the action line sits below.
         if self.thread_mode:
             gutter_w = 1
+            pad_l = self.content_pad_left
+            pad_r = self.content_pad_right
             has_actions = bool(self._visible_actions())
             child_h = max(0, height - (1 if has_actions else 0))
+            child_x = x + gutter_w + pad_l
+            child_w = max(0, width - gutter_w - pad_l - pad_r)
             if size_changed:
                 super().set_layout(x, y, width, height)
-                self.child.set_layout(x + gutter_w, y, max(0, width - gutter_w), child_h)
+                self.child.set_layout(child_x, y, child_w, child_h)
             else:
                 self.x = x
                 self.y = y
                 self.width = width
                 self.height = height
-                self.child.x = x + gutter_w
+                self.child.x = child_x
                 self.child.y = y
-                self.child.width = max(0, width - gutter_w)
+                self.child.width = child_w
                 self.child.height = child_h
         # In compact mode when unfocused, no borders - child gets full size
         elif self.compact_when_unfocused and not self.focused:
@@ -212,7 +223,8 @@ class Box(Component):
             # A focused message with actions gains one extra row for the action
             # line below the content, which pushes subsequent messages down.
             if self.thread_mode:
-                base = self.child.get_preferred_height(max(1, width - 2))
+                inner_w = max(1, width - 1 - self.content_pad_left - self.content_pad_right)
+                base = self.child.get_preferred_height(inner_w)
                 if self._visible_actions():
                     return base + 1
                 return base
@@ -521,9 +533,12 @@ class Box(Component):
                 for ix in range(self.width):
                     self.subbuffer.set(ix, iy, " ", bg=bg)
 
-        # Draw the role gutter in the first column.
+        # Draw the role gutter in the first column. User/pico messages use a
+        # full-height prefix bar (every row); status gutters stay on row 0.
         if gutter and self.width > 0:
-            self.subbuffer.set(0, 0, gutter, fg=fg, bg=bg)
+            rows = range(self.height) if self.full_height_gutter else (0,)
+            for row in rows:
+                self.subbuffer.set(0, row, gutter, fg=fg, bg=bg)
 
         # Collapsed messages (e.g. thinking folded by default) render a single
         # summary line instead of the full content.

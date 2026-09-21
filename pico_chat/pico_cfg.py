@@ -110,7 +110,7 @@ DEFAULT_UI_TOML = """\
 # use_bg_color = false                # paint the theme background
 # app_global_padding = 0
 # msg_h_padding = 1
-# msg_v_margin = 0
+# msg_v_margin = 1                   # blank lines between messages
 # debug_console_height = 10
 # max_input_height = 8                # input grows with wrapped lines, then scrolls
 # box_style = "square"                # "square" | "double" | "rounded" | "ascii"
@@ -402,7 +402,7 @@ class Config:
         self.ui_theme: str = "terminal"
         self.ui_app_global_padding: int = 0
         self.ui_msg_h_padding: int = 1
-        self.ui_msg_v_margin: int = 0
+        self.ui_msg_v_margin: int = 1
         self.ui_box_style: str = "square"
         self.ui_box_style_focused: str = "square"
         self.ui_scroll_lines_per_notch: int = 3

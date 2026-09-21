@@ -77,7 +77,10 @@ uses `ActionBar` (collapsible via `set_expanded`) as the message action line.
 
 ### `menu.py`
 `SelectionMenu` — floating dropdown list.
-- Fuzzy search filtering via `fuzzy.py`
+- Fuzzy search filtering via `fuzzy.py`, or `set_items(items)` for pre-ranked lists
+- Selection uses `highlight_color` (default `USER`) in bold + underline, not reverse-video
+- Scroll-follows the selection and shows an `n/m` counter when items overflow
+- Uses the available width (up to the screen edge) so long paths fit
 - Keyboard navigation (up/down/enter/escape)
 - Used for autocomplete popups in `InputComponent`
 
@@ -219,7 +222,7 @@ Handles canonical keyboard, mouse, and paste events.
 |--------|----------|-------|
 | `command_completion.py` | `/` at start of input | Command name fuzzy search |
 | `subcommand_completion.py` | Second word after a `/` command | Subcommand suggestions |
-| `context_completion.py` | Context-aware (e.g., after `./`) | Configurable trigger prefix (default: `./`); typing `./dir/` drills into the directory and lists its immediate children; Tab on a directory appends `/` (not a space) so paths can be built folder-by-folder |
+| `context_completion.py` | `@` file picker (word boundary) | Trigger `@`; typing `@dir/` drills into the directory and lists its immediate children; ranks candidates with `fuzzy_match` (dirs first when no term); the menu uses the `USER` accent for its frame and selected row, normal color for suggestions, and spans the full screen width; Tab replaces the whole current word (cursor-independent) and appends `/` on directories |
 | `argument_completion.py` | After any command with `Param` schema | Generic fuzzy completer; reads `Command.params`, resolves argument index, filters completions via menu |
 | `path_completion.py` | After `/` mid-word or explicit file path input | — |
 | `server_completion.py` | After `/server` subcommand | Deprecated — superseded by `argument_completion.py` with `Param` schema |

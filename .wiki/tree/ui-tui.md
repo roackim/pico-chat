@@ -99,12 +99,16 @@ Text utilities for rendering:
 - `strip_ansi(text)` — removes ANSI escape codes
 
 ### `fuzzy.py`
-`fuzzy_score(query, candidate)` — scoring function for fuzzy search.
-Used by `SelectionMenu` to rank completions.
+`fuzzy_score(query, candidate)` / `fuzzy_search(...)` — word-based scoring used
+by `SelectionMenu` for command completions.
+`fuzzy_match(needle, haystack)` — case-insensitive subsequence matcher tuned for
+paths: returns `(score, matched_indices)` (or `None`), rewarding consecutive
+runs and segment starts. The file picker uses the score for ranking; the indices
+are available but not currently rendered.
 
 ### `msg_types.py`
 `MsgType` base class and all concrete message type classes. Each type defines `title`, `frame_color`, `content_color`, and `actions`.
-`MsgAction` enum — per-message action buttons (DELETE, COPY, EDIT, RETRY, STOP, ALLOW, DENY, OUTPUT, STEER, PAUSE, RESUME) with keyboard shortcut keys.
+`MsgAction` enum — non-destructive per-message actions (COPY, OUTPUT, ALLOW, DENY) with keyboard shortcut keys.
 See [notes/ui.md](../notes/ui.md) for the full type table and how to add a new type.
 
 ### `ascii_table.py`

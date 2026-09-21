@@ -40,15 +40,18 @@ class UserMsg(MsgType):
     title = "user"
     actions = [MsgAction.COPY]
     frame_color = "USER"
-    content_color = "USER"
-    gutter = "▸"
+    # Content renders in the normal text color (like the input field); the
+    # user color is kept for the gutter/prefix bar.
+    content_color = None
+    gutter = "▌"
 
 class PicoMsg(MsgType):
     name = "pico"
     title = "pico"
     actions = [MsgAction.COPY]
     frame_color = "PICO"
-    gutter = "▸"
+    gutter = "▌"
+    gutter_color = "MUTED"
 
 class SysMsg(MsgType):
     name = "system"

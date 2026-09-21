@@ -78,9 +78,10 @@ Server definitions are saved to `~/.config/pico-chat/servers.toml` and persist b
 | `/compact` | Summarize conversation history to free context space |
 | `/clear` | Clear the conversation history |
 | `/stop` | Stop the current generation |
+| `/activity` | Toggle the activity overlay (shell/status output) |
 | `/set` | Set runtime parameters (e.g. `/set fps 60`) |
 | `/get` | Get current runtime parameters |
-| `/debug` | Debug utilities (toggle panel, copy context, show system prompt) |
+| `/debug` | Debug utilities (toggle console, copy context, show system prompt) |
 | `/exit` | Quit the application |
 
 ### Server Management
@@ -136,11 +137,21 @@ Then:
 
 ### Navigating history
 
-- **↑ / ↓** arrow keys — focus messages in the history
-- **Mouse click** — focus a message directly
-- When a message is focused, a footer appears with available actions:
-  - **`c`** — copy message content to clipboard
-  - **`r`** — retry the response (assistant messages only)
+- **↑ / ↓** arrow keys — select messages in the history; a selected message
+  gets a bright `▌` bar in the left margin
+- **Mouse click** — select a message directly
+- **Esc** — clear the selection; **Enter** / **`i`** — jump to the input
+- While a message is selected an action line appears just above the input
+  (the status bar stays visible), marked with `▌`:
+  - **`c`** — copy the message content to clipboard
+  - **`o`** — show a tool call's full output
+  - **`a`** / **`x`** — allow / deny a pending permission request
+- When the input is focused, the same line shows a muted right-aligned hint:
+  `[/] command  [@] file  [$] shell  ↑↓ move` (`@` works mid-text)
+
+Non-conversation output (shell commands, command status, notices) appears in the
+activity overlay (`/activity`) as a toast, keeping the transcript to the
+conversation itself.
 
 ---
 

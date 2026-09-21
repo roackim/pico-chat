@@ -155,6 +155,9 @@ class ActionBar(Component):
         # Leading marker drawn before the actions (e.g. "▌ " for the selected
         # message) and the start of the action hit regions.
         self.prefix = ""
+        # Right-align the (prefix + actions + hint) group instead of starting
+        # at the left edge.
+        self.align_right = False
         # When collapsed the bar occupies zero rows (mounted permanently above
         # the input, shown only while a message is selected or input is idle).
         self.expanded = False
@@ -177,6 +180,11 @@ class ActionBar(Component):
     def set_prefix(self, prefix: str):
         if self.prefix != prefix:
             self.prefix = prefix
+            self.mark_changed()
+
+    def set_align_right(self, align_right: bool):
+        if self.align_right != align_right:
+            self.align_right = align_right
             self.mark_changed()
 
     def set_expanded(self, expanded: bool):
@@ -227,29 +235,34 @@ class ActionBar(Component):
         # Fill the whole bar (blank pad line + content line).
         buffer.fill(self.x, self.y, self.width, self.height, " ", bg=self.style.bg)
         self._content_y = self.y + (1 if (self.top_pad and self.height > 1) else 0)
-        x = self.x + self.style.padding
+        row = self._content_y
+        gap = max(1, self.style.padding)
+
+        # Build the content as ordered segments so it can be left- or
+        # right-aligned as a group.
+        segments = []
         if self.prefix:
-            buffer.write_str(x, self._content_y, self.prefix,
-                             fg=self.style.focused_fg if self.focused else self.style.fg,
-                             bg=self.style.bg, max_width=max(0, self.x + self.width - x))
-            x += len(self.prefix)
-        for index, item in enumerate(self.actions):
-            text = f"[{item.key}] {item.label}"
+            segments.append(("prefix", self.prefix, None))
+        for item in self.actions:
+            segments.append(("action", f"[{item.key}] {item.label}", item))
+        if self.hint:
+            segments.append(("hint", self.hint, None))
+
+        total = sum(len(text) for _, text, _ in segments) + gap * max(0, len(segments) - 1)
+        x = self.x + self.style.padding
+        if self.align_right:
+            x = max(self.x + self.style.padding,
+                    self.x + self.width - total - self.style.padding)
+
+        action_fg = self.style.focused_fg if self.focused else self.style.fg
+        for index, (kind, text, item) in enumerate(segments):
+            if index:
+                x += gap
             if x >= self.x + self.width:
                 break
             end = min(self.x + self.width, x + len(text))
-            self._hit_regions.append((x, end, item))
-            buffer.write_str(x, self._content_y, text,
-                             fg=self.style.focused_fg if self.focused else self.style.fg,
-                             bg=self.style.bg,
-                             max_width=end - x)
-            # Items are always separated by at least one space, independent of
-            # the bar's leading padding.
-            x = end + max(1, self.style.padding)
-
-        if self.hint:
-            hint_x = self.x + max(0, self.width - len(self.hint) - self.style.padding)
-            if hint_x > x:
-                buffer.write_str(hint_x, self._content_y, self.hint, fg=theme.MUTED,
-                                 bg=self.style.bg,
-                                 max_width=max(0, self.x + self.width - hint_x))
+            color = theme.MUTED if kind == "hint" else action_fg
+            if kind == "action" and item is not None:
+                self._hit_regions.append((x, end, item))
+            buffer.write_str(x, row, text, fg=color, bg=self.style.bg, max_width=end - x)
+            x = end

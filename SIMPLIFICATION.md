@@ -1,6 +1,10 @@
 # Pico-Chat Simplification — Plan
 
-**Status:** in refinement (resolved decisions below; definition-needed items at the end)
+**Status:** R1,R2,R4,R4b,R5,R6,R7,R8,R9 done; R3 (commands as data) pending.
+See `HANDOFF.md` for current state and the remaining work (OSC 52 clipboard,
+optional picker polish / structural refactor). A round of UI/UX polish
+(message prefix bar, selection + action line, activity surface, `@` picker) is
+also done.
 **Scope:** independent of `refactor.todo`.
 
 ---

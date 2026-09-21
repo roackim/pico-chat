@@ -455,10 +455,13 @@ routed to the activity surface rather than the transcript (see below).
 
 ### Message Selection and the Mode Line
 
-Messages are gutter-threaded and do not render actions inline. `ChatHistoryPanel`
-keeps a `focused_message_index` (the selected message); the selected message's
-gutter glyph is replaced with a bright `▌` marker (no extra column, nothing
-shifts, and no leading margin).
+Messages are gutter-threaded and do not render actions inline. User and pico
+messages use a `▌` prefix bar spanning the full message height
+(`Box.full_height_gutter`) — user in the `USER` accent, pico in `MUTED`
+gray; user content is normal text color (the accent is only the bar).
+`ChatHistoryPanel` keeps a `focused_message_index` (the selected message); the
+selected message's prefix bar is replaced with a brighter `▌` marker (no extra
+column, nothing shifts, no leading margin).
 
 An **action line** sits above the input with a blank pad row above it
 (`ActionBar.set_top_pad`): an `ActionBar` mounted permanently in the workspace
@@ -467,7 +470,8 @@ two (pad + content) when needed. The app (`_update_action_strip`) drives it in
 two modes:
 
 - **Message selected** — shows the message's actions (`[c] copy`, `[o] output`,
-  permission `[a]/[x]`) with a `▌ ` prefix and a `↑↓ move · esc back` hint.
+  permission `[a]/[x]`) in the muted style, right-aligned as a group with the
+  `↑↓ move · esc back` hint (`ActionBar.set_align_right`).
   Mouse clicks are dispatched by the app interceptor to
   `ActionBar.handle_input`; key dispatch goes through
   `ChatHistoryPanel.handle_input` → `on_action`. `ChatHistoryPanel` notifies the
@@ -516,8 +520,20 @@ overlay only.
 ### How Messages Are Displayed
 
 `ChatHistoryPanel.add_message(text, msg_type, title=None, ...)` creates a `Message` object and appends it (or routes it to the activity sink for `SysMsg*`).
-`Message` wraps a `TextComponent`/`MarkdownComponent` inside a thread-mode `Box` (role gutter, no border).
-`ChatHistoryPanel` is the owner of the message list — it handles layout, selection, scrolling, and width-change reformatting.
+`Message` wraps a `TextComponent`/`MarkdownComponent` inside a thread-mode `Box`
+(role gutter, no border).
+
+**Padding is owned by the `Box`.** The panel passes the wrap width to `Message`
+(content width = panel width − gutter − padding); `Box` lays the child out at
+`x + gutter + content_pad_left` with width reduced by the right pad. Content
+components render *unpadded* (plain text is no longer pre-padded and
+`MarkdownComponent` gets `left_pad=0`), so "where content starts and how wide it
+is" has a single owner. `Message.append()` drops leading whitespace on the first
+chunk, since models often open with a space.
+
+Messages are separated by `ui_msg_v_margin` blank lines (default `1`; set it in
+`ui.toml`). `ChatHistoryPanel` is the owner of the message list — it handles
+layout, selection, scrolling, and width-change reformatting.
 
 ---
 

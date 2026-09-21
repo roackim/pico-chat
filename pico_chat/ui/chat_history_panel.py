@@ -448,15 +448,11 @@ class ChatHistoryPanel(TextComponent):
             new_width: The new width of the component
         """
         self.max_width = new_width
-        
-        # Reformat all messages with the new width (account for box borders -2)
-        inner_width = new_width - 2
-        if inner_width < 1:
-            inner_width = 1
-            
+
+        # Content width for a message = panel width - gutter (1) - padding.
+        # The Box owns the gutter/padding; this is just the wrap width.
         for message in self.messages:
-            # Account for box padding
-            msg_inner_width = inner_width - message.left_pad - message.right_pad
+            msg_inner_width = new_width - 1 - message.left_pad - message.right_pad
             if msg_inner_width < 1:
                 msg_inner_width = 1
             message.reformat(msg_inner_width)
@@ -1021,8 +1017,9 @@ class ChatHistoryPanel(TextComponent):
         # This prevents unwanted scrolling when user has scrolled up
             
         # Create a new message
-        # Account for box padding in initial max_width
-        initial_max_width = self.max_width - 2 - self.left_pad - self.right_pad
+        # Content width = panel width - gutter (1) - padding. The Box owns the
+        # gutter and padding, so ``max_width`` here is the wrap width.
+        initial_max_width = self.max_width - 1 - self.left_pad - self.right_pad
         if initial_max_width < 1:
             initial_max_width = 1
 

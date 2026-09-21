@@ -41,7 +41,7 @@ def test_action_line_expands_only_when_selected():
     ui.chat_history_panel.set_focused_message(0)
     assert ui.action_bar.expanded is True
     assert [item.key for item in ui.action_bar.actions] == ["c"]
-    assert ui.action_bar.prefix == "▌ "
+    assert ui.action_bar.prefix == ""
     # The input component is never swapped out.
     assert ui.input_box.child is ui.input_component
 

@@ -1,4 +1,41 @@
 import difflib
+from typing import List, Optional, Tuple
+
+
+def fuzzy_match(needle: str, haystack: str) -> Optional[Tuple[float, List[int]]]:
+    """Subsequence match with positions, tuned for paths.
+
+    Returns ``(score, matched_indices)`` when every character of ``needle``
+    appears in order in ``haystack`` (case-insensitive), else ``None``. The
+    score rewards consecutive runs, segment starts (after ``/``/``_``/``-``/
+    ``.``/space), and a prefix match, and penalizes length and gaps.
+    """
+    needle_l = needle.lower()
+    hay_l = haystack.lower()
+    if not needle_l:
+        return (1.0, [])
+
+    indices: List[int] = []
+    pos = 0
+    for ch in needle_l:
+        idx = hay_l.find(ch, pos)
+        if idx == -1:
+            return None
+        indices.append(idx)
+        pos = idx + 1
+
+    score = 1.0
+    runs = sum(1 for a, b in zip(indices, indices[1:]) if b == a + 1)
+    score += 0.15 * runs
+    for i in indices:
+        if i == 0 or hay_l[i - 1] in "/._- ":
+            score += 0.2
+    if indices[0] == 0:
+        score += 0.5
+    score -= len(hay_l) * 0.002
+    span = indices[-1] - indices[0] + 1
+    score -= (span - len(indices)) * 0.01
+    return score, indices
 
 def split_string(s: str):
     s = s.replace("_", " ")

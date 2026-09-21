@@ -25,19 +25,38 @@ def test_thread_mode_uses_role_gutter():
     pico = Message("hello", msg_type=PicoMsg(), max_width=40)
 
     assert user.box.thread_mode is True
-    assert user.box.gutter == "▸"
-    assert pico.box.gutter == "▸"
+    assert user.box.gutter == "▌"
+    assert pico.box.gutter == "▌"
 
 
-def test_user_message_content_colored_user():
-    """User message content is tinted with the USER color."""
+def test_user_message_content_is_normal_but_gutter_is_user_colored():
+    """User message text is normal color; the prefix bar keeps the USER color."""
     from pico_chat.ui.tui.msg_types import UserMsg
     from pico_chat.ui.tui.colors import theme
 
     msg = Message("hello", msg_type=UserMsg(), max_width=40)
-    # The content component's fg resolves from the message type's content_color.
-    assert msg.component.fg is not None
-    assert msg.component.fg == theme.USER
+    assert msg.component.fg == theme.DEFAULT  # normal text color
+    assert msg.box.gutter_color == theme.USER
+
+
+def test_pico_message_gutter_is_gray():
+    from pico_chat.ui.tui.msg_types import PicoMsg
+    from pico_chat.ui.tui.colors import theme
+
+    msg = Message("hello", msg_type=PicoMsg(), max_width=40)
+    assert msg.box.gutter_color == theme.MUTED
+
+
+def test_append_strips_leading_whitespace_on_first_chunk():
+    """Streamed assistant content often opens with a space; drop it once."""
+    from pico_chat.ui.tui.msg_types import PicoMsg
+
+    msg = Message("", msg_type=PicoMsg(), max_width=40, render_markdown=True)
+    msg.append(" Hello.")
+    assert msg.base_text == "Hello."
+
+    msg.append(" More text.")
+    assert msg.base_text == "Hello. More text."
 
 
 def test_thinking_message_is_collapsible():

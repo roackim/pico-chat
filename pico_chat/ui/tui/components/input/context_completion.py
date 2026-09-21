@@ -5,6 +5,9 @@ Provides fuzzy file/folder completion with a configurable trigger prefix.
 
 from typing import Callable, List, Optional
 
+from pico_chat.ui.tui.colors import theme
+from pico_chat.ui.tui.fuzzy import fuzzy_match
+
 from .completion import Completer
 
 
@@ -22,6 +25,12 @@ class ContextCompletion(Completer):
         self.get_items = get_items_callback
         self.trigger = trigger
         self.trigger_len = len(trigger)
+        # File paths are long; let the menu use the available width.
+        self.menu.set_fill_width(True)
+        # Frame in the user/accent color; suggestions keep the normal color;
+        # the selected row is that accent (bold, not inverted).
+        self.menu.frame_color = theme.USER
+        self.menu.content_color = theme.DEFAULT
     
     def find_trigger_position(self, text: str, cursor_pos: int) -> Optional[int]:
         """Find the last trigger before cursor position."""
@@ -32,6 +41,11 @@ class ContextCompletion(Completer):
         last_trigger = text_before_cursor.rfind(self.trigger)
         
         if last_trigger == -1:
+            return None
+
+        # Only trigger at a word boundary (start or after whitespace), so the
+        # file picker does not fire inside e.g. an email address ("a@b").
+        if last_trigger > 0 and not text[last_trigger - 1].isspace():
             return None
         
         # Check if there's a space after the trigger (means context is complete)
@@ -130,15 +144,34 @@ class ContextCompletion(Completer):
             rest = [it for it in items if it != "../"]
         else:
             rest = items
-        
-        # Update menu with fuzzy filtering. No display prefix: the items are
-        # already relative paths (or bare names when drilling), so showing
-        # "@" would be redundant.
-        self._show(rest, search_term)
+
+        # Rank the candidates. With a search term, use the subsequence matcher
+        # (score + matched indices for highlighting); without one, list
+        # directories before files, alphabetically.
+        if search_term:
+            scored = []
+            for it in rest:
+                match = fuzzy_match(search_term, it)
+                if match is not None:
+                    scored.append((it, match[0]))
+            scored.sort(key=lambda t: (-t[1], t[0].count('/'), len(t[0]), t[0].lower()))
+            ranked = [t[0] for t in scored]
+        else:
+            dirs = sorted((it for it in rest if it.endswith('/')), key=str.lower)
+            files = sorted((it for it in rest if not it.endswith('/')), key=str.lower)
+            ranked = dirs + files
+
         if has_parent:
-            self.menu.items = self.menu.items + ["../"]
-            self.menu.is_visible = len(self.menu.items) > 0
-            self.is_active = self.menu.is_visible
+            ranked.append("../")
+
+        if not ranked:
+            self.hide()
+            return
+
+        # No display prefix: items are relative paths, so showing "@" would be
+        # redundant.
+        self.menu.set_items(ranked)
+        self.is_active = self.menu.is_visible
     
     def accept_selection(self, text: str, cursor_pos: int) -> Optional[tuple[str, int]]:
         """Accept current selection, return (new_text, new_cursor_pos)."""
@@ -149,11 +182,19 @@ class ContextCompletion(Completer):
         trigger_pos = self.find_trigger_position(text, cursor_pos)
         if trigger_pos is None:
             return None
-        
+
+        # Replace the whole current word (trigger to the next whitespace), not
+        # just up to the cursor, so accepting with the cursor mid-word doesn't
+        # leave trailing letters behind.
+        word_end = cursor_pos
+        while word_end < len(text) and not text[word_end].isspace():
+            word_end += 1
+        tail = text[word_end:]
+
         # Preserve any directory prefix already typed (e.g. "@src/").
         current_word = self.get_current_context_word(text, cursor_pos) or ""
         prefix = current_word if current_word.endswith('/') else ""
-        
+
         # The ".." entry navigates up one level: drop the last path segment.
         if selected == "../":
             if prefix:
@@ -163,17 +204,17 @@ class ContextCompletion(Completer):
                 else:
                     # Single-level dir (e.g. "src/") — going up returns to root.
                     parent = ""
-                new_text = text[:trigger_pos] + self.trigger + parent + text[cursor_pos:]
+                new_text = text[:trigger_pos] + self.trigger + parent + tail
                 new_cursor_pos = trigger_pos + self.trigger_len + len(parent)
             else:
-                new_text = text[:trigger_pos] + self.trigger + text[cursor_pos:]
+                new_text = text[:trigger_pos] + self.trigger + tail
                 new_cursor_pos = trigger_pos + self.trigger_len
             return (new_text, new_cursor_pos)
 
         # _resolve_items returns full relative paths (e.g. "notes/doc.md"), so
         # we must NOT re-prepend the directory prefix — that would double it
         # ("@notes/notes/doc.md"). Just insert the selected path as-is.
-        new_text = text[:trigger_pos] + self.trigger + selected + text[cursor_pos:]
+        new_text = text[:trigger_pos] + self.trigger + selected + tail
         new_cursor_pos = trigger_pos + self.trigger_len + len(selected)
 
         return (new_text, new_cursor_pos)

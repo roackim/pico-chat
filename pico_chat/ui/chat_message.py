@@ -75,7 +75,8 @@ class Message:
 
         if render_markdown:
             self.formatted_text = ""  # Not used for markdown messages
-            self.component = MarkdownComponent(text, fg=content_color, left_pad=left_pad)
+            # Padding is owned by the Box (thread mode), not the content.
+            self.component = MarkdownComponent(text, fg=content_color, left_pad=0)
         else:
             self.formatted_text = self._format_line_wrap()
             self.component = TextComponent(self.formatted_text, fg=content_color)
@@ -117,6 +118,8 @@ class Message:
         thread_gutter_color = getattr(self.type, "gutter_color", None)
         if thread_gutter_color is None:
             thread_gutter_color = frame_color
+        elif isinstance(thread_gutter_color, str):
+            thread_gutter_color = getattr(theme, thread_gutter_color, frame_color)
 
         self.box = Box(
             self.component,
@@ -125,6 +128,10 @@ class Message:
             thread_mode=True,
             gutter=thread_gutter,
             gutter_color=thread_gutter_color,
+            content_pad_left=left_pad,
+            content_pad_right=right_pad,
+            # User/pico use a `▌` prefix bar that spans every row.
+            full_height_gutter=isinstance(msg_type, (msg_types.UserMsg, msg_types.PicoMsg)),
         )
     
     def finalize(self):
@@ -267,7 +274,9 @@ class Message:
             return "?", theme.PERMISSION
         if self.is_tool_message():
             return self.status_glyph()
-        return getattr(self.type, "gutter", "▸"), self.frame_color
+        # Respect the type's explicit gutter color (e.g. MUTED for pico); fall
+        # back to the frame color.
+        return getattr(self.type, "gutter", "▸"), (self.box.gutter_color or self.frame_color)
 
     def _collapsed_text(self) -> str:
         """Return the single-line summary shown when collapsed."""
@@ -306,9 +315,10 @@ class Message:
         """
         if self.max_width is None or self.max_width <= 0:
             return self.base_text
-        
-        # Calculate available width for content after padding
-        content_width = self.max_width - self.left_pad - self.right_pad
+
+        # ``max_width`` is already the content width (the panel subtracts the
+        # gutter and padding); the Box applies the padding at render time.
+        content_width = self.max_width
         if content_width < 1:
             content_width = 1
         
@@ -344,7 +354,7 @@ class Message:
             
             wrapped = wrap_text(line, content_width, padding_width=0, first_line_padding=False)
             for w_line in wrapped.split('\n'):
-                lines.append(" " * self.left_pad + w_line)
+                lines.append(w_line)
         
         return "\n".join(lines)
     
@@ -385,7 +395,13 @@ class Message:
         self.reformat(self.max_width)
 
     def append(self, text: str):
-        """Append text to the message and reformat."""
+        """Append text to the message and reformat.
+
+        Leading whitespace on the very first chunk is dropped (models often
+        open with a space; user input is stripped on submit).
+        """
+        if not self.base_text:
+            text = text.lstrip()
         self.base_text += text
         self.reformat(self.max_width)
     
