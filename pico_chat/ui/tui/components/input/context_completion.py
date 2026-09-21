@@ -14,10 +14,10 @@ class ContextCompletion(Completer):
     Args:
         menu: SelectionMenu instance for displaying completions
         get_items_callback: Callable returning list of available items
-        trigger: Trigger prefix string (default: "./")
+        trigger: Trigger prefix string (default: "@")
     """
 
-    def __init__(self, menu, get_items_callback: Callable[[], List[str]], trigger: str = "./"):
+    def __init__(self, menu, get_items_callback: Callable[[], List[str]], trigger: str = "@"):
         super().__init__(menu)
         self.get_items = get_items_callback
         self.trigger = trigger
@@ -133,7 +133,7 @@ class ContextCompletion(Completer):
         
         # Update menu with fuzzy filtering. No display prefix: the items are
         # already relative paths (or bare names when drilling), so showing
-        # "./" would be redundant.
+        # "@" would be redundant.
         self._show(rest, search_term)
         if has_parent:
             self.menu.items = self.menu.items + ["../"]
@@ -150,7 +150,7 @@ class ContextCompletion(Completer):
         if trigger_pos is None:
             return None
         
-        # Preserve any directory prefix already typed (e.g. "./src/").
+        # Preserve any directory prefix already typed (e.g. "@src/").
         current_word = self.get_current_context_word(text, cursor_pos) or ""
         prefix = current_word if current_word.endswith('/') else ""
         
@@ -172,7 +172,7 @@ class ContextCompletion(Completer):
 
         # _resolve_items returns full relative paths (e.g. "notes/doc.md"), so
         # we must NOT re-prepend the directory prefix — that would double it
-        # ("./notes/notes/doc.md"). Just insert the selected path as-is.
+        # ("@notes/notes/doc.md"). Just insert the selected path as-is.
         new_text = text[:trigger_pos] + self.trigger + selected + text[cursor_pos:]
         new_cursor_pos = trigger_pos + self.trigger_len + len(selected)
 

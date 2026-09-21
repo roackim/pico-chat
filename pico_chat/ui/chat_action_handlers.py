@@ -68,7 +68,7 @@ class ChatActionHandlers:
                              check=True, 
                              stderr=subprocess.DEVNULL)
                 logger.info("Message copied to clipboard (xclip)")
-                self.chat_history_panel.add_message("Copied to clipboard", msg_type=SysMsg())
+                self._copy_feedback()
                 return
             except (FileNotFoundError, subprocess.CalledProcessError):
                 pass
@@ -80,7 +80,7 @@ class ChatActionHandlers:
                              check=True,
                              stderr=subprocess.DEVNULL)
                 logger.info("Message copied to clipboard (xsel)")
-                self.chat_history_panel.add_message("Copied to clipboard", msg_type=SysMsg())
+                self._copy_feedback()
                 return
             except (FileNotFoundError, subprocess.CalledProcessError):
                 pass
@@ -92,7 +92,7 @@ class ChatActionHandlers:
                              check=True,
                              stderr=subprocess.DEVNULL)
                 logger.info("Message copied to clipboard (wl-copy)")
-                self.chat_history_panel.add_message("Copied to clipboard", msg_type=SysMsg())
+                self._copy_feedback()
                 return
             except (FileNotFoundError, subprocess.CalledProcessError):
                 pass
@@ -108,28 +108,15 @@ class ChatActionHandlers:
             logger.error(f"Error copying to clipboard: {e}")
             self.chat_history_panel.add_message(f"Copy failed: {e}", msg_type=SysMsgError())
     
-    def handle_delete_action(self, message):
-        """Delete a message and all messages after it from both UI and harness."""
-        logger = logging.getLogger("tui")
-        logger.info("Delete action triggered")
-
-        self.stop_generation()
-
-        try:
-            idx = self.chat_history_panel.messages.index(message)
-        except ValueError:
-            return
-
-        # Remove from harness (inclusive: removes this message and everything after)
-        if message.harness_message_ids:
-            harness_id = message.harness_message_ids[0]
-            self.agent.delete_messages_after_id(harness_id, inclusive=True)
-
-        # Remove from UI: this message and all after it
-        to_remove = len(self.chat_history_panel.messages) - idx
-        for _ in range(to_remove):
-            self.chat_history_panel.remove_last_message()
-
+    def _copy_feedback(self):
+        """Confirm a copy without disturbing the action mode line."""
+        panel = getattr(self, "chat_history_panel", None)
+        selected = panel is not None and panel.focused_message_index is not None
+        flash = getattr(self, "flash_hint", None)
+        if selected and callable(flash):
+            flash("copied ✓")
+        elif hasattr(self, "notify"):
+            self.notify("Copied to clipboard")
 
     def handle_retry_action(self, message):
         """Handle retry action for a message (regenerate response)."""

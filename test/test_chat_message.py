@@ -13,9 +13,9 @@ def test_focusing_compact_single_line_message_invalidates_height_cache():
     message.set_focused(True)
 
     assert message.layout_revision == 1
-    # Focusing a message with actions adds one row for the action line below
-    # the content (which pushes subsequent messages down).
-    assert component.get_preferred_height(40) == 2
+    # Actions are no longer rendered inline (the app shows them in the mode
+    # line), so focusing does not change the message height.
+    assert component.get_preferred_height(40) == 1
 
 
 def test_thread_mode_uses_role_gutter():

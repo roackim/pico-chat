@@ -15,8 +15,16 @@ See [notes/ui.md](../notes/ui.md) for the full architecture overview.
 	`current_generation_task`, `active_tool_messages`, `pending_permission_prompt`,
 	and pause/steer state live directly on the app (no `ConversationRuntime`)
 - Installs one `ChatScreen` (history + input + status bar) through `Navigator`
+- The **action line** just above the input is a collapsible `ActionBar` in the
+	workspace body; `_update_action_strip` shows the selected message's actions
+	(with a `▌ ` prefix) or, when the input is focused and empty, the input
+	prefixes (`/`, `@`, `$`) as clickable hints (`input_component.on_change`,
+	`chat_history_panel.on_selection_changed`)
 - The debug console is a `DebugPopup` compositor overlay toggled by `/debug panel`
 	(`toggle_debug_console`), not a workspace tab
+- The activity overlay (`DebugPopup` titled "activity", toggled by `/activity`)
+	holds non-conversation output; `SysMsg*` is routed to it (and a status-bar
+	toast) instead of the transcript
 - Ordinary, edited, retried, and resumed messages share one enqueue path,
 	preserving consistent queued state and FIFO ordering
 - Application startup launches one `agent_worker` plus one app-level command

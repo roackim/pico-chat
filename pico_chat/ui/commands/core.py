@@ -227,6 +227,18 @@ class ResumeCommand(Command):
             ui.chat_history_panel.add_message("Resume not supported.", msg_type=SysMsg())
 
 
+class ActivityCommand(Command):
+    def __init__(self):
+        super().__init__("activity", "Toggle the activity overlay (shell/status output)")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        if hasattr(ui, "toggle_activity"):
+            ui.toggle_activity()
+        else:
+            ui.chat_history_panel.add_message(
+                "Activity overlay not supported by this UI.", msg_type=SysMsg())
+
+
 class StatusCommand(Command):
     def __init__(self):
         super().__init__("status", "Show system and connection status")
@@ -317,4 +329,5 @@ __all__ = [
     "HelpCommand", "ClearCommand", "ReloadCommand", "ConfigCommand", "EditCommand",
     "CompactCommand", "ExitCommand",
     "StopCommand", "ResumeCommand", "StatusCommand", "PwdCommand", "CdCommand",
+    "ActivityCommand",
 ]

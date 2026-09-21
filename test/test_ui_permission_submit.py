@@ -20,11 +20,10 @@ class TestPermissionPendingSubmit:
 
         assert ui.message_queue.qsize() == 0
         assert ui.command_queue.qsize() == 0
-        assert len(ui.chat_history_panel.messages) == 1
-
-        last_msg = ui.chat_history_panel.messages[-1]
-        assert isinstance(last_msg.type, SysMsg)
-        assert "Permission required for pending tool call" in last_msg.base_text
+        # The notice is routed to the activity surface, not the transcript.
+        assert ui.chat_history_panel.messages == []
+        assert any("Permission required for pending tool call" in line
+                   for line in ui.activity_panel.lines)
 
     def test_command_allowed_while_permission_pending(self):
         ui = chatTUI(StubAgent())

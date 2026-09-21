@@ -1,3 +1,4 @@
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Sequence
 
@@ -40,6 +41,24 @@ class StatusBar(Component):
         self.separator = separator
         self.values: dict[str, str] = {}
         self.field_colors: dict[str, Any] = {}
+        self._toast_text: Optional[str] = None
+        self._toast_color: Any = None
+        self._toast_until: float = 0.0
+
+    def set_toast(self, text: str, duration: float = 4.0, color: Any = None):
+        """Show a transient one-line message in place of the status fields."""
+        self._toast_text = text
+        self._toast_color = color if color is not None else theme.WARNING
+        self._toast_until = time.monotonic() + duration
+        self.mark_changed()
+
+    def clear_toast(self):
+        self._toast_text = None
+        self._toast_until = 0.0
+        self.mark_changed()
+
+    def toast_active(self) -> bool:
+        return bool(self._toast_text) and time.monotonic() < self._toast_until
 
     def set_field_colors(self, colors: dict[str, Any]):
         """Set per-field foreground colors (field name -> RGB/ANSIColor)."""
@@ -77,6 +96,15 @@ class StatusBar(Component):
         if self.width <= 0 or self.height <= 0:
             return
         buffer.fill(self.x, self.y, self.width, 1, " ", bg=self.style.bg)
+
+        # A transient toast temporarily takes over the bar.
+        if self.toast_active():
+            avail = max(0, self.width - self.style.padding * 2)
+            buffer.write_str(self.x + self.style.padding, self.y,
+                             (self._toast_text or "")[:avail],
+                             fg=self._toast_color, bg=self.style.bg, max_width=avail)
+            return
+
         right = self.right[:max(0, self.width - self.style.padding * 2)]
         if right:
             right_x = self.x + max(self.style.padding, self.width - self.style.padding - len(right))
@@ -123,7 +151,38 @@ class ActionBar(Component):
         self.style = style or BarStyle.default()
         self.enabled = True
         self.focused = False
+        self.hint = ""
+        # Leading marker drawn before the actions (e.g. "▌ " for the selected
+        # message) and the start of the action hit regions.
+        self.prefix = ""
+        # When collapsed the bar occupies zero rows (mounted permanently above
+        # the input, shown only while a message is selected or input is idle).
+        self.expanded = False
+        # When true, a blank line is rendered above the bar for breathing room.
+        self.top_pad = False
+        self._content_y = 0
         self._hit_regions: list[tuple[int, int, ActionItem]] = []
+
+    def set_top_pad(self, top_pad: bool):
+        if self.top_pad != top_pad:
+            self.top_pad = top_pad
+            self.mark_changed()
+
+    def set_hint(self, hint: str):
+        """Right-aligned muted hint text (e.g. "↑↓ move · esc back")."""
+        if self.hint != hint:
+            self.hint = hint
+            self.mark_changed()
+
+    def set_prefix(self, prefix: str):
+        if self.prefix != prefix:
+            self.prefix = prefix
+            self.mark_changed()
+
+    def set_expanded(self, expanded: bool):
+        if self.expanded != expanded:
+            self.expanded = expanded
+            self.mark_changed()
 
     def set_focused(self, focused: bool):
         if self.focused != focused:
@@ -131,7 +190,9 @@ class ActionBar(Component):
             self.mark_changed()
 
     def get_preferred_height(self, width: int) -> int:
-        return 1
+        if not self.expanded:
+            return 0
+        return 2 if self.top_pad else 1
 
     def set_actions(self, actions: Sequence[ActionItem]):
         self.actions = list(actions)
@@ -155,7 +216,7 @@ class ActionBar(Component):
                     return self._activate(item)
         if isinstance(event, MouseEvent) and event.pressed and event.button == 0:
             for start, end, item in self._hit_regions:
-                if start <= event.x < end and self.y <= event.y < self.y + self.height:
+                if start <= event.x < end and event.y == self._content_y:
                     return self._activate(item)
         return False
 
@@ -163,16 +224,32 @@ class ActionBar(Component):
         if self.width <= 0 or self.height <= 0:
             return
         self._hit_regions = []
-        buffer.fill(self.x, self.y, self.width, 1, " ", bg=self.style.bg)
+        # Fill the whole bar (blank pad line + content line).
+        buffer.fill(self.x, self.y, self.width, self.height, " ", bg=self.style.bg)
+        self._content_y = self.y + (1 if (self.top_pad and self.height > 1) else 0)
         x = self.x + self.style.padding
+        if self.prefix:
+            buffer.write_str(x, self._content_y, self.prefix,
+                             fg=self.style.focused_fg if self.focused else self.style.fg,
+                             bg=self.style.bg, max_width=max(0, self.x + self.width - x))
+            x += len(self.prefix)
         for index, item in enumerate(self.actions):
             text = f"[{item.key}] {item.label}"
             if x >= self.x + self.width:
                 break
             end = min(self.x + self.width, x + len(text))
             self._hit_regions.append((x, end, item))
-            buffer.write_str(x, self.y, text,
+            buffer.write_str(x, self._content_y, text,
                              fg=self.style.focused_fg if self.focused else self.style.fg,
-                             bg=self.style.bg, reverse=self.focused,
+                             bg=self.style.bg,
                              max_width=end - x)
-            x = end + self.style.padding
+            # Items are always separated by at least one space, independent of
+            # the bar's leading padding.
+            x = end + max(1, self.style.padding)
+
+        if self.hint:
+            hint_x = self.x + max(0, self.width - len(self.hint) - self.style.padding)
+            if hint_x > x:
+                buffer.write_str(hint_x, self._content_y, self.hint, fg=theme.MUTED,
+                                 bg=self.style.bg,
+                                 max_width=max(0, self.x + self.width - hint_x))

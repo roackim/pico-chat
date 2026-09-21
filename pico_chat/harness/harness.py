@@ -354,7 +354,7 @@ class Harness:
 
         Uses a depth/max-files-bounded walk so it stays responsive on huge
         trees (e.g. ``$HOME``). The result is cached per-workspace so typing
-        ``./`` doesn't re-walk the tree on every keystroke.
+        ``@`` doesn't re-walk the tree on every keystroke.
         """
         from pico_chat.harness.context_builder import list_files_bounded
         from pico_chat import pico_cfg

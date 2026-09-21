@@ -18,6 +18,7 @@ from .conversation import (
     ConversationImportCommand,
 )
 from .core import (
+    ActivityCommand,
     CdCommand,
     ClearCommand,
     CompactCommand,
@@ -63,6 +64,7 @@ COMMANDS: Dict[str, Command] = {
     "stop":         StopCommand(),
     "resume":       ResumeCommand(),
     "status":       StatusCommand(),
+    "activity":     ActivityCommand(),
     "server":       ServerCommand(),
     "model":        ModelCommand(),
     "tools":        ToolsCommand(),
@@ -119,6 +121,7 @@ __all__ = [
     "HelpCommand", "ClearCommand", "ReloadCommand", "ConfigCommand", "EditCommand",
     "CompactCommand", "ExitCommand",
     "StopCommand", "ResumeCommand", "StatusCommand", "PwdCommand", "CdCommand",
+    "ActivityCommand",
     "ServerCommand", "ServerListCommand", "ServerUseCommand", "ServerEditCommand",
     "ServerRemoveCommand", "ServerInfoCommand",
     "ModelCommand", "ModelListCommand", "ModelUseCommand",

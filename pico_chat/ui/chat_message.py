@@ -81,6 +81,9 @@ class Message:
             self.component = TextComponent(self.formatted_text, fg=content_color)
 
         self.finalized = False  # Whether this message is finalized
+        # Messages do not render actions inline; the app surfaces the selected
+        # message's actions in the bottom mode line instead.
+        self.inline_actions = False
         
         # Collapsed state: when True, render a single summary line instead of
         # the full content (used for thinking messages that fold by default).
@@ -133,36 +136,12 @@ class Message:
         self.box.mark_changed()  # Finalization affects actions display
     
     def get_active_actions(self):
-        """Get the list of active actions based on message state."""
-        actions = list(self.type.actions)
+        """Get the list of active actions based on message state.
 
-        if isinstance(self.type, msg_types.UserMsg):
-            # STEER only visible while this message is sitting in the queue
-            if not self.is_queued:
-                actions = [a for a in actions if a != MsgAction.STEER]
-
-        elif isinstance(self.type, msg_types.PicoMsg):  # includes ThinkingMsg
-            if self.is_paused:
-                # Paused: copy, resume, delete
-                keep = {MsgAction.COPY, MsgAction.RESUME, MsgAction.DELETE}
-                actions = [a for a in actions if a in keep]
-            elif self.finalized:
-                # Finalized: hide streaming-only actions
-                actions = [a for a in actions if a not in (
-                    MsgAction.STOP, MsgAction.PAUSE, MsgAction.RESUME
-                )]
-            else:
-                # Live streaming: hide destructive/post-gen actions
-                actions = [a for a in actions if a not in (
-                    MsgAction.DELETE, MsgAction.RETRY, MsgAction.RESUME
-                )]
-
-        elif self.is_tool_message():
-            # The STOP action only applies while the command is still running.
-            if self.finalized:
-                actions = [a for a in actions if a != MsgAction.STOP]
-
-        return actions
+        The exposed set is deliberately small (copy/output/permission); actions
+        that alter or remove conversation state live behind commands.
+        """
+        return list(self.type.actions)
     
     def update_actions(self):
         """Update the box's actions list based on current state.

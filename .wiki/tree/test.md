@@ -31,5 +31,9 @@ All tests use pytest. See [notes/testing.md](../notes/testing.md) for run instru
 | `test_ollama_server.py` | `harness/llm_server.py` | Ollama `/api/tags` discovery, context-window parsing, native chat adaptation |
 | `test_layout_primitives.py` | `ui/tui/container.py` | Layout, clipping, scrolling, and typed ScrollView navigation |
 | `test_tui_interactions.py` | `ui/app.py`, `ui/tui/components/` | Focus routing, queued-message state, and the debug overlay |
+| `test_message_focus.py` | `ui/app.py`, `chat_history_panel.py` | Message selection, action line, activity routing, toasts |
+| `test_list_modal.py` | `ui/tui/components/list_modal.py` | Modal list selector (accept/cancel/navigation) |
+| `test_context_window_discovery.py` | `harness/endpoint.py` | OpenRouter context-window lookup by bare/canonical id |
+| `test_input_height.py` | `ui/tui/components/input/` | Input box cap/scroll via `ui_max_input_height` |
 | `test_tui_navigation.py` | `ui/tui/navigation.py`, `ui/tui/compositor.py` | Screen navigation, modal lifecycle, and compositor shutdown handling |
 | `test_subagents.py` | `tools.py`, `harness.py` | Depth limit, timeout, scaffolder role, abort |

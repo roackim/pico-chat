@@ -4,17 +4,17 @@ from typing import Optional, List
 from enum import Enum
 
 class MsgAction(Enum):
-    """Available actions for messages."""
-    DELETE = ("d", "delete")
+    """Available actions for messages.
+
+    Only non-destructive, non-editing actions are exposed on messages. Actions
+    that change conversation state (retry/stop/steer/pause/resume) or remove
+    content (delete/edit) are intentionally not message actions; when needed
+    they belong to explicit commands.
+    """
     COPY = ("c", "copy")
-    RETRY = ("r", "retry")
-    STOP = ("s", "stop")
+    OUTPUT = ("o", "output")
     ALLOW = ("a", "allow")
     DENY = ("x", "deny")
-    OUTPUT = ("o", "output")
-    STEER = ("t", "steer")   # inject queued message as thinking prefill
-    PAUSE = ("p", "pause")   # cancel generation + capture thinking so far
-    RESUME = ("u", "resume") # re-send with captured thinking prefill
     
     def __init__(self, key: str, label: str):
         self.key = key
@@ -38,7 +38,7 @@ class MsgType:
 class UserMsg(MsgType):
     name = "user"
     title = "user"
-    actions = [MsgAction.COPY, MsgAction.DELETE, MsgAction.STEER]
+    actions = [MsgAction.COPY]
     frame_color = "USER"
     content_color = "USER"
     gutter = "▸"
@@ -46,7 +46,7 @@ class UserMsg(MsgType):
 class PicoMsg(MsgType):
     name = "pico"
     title = "pico"
-    actions = [MsgAction.COPY, MsgAction.RETRY, MsgAction.DELETE, MsgAction.STOP, MsgAction.PAUSE, MsgAction.RESUME]
+    actions = [MsgAction.COPY]
     frame_color = "PICO"
     gutter = "▸"
 
@@ -55,7 +55,7 @@ class SysMsg(MsgType):
     title = "system"
     frame_color = "MUTED"
     content_color = "MUTED"
-    actions = [MsgAction.COPY, MsgAction.DELETE]
+    actions = [MsgAction.COPY]
     gutter = "·"
 
 class SysMsgError(SysMsg):
@@ -63,7 +63,7 @@ class SysMsgError(SysMsg):
     title = "error"
     frame_color = "ERROR"
     content_color = "ERROR"
-    actions = [MsgAction.COPY, MsgAction.DELETE]
+    actions = [MsgAction.COPY]
     gutter = "✗"
 
 class SysMsgWarning(SysMsg):
@@ -78,7 +78,7 @@ class ThinkingMsg(PicoMsg):
     title = "thinking"
     frame_color = "MUTED"
     content_color = "MUTED"
-    actions = [MsgAction.COPY, MsgAction.RETRY, MsgAction.DELETE, MsgAction.STOP, MsgAction.PAUSE, MsgAction.RESUME]
+    actions = [MsgAction.COPY]
     gutter = "…"
 
 class ToolCallMsg(MsgType):
@@ -86,7 +86,7 @@ class ToolCallMsg(MsgType):
     title = "tool"
     frame_color = "WARNING"
     content_color = None
-    actions = [MsgAction.OUTPUT, MsgAction.COPY, MsgAction.DELETE, MsgAction.STOP]
+    actions = [MsgAction.OUTPUT, MsgAction.COPY]
     gutter = "⚙"
 
 

@@ -427,35 +427,69 @@ Every message displayed in the chat history has a `MsgType` that controls its ti
 | Class | Title | Frame Color | Actions |
 |-------|-------|-------------|---------|
 | `MsgType` | *(base)* | DEFAULT | none |
-| `UserMsg` | "user" | USER | COPY, EDIT, DELETE, STEER |
-| `PicoMsg` | "pico" | PICO | COPY, EDIT, RETRY, STOP (→DELETE after finalize), PAUSE, RESUME |
-| `ThinkingMsg` | "thinking" | MUTED | COPY, EDIT, RETRY, DELETE, STOP, PAUSE, RESUME |
-| `SysMsg` | "system" | MUTED | COPY, DELETE |
-| `SysMsgError` | "error" | ERROR | COPY, EDIT, DELETE |
-| `SysMsgWarning` | "warning" | WARNING | COPY, DELETE |
-| `ToolCallMsg` | "tool" | WARNING | OUTPUT, COPY, DELETE |
+| `UserMsg` | "user" | USER | COPY |
+| `PicoMsg` | "pico" | PICO | COPY |
+| `ThinkingMsg` | "thinking" | MUTED | COPY |
+| `SysMsg` | "system" | MUTED | COPY |
+| `SysMsgError` | "error" | ERROR | COPY |
+| `SysMsgWarning` | "warning" | WARNING | (inherits COPY) |
+| `ToolCallMsg` | "tool" | WARNING | OUTPUT, COPY |
 | `ToolDraftMsg` | "tool" | MUTED | none |
 | `AskPermissionMsg` | "permission" | PERMISSION | ALLOW, DENY, OUTPUT, COPY |
 
 `ThinkingMsg` and `SysMsgError/Warning` extend `PicoMsg` / `SysMsg` — they inherit defaults and override only what differs.
 
-### MsgAction Enum
+Actions are deliberately limited to non-destructive operations. State-changing
+actions (retry/stop/steer/pause/resume) and removal/edit are **not** message
+actions; when needed they belong to explicit commands. `SysMsg*` notices are
+routed to the activity surface rather than the transcript (see below).
 
-Each action has a keyboard shortcut key and a label displayed in the box border:
+### MsgAction Enum
 
 | Action | Key | Label |
 |--------|-----|-------|
 | `COPY` | `c` | copy |
-| `DELETE` | `d` | delete |
-| `EDIT` | `e` | edit |
-| `RETRY` | `r` | retry |
-| `STOP` | `s` | stop |
+| `OUTPUT` | `o` | output |
 | `ALLOW` | `a` | allow |
 | `DENY` | `x` | deny |
-| `OUTPUT` | `o` | output |
-| `STEER` | `t` | steer |
-| `PAUSE` | `p` | pause |
-| `RESUME` | `u` | resume |
+
+### Message Selection and the Mode Line
+
+Messages are gutter-threaded and do not render actions inline. `ChatHistoryPanel`
+keeps a `focused_message_index` (the selected message); the selected message's
+gutter glyph is replaced with a bright `▌` marker (no extra column, nothing
+shifts, and no leading margin).
+
+An **action line** sits above the input with a blank pad row above it
+(`ActionBar.set_top_pad`): an `ActionBar` mounted permanently in the workspace
+body (`ChatScreen(..., action_bar=...)`), collapsed to zero rows and expanded to
+two (pad + content) when needed. The app (`_update_action_strip`) drives it in
+two modes:
+
+- **Message selected** — shows the message's actions (`[c] copy`, `[o] output`,
+  permission `[a]/[x]`) with a `▌ ` prefix and a `↑↓ move · esc back` hint.
+  Mouse clicks are dispatched by the app interceptor to
+  `ActionBar.handle_input`; key dispatch goes through
+  `ChatHistoryPanel.handle_input` → `on_action`. `ChatHistoryPanel` notifies the
+  app via `on_selection_changed`.
+- **Input focused** — shows a single muted, right-aligned hint:
+  `[/] command [@] file [$] shell    ↑↓ move`. `@` works mid-text, so the line
+  stays visible while typing. `InputComponent.on_change` (fired on every text
+  change) refreshes it.
+
+The status bar stays visible below in both modes. `Esc`/`Enter`/`i` clear the
+message selection and collapse the line.
+
+### Activity Surface and Toasts
+
+Non-conversation output (shell commands/results, command status, errors, role
+changes, generation-stopped notices) must not live in the transcript.
+`ChatHistoryPanel.add_message` routes `SysMsg`/`SysMsgError`/`SysMsgWarning` to
+`activity_sink` when set; the app's sink appends to the **activity overlay**
+(a `DebugPopup`-style overlay toggled by `/activity`) and shows a transient
+**toast** in the status bar (`StatusBar.set_toast`, auto-expiring). The returned
+message is detached (not appended). Explicit `ui.activity(text)` writes to the
+overlay only.
 
 ### How to Add a New Message Type
 
@@ -481,9 +515,9 @@ Each action has a keyboard shortcut key and a label displayed in the box border:
 
 ### How Messages Are Displayed
 
-`ChatHistoryPanel.add_message(text, msg_type, title=None, ...)` creates a `Message` object and appends it.
-`Message` wraps a `TextComponent` inside a `Box`. The `Box` renders the border, title, and action buttons.
-`ChatHistoryPanel` is the owner of the message list — it handles layout, focus, scrolling, and width-change reformatting.
+`ChatHistoryPanel.add_message(text, msg_type, title=None, ...)` creates a `Message` object and appends it (or routes it to the activity sink for `SysMsg*`).
+`Message` wraps a `TextComponent`/`MarkdownComponent` inside a thread-mode `Box` (role gutter, no border).
+`ChatHistoryPanel` is the owner of the message list — it handles layout, selection, scrolling, and width-change reformatting.
 
 ---
 

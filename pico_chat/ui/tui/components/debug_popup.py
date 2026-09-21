@@ -24,11 +24,12 @@ class DebugPopup(Component):
     
     def __init__(self,
                  debug_panel: DebugLogPanel,
-                 compositor: Optional[Any] = None):
+                 compositor: Optional[Any] = None,
+                 title: str = "debug console"):
         super().__init__()
         self.debug_panel = debug_panel
         self.is_visible = False
-        self._box = Box(debug_panel, title="debug console", fg=debug_panel.frame_color,
+        self._box = Box(debug_panel, title=title, fg=debug_panel.frame_color,
                         focused=True, actions=[_DEBUG_CLOSE])
         self.compositor = compositor
         self._registered_with_compositor = False

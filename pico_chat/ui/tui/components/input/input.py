@@ -59,6 +59,9 @@ class InputComponent(Component):
         self.context_items_callback: Optional[Callable[[], List[str]]] = None
         self.argument_completion: Optional[ArgumentCompletion] = None
         self._command_registry: Optional[Dict[str, Any]] = None  # COMMANDS dict for generic hints/args
+        # Notified (no args) whenever the text changes, so hosts can refresh
+        # context-sensitive chrome (e.g. the action line).
+        self.on_change = None
     
     @property
     def on_submit(self):
@@ -140,7 +143,8 @@ class InputComponent(Component):
                 frame_color=self.content_color,
                 content_color=self.content_color
             )
-            self.context_completion = ContextCompletion(menu, self.context_items_callback)
+            self.context_completion = ContextCompletion(
+                menu, self.context_items_callback, trigger="@")
     
     def _ensure_argument_menu(self):
         """Lazy-create argument completion menu for generic Param-driven completion."""
@@ -169,6 +173,7 @@ class InputComponent(Component):
         # Mark parent Box as changed for visual update
         if hasattr(self, 'parent') and self.parent and hasattr(self.parent, 'mark_changed'):
             self.parent.mark_changed()
+        self._notify_changed()
         
         # Try command completion first (has priority at line start, no space)
         if self.command_list:
@@ -219,6 +224,10 @@ class InputComponent(Component):
             if self.context_completion.is_active:
                 self._position_context_menu()
                 return
+
+    def _notify_changed(self):
+        if self.on_change is not None:
+            self.on_change()
     
     def _position_command_menu(self):
         """Position command menu at the '/' character."""
@@ -677,14 +686,10 @@ class InputComponent(Component):
         """Update the input field text programmatically."""
         self.buffer.text = text
         self.buffer.cursor_pos = len(text)
-        # Mark parent for re-render
-        if hasattr(self, 'parent') and self.parent and hasattr(self.parent, 'mark_changed'):
-            self.parent.mark_changed()
+        self._on_text_changed()
 
     def clear(self):
         """Clear the input field."""
         self.buffer.clear()
         self.scroll_manager.reset()
-        # Mark parent for re-render
-        if hasattr(self, 'parent') and self.parent and hasattr(self.parent, 'mark_changed'):
-            self.parent.mark_changed()
+        self._on_text_changed()

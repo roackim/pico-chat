@@ -80,18 +80,16 @@ def test_advance_spinner_rebuilds_tool_display():
     assert before != after
 
 
-def test_stop_action_shown_while_running_hidden_when_finalized():
-    """STOP is offered only while the tool command is still running."""
+def test_tool_message_exposes_only_non_destructive_actions():
+    """Tool messages expose output/copy; state-changing actions are commands."""
     from pico_chat.ui.tui.msg_types import MsgAction
 
     running = _tool(status="approved | executing", finalized=False)
-    done = _tool(status="approved | completed", finalized=True)
+    actions = running.get_active_actions()
 
-    running_actions = [a for a in running.get_active_actions()]
-    done_actions = [a for a in done.get_active_actions()]
-
-    assert MsgAction.STOP in running_actions
-    assert MsgAction.STOP not in done_actions
+    assert MsgAction.OUTPUT in actions
+    assert MsgAction.COPY in actions
+    assert all(a in (MsgAction.OUTPUT, MsgAction.COPY) for a in actions)
 
 
 def test_harness_stop_tool_kills_run(tmp_path):

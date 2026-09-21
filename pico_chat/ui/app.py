@@ -6,6 +6,7 @@ import sys
 import os
 import asyncio
 import atexit
+import time
 from typing import Any
 
 from pico_chat.ui.tui.compositor import Compositor
@@ -14,6 +15,7 @@ from pico_chat.ui.tui.components.box import SPINNER_FRAMES
 from pico_chat.ui.tui.components import (
     Box, InputComponent,
 )
+from pico_chat.ui.tui.components.bars import ActionBar, ActionItem, BarStyle
 from pico_chat.ui.tui.components.debug_panel import DebugLogPanel
 from pico_chat.ui.tui.components.popup import Popup, PopupScreen
 from pico_chat.ui.tui.components.debug_popup import DebugPopup
@@ -129,8 +131,7 @@ class chatTUI(ChatActionHandlers):
             title="",
             fg=theme.USER,  # Color the bars/prefix with the user color.
             lines_only=True,
-            # Recede to muted chrome when the input isn't focused.
-            color_provider=lambda: (theme.USER if self.input_box.focused else theme.MUTED),
+            color_provider=self._input_box_fg,
         )
         # Mute the typed text too when the input loses focus; keep default
         # content color (None) while focused.
@@ -144,16 +145,34 @@ class chatTUI(ChatActionHandlers):
         self._focus_scope = FocusScope(self._focus_targets)
         self.debug_panel = DebugLogPanel(max_lines=1000, frame_color=theme.ERROR, content_color=theme.MUTED, left_pad=1, right_pad=0)
         self.debug_popup = DebugPopup(self.debug_panel)
+        # Activity surface: non-conversation output (shell results, command
+        # status, notices) lives here, not in the transcript.
+        self.activity_panel = DebugLogPanel(max_lines=2000, frame_color=theme.WARNING, content_color=theme.MUTED, left_pad=1, right_pad=0)
+        self.activity_popup = DebugPopup(self.activity_panel, title="activity")
+        self.chat_history_panel.activity_sink = self._on_activity
         self.popup = Popup()
         self.log_handler = setup_tui_logging(self.debug_panel)
         self.editing_prefill_for_resume = False
-        # Restore BarStyle's default 1-col left padding so the status text
-        # sits one space in from the left edge, matching the message gutter.
+        # Left-align the status text (no leading padding).
         self.status_bar = StatusBar(
             fields=pico_cfg.config.ui_status_bar_fields,
             id="status",
+            style=BarStyle(theme.DEFAULT, theme.get_bg(), theme.FOCUSED, padding=0),
         )
         self._status_spinner_frame = 0
+        # Bottom mode line: shows the selected message's actions while a message
+        # is selected, otherwise the status bar is mounted there.
+        self.action_bar = ActionBar(
+            id="actions",
+            style=BarStyle(theme.DEFAULT, theme.get_bg(), theme.FOCUSED, padding=0),
+        )
+        self._mode_hint_default = "↑↓ move · esc back"
+        self.action_bar.set_hint(self._mode_hint_default)
+        self.action_bar.set_top_pad(True)
+        self._hint_flash_until = 0.0
+        self.chat_history_panel.on_selection_changed = self._update_mode_line
+        self.input_component.on_change = self._update_action_strip
+        self.chat_screen = None
         self.command_queue = asyncio.Queue()
         self.shutdown_event = asyncio.Event()
         # Single-conversation state (formerly owned by ConversationRuntime).
@@ -183,6 +202,10 @@ class chatTUI(ChatActionHandlers):
             self.current_generation_task is not None
             and not self.current_generation_task.done()
         )
+
+    def _input_box_fg(self):
+        """Color the input row by focus (muted when unfocused)."""
+        return theme.USER if self.input_box.focused else theme.MUTED
 
     @staticmethod
     def _format_status_tokens(value: int | None) -> str:
@@ -644,22 +667,96 @@ class chatTUI(ChatActionHandlers):
         logger = logging.getLogger("tui")
         logger.info("Debug console toggled: visible=%s", self.debug_popup.is_visible)
 
+    def toggle_activity(self):
+        """Toggle the activity overlay (non-conversation output)."""
+        self.activity_popup.set_compositor(self.compositor)
+        self.activity_popup.toggle()
+
+    def activity(self, text: str, level: str = "info"):
+        """Append output to the activity surface (persistent, not a message)."""
+        for line in str(text).splitlines() or [""]:
+            self.activity_panel.log(line)
+        if self.compositor:
+            self.compositor.request_render()
+
+    def notify(self, text: str, level: str = "info", duration: float = 4.0):
+        """Show a transient toast in the status bar."""
+        color = {"error": theme.ERROR, "warning": theme.WARNING}.get(level, theme.DEFAULT)
+        first_line = str(text).splitlines()[0] if str(text).splitlines() else ""
+        self.status_bar.set_toast(first_line, duration=duration, color=color)
+        if self.compositor:
+            self.compositor.request_render()
+
+    def _on_activity(self, text: str, level: str = "info"):
+        """Sink for routed SysMsg-family notices: activity + toast."""
+        self.activity(text, level)
+        self.notify(text, level)
+
+    def flash_hint(self, text: str, duration: float = 1.5):
+        """Temporarily replace the mode-line hint (e.g. "copied ✓")."""
+        self.action_bar.set_hint(text)
+        self._hint_flash_until = time.monotonic() + duration
+        if self.compositor:
+            self.compositor.request_render()
+
     def _handle_message_action(self, message, action: MsgAction):
         handlers = {
             MsgAction.COPY: self.handle_copy_action,
-            MsgAction.RETRY: self.handle_retry_action,
-            MsgAction.STOP: self.handle_stop_action,
+            MsgAction.OUTPUT: self.handle_output_action,
             MsgAction.ALLOW: self.handle_allow_action,
             MsgAction.DENY: self.handle_deny_action,
-            MsgAction.OUTPUT: self.handle_output_action,
-            MsgAction.STEER: self.handle_steer_action,
-            MsgAction.PAUSE: self.handle_pause_action,
-            MsgAction.RESUME: self.handle_resume_action,
-            MsgAction.DELETE: self.handle_delete_action,
         }
         handler = handlers.get(action)
         if handler:
             handler(message)
+
+    def _selected_message(self):
+        """The currently selected message, or None."""
+        index = self.chat_history_panel.focused_message_index
+        messages = self.chat_history_panel.messages
+        if index is None or not (0 <= index < len(messages)):
+            return None
+        return messages[index]
+
+    def _update_action_strip(self):
+        """Show/hide the action line (mounted right above the input).
+
+        It shows the selected message's actions, or, when the input is focused
+        and empty, the available input prefixes as hints.
+        """
+        message = self._selected_message()
+
+        if message is not None:
+            actions = list(message.get_active_actions())
+            self.action_bar.set_actions([
+                ActionItem(action.key, action.label,
+                           callback=lambda a=action, m=message: self._handle_message_action(m, a))
+                for action in actions
+            ])
+            self.action_bar.set_prefix("▌ ")
+            self.action_bar.set_hint(self._mode_hint_default)
+            self._hint_flash_until = 0.0
+            self.action_bar.set_focused(True)
+            self.action_bar.set_expanded(True)
+        elif self._last_focus_id == "input":
+            # Subtle right-aligned reminder of the input prefixes and the
+            # history-move keys. ``@`` works mid-text; ``/``/``$`` are
+            # line-start prefixes.
+            self.action_bar.set_actions([])
+            self.action_bar.set_prefix("")
+            self.action_bar.set_hint("[/] command [@] file [$] shell    ↑↓ move")
+            self.action_bar.set_focused(False)
+            self.action_bar.set_expanded(True)
+        else:
+            self.action_bar.set_focused(False)
+            self.action_bar.set_expanded(False)
+
+        if self.compositor:
+            self.compositor._full_redraw = True
+            self.compositor.request_render()
+
+    # Back-compat alias for the old mode-line hook name.
+    _update_mode_line = _update_action_strip
 
     def show_popup(self, title: str, content: str, content_padding: int = 1):
         """Show a popup overlay with the given title and content."""
@@ -862,6 +959,7 @@ class chatTUI(ChatActionHandlers):
         self._last_focus_id = focus_id
         self._focus_scope.manager.focus(0 if focus_id == "input" else 1)
         self._update_focus_states()
+        self._update_action_strip()
 
     def handle_global_input(self, event: Any) -> bool:
         """Handle focus logging and input dispatch with navigation between input and history."""
@@ -879,6 +977,17 @@ class chatTUI(ChatActionHandlers):
             ):
                 self._status_spinner_frame += 1
                 self.refresh_status_bar()
+            # Expire a transient toast once its time is up.
+            if self.status_bar._toast_text is not None and not self.status_bar.toast_active():
+                self.status_bar.clear_toast()
+                if self.compositor:
+                    self.compositor.request_render()
+            # Restore the mode-line hint after a transient flash (e.g. "copied").
+            if self._hint_flash_until and time.monotonic() >= self._hint_flash_until:
+                self._hint_flash_until = 0.0
+                self.action_bar.set_hint(self._mode_hint_default)
+                if self.compositor:
+                    self.compositor.request_render()
             return False
 
         # Handle keyboard navigation between input and history
@@ -925,6 +1034,13 @@ class chatTUI(ChatActionHandlers):
         
         # Handle mouse click focus changes
         if isinstance(event, MouseEvent):
+            # Clicks on the action line dispatch actions.
+            if self.action_bar.expanded and (
+                self.action_bar.x <= event.x < self.action_bar.x + self.action_bar.width
+                and self.action_bar.y <= event.y < self.action_bar.y + self.action_bar.height
+            ):
+                return self.action_bar.handle_input(event)
+
             # Ignore wheel scroll events for focus purposes — they shouldn't
             # change focus, only scroll the panel under the cursor.
             if event.pressed and event.button not in (64, 65):
@@ -999,7 +1115,9 @@ class chatTUI(ChatActionHandlers):
             self.input_box,
             self._focus_scope,
             self.status_bar,
+            self.action_bar,
         )
+        self.chat_screen = chat_screen
         self.root = chat_screen.root  # Store root for global handler
         # Read fps at construction time (not import time) so config changes apply.
         self.compositor = Compositor(self.root, fps=pico_cfg.config.target_fps,
@@ -1023,6 +1141,7 @@ class chatTUI(ChatActionHandlers):
         
         # Set initial focus states
         self._update_focus_states()
+        self._update_action_strip()
         self.refresh_status_bar()
 
         # Start background server status check (non-blocking). No status

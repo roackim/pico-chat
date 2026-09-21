@@ -83,7 +83,9 @@ def test_action_bar_activates_by_key_and_mouse():
     assert activated == ["save", "quit"]
 
 
-def test_action_bar_focus_uses_shared_style_and_disabled_ignores_input():
+def test_action_bar_focus_uses_shared_style_without_inversion():
+    from pico_chat.ui.tui.colors import theme
+
     activated = []
     bar = ActionBar([ActionItem("x", "close", lambda: activated.append(True))])
     bar.set_layout(0, 0, 12, 1)
@@ -91,7 +93,9 @@ def test_action_bar_focus_uses_shared_style_and_disabled_ignores_input():
     buffer = Buffer(12, 1)
     bar.render(buffer)
 
-    assert all(cell.reverse for cell in buffer.cells[0][1:9])
+    # Focus switches to the shared focused color but is not reverse-video.
+    assert not any(cell.reverse for cell in buffer.cells[0][1:9])
+    assert buffer.cells[0][1].fg == theme.FOCUSED
     bar.enabled = False
     assert bar.handle_input("x") is False
     assert activated == []

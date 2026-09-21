@@ -70,8 +70,10 @@ Keyboard navigation consumes canonical `KeyEvent` values.
 
 ### `bars.py`
 `BarStyle` centralizes bar padding and theme colors. `StatusBar` renders left
-and right status text, while `ActionBar` renders keyboard/mouse actions with
-shared spacing and focus styling.
+and right status text (and a transient `set_toast()` message that temporarily
+replaces the fields), while `ActionBar` renders keyboard/mouse actions with
+shared spacing, focus styling, and a right-aligned `set_hint()` string. The app
+uses `ActionBar` (collapsible via `set_expanded`) as the message action line.
 
 ### `menu.py`
 `SelectionMenu` — floating dropdown list.

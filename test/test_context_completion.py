@@ -9,9 +9,17 @@ def make_completion(items):
     return ContextCompletion(menu, lambda: items)
 
 
+def _update(comp, text):
+    comp.update(text, len(text))
+
+
+def _accept(comp, text):
+    return comp.accept_selection(text, len(text))
+
+
 def test_lists_top_level_by_default():
     comp = make_completion(["src/", "src/a.py", "README.md"])
-    comp.update("./", 2)
+    _update(comp, "@")
     assert comp.is_active
     # Top-level listing shows the full relative paths.
     assert comp.menu.items == ["src/", "src/a.py", "README.md"]
@@ -19,7 +27,7 @@ def test_lists_top_level_by_default():
 
 def test_drills_into_directory_with_trailing_slash():
     comp = make_completion(["src/", "src/a.py", "src/sub/", "src/sub/b.py", "README.md"])
-    comp.update("./src/", 6)
+    _update(comp, "@src/")
     assert comp.is_active
     # Immediate children of src/ shown as full paths, "../" at the END so it
     # is never the default highlight.
@@ -29,69 +37,69 @@ def test_drills_into_directory_with_trailing_slash():
 
 def test_accept_selection_preserves_directory_prefix():
     comp = make_completion(["src/", "src/a.py", "src/sub/", "src/sub/b.py"])
-    comp.update("./src/", 6)
+    _update(comp, "@src/")
     # Select "src/sub/" (index 1 in the drilled listing, before "../").
     comp.menu.selected_index = 1
-    new_text, new_cursor = comp.accept_selection("./src/", 6)
-    assert new_text == "./src/sub/"
-    assert new_cursor == len("./src/sub/")
+    new_text, new_cursor = _accept(comp, "@src/")
+    assert new_text == "@src/sub/"
+    assert new_cursor == len("@src/sub/")
 
 
 def test_accept_selection_top_level():
     comp = make_completion(["src/", "README.md"])
-    comp.update("./", 2)
+    _update(comp, "@")
     comp.menu.selected_index = 1  # README.md
-    new_text, new_cursor = comp.accept_selection("./", 2)
-    assert new_text == "./README.md"
-    assert new_cursor == len("./README.md")
+    new_text, new_cursor = _accept(comp, "@")
+    assert new_text == "@README.md"
+    assert new_cursor == len("@README.md")
 
 
 def test_no_children_returns_top_level():
     comp = make_completion(["src/", "README.md"])
     # "nonexistent/" has no children under the listing.
-    comp.update("./nonexistent/", 14)
+    _update(comp, "@nonexistent/")
     # Falls back to the top-level listing.
     assert comp.menu.items == ["src/", "README.md"]
 
 
 def test_partial_path_stays_inside_directory():
     comp = make_completion(["src/", "src/a.py", "src/sub/", "src/sub/b.py", "README.md"])
-    # Typing "./src/a" (no trailing slash) should still filter within src/.
-    comp.update("./src/a", 7)
+    # Typing "@src/a" (no trailing slash) should still filter within src/.
+    _update(comp, "@src/a")
     assert comp.menu.items == ["src/a.py", "../"]
 
 
 def test_accept_directory_no_double_slash():
     comp = make_completion(["src/", "src/a.py", "src/sub/", "src/sub/b.py"])
-    comp.update("./src/", 6)
+    _update(comp, "@src/")
     comp.menu.selected_index = 1  # src/sub/
-    new_text, _ = comp.accept_selection("./src/", 6)
+    new_text, _ = _accept(comp, "@src/")
     # accept_selection inserts the full path — no double slash.
-    assert new_text == "./src/sub/"
+    assert new_text == "@src/sub/"
     assert "//" not in new_text
 
 
 def test_accept_nested_file_no_double_prefix():
-    # Regression: ./notes/ + TAB on notes/doc.md must not become
-    # ./notes/notes/doc.md.
+    # Regression: @notes/ + TAB on notes/doc.md must not become
+    # @notes/notes/doc.md.
     comp = make_completion(["notes/", "notes/doc.md", "README.md"])
-    comp.update("./notes/doc", 11)
+    _update(comp, "@notes/doc")
     comp.menu.selected_index = 0  # notes/doc.md
-    new_text, _ = comp.accept_selection("./notes/doc", 11)
-    assert new_text == "./notes/doc.md"
+    new_text, _ = _accept(comp, "@notes/doc")
+    assert new_text == "@notes/doc.md"
 
 
 def test_accept_parent_navigates_up_from_single_level():
     comp = make_completion(["src/", "src/a.py", "src/sub/", "src/sub/b.py"])
-    comp.update("./src/", 6)
+    _update(comp, "@src/")
     comp.menu.selected_index = 2  # ../ (last)
-    new_text, _ = comp.accept_selection("./src/", 6)
-    assert new_text == "./"
+    new_text, _ = _accept(comp, "@src/")
+    assert new_text == "@"
 
 
 def test_accept_parent_navigates_up_from_nested():
     comp = make_completion(["src/", "src/sub/", "src/sub/b.py"])
-    comp.update("./src/sub/", 10)
+    _update(comp, "@src/sub/")
     comp.menu.selected_index = 1  # ../ (last)
-    new_text, _ = comp.accept_selection("./src/sub/", 10)
-    assert new_text == "./src/"
+    new_text, _ = _accept(comp, "@src/sub/")
+    assert new_text == "@src/"

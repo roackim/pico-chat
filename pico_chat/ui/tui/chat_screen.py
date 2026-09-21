@@ -15,12 +15,18 @@ class ChatScreen(Screen):
     """
 
     def __init__(self, history: Component, input_box: Component,
-                 focus_scope: FocusScope, status_bar: StatusBar | None = None):
+                 focus_scope: FocusScope, status_bar: StatusBar | None = None,
+                 action_bar: Component | None = None):
         self.status_bar = status_bar or StatusBar()
         self.status_bar.parent = self
+        self.action_bar = action_bar
         from pico_chat.ui.tui.container import Hsplit, Content, Fill
-        # History fills the body; the input box takes its preferred height.
-        body = Hsplit([history, input_box], [Fill(), Content()])
+        # History fills the body; an optional action line sits right above the
+        # input box; the input box takes its preferred height.
+        if action_bar is not None:
+            body = Hsplit([history, action_bar, input_box], [Fill(), Content(), Content()])
+        else:
+            body = Hsplit([history, input_box], [Fill(), Content()])
         self.scaffold = AppScaffold(body, bottom=self.status_bar)
         super().__init__(self.scaffold, focus_scope=focus_scope)
 

@@ -91,7 +91,7 @@ class Box(Component):
         # actions, the child is one row shorter so the action line sits below.
         if self.thread_mode:
             gutter_w = 1
-            has_actions = self.focused and self.parent_msg and self.parent_msg.get_active_actions()
+            has_actions = bool(self._visible_actions())
             child_h = max(0, height - (1 if has_actions else 0))
             if size_changed:
                 super().set_layout(x, y, width, height)
@@ -184,6 +184,19 @@ class Box(Component):
             self.inline_editor.set_layout(ex, y + inset_y, ew,
                                            max(1, height - 2 * inset_y))
 
+    def _visible_actions(self):
+        """Actions this box should render.
+
+        A parent message can opt out of inline actions by setting
+        ``inline_actions = False``; such messages surface their actions through
+        the app's bottom mode line instead.
+        """
+        if self.parent_msg is not None:
+            if not getattr(self.parent_msg, "inline_actions", True):
+                return []
+            return self.parent_msg.get_active_actions() if self.focused else []
+        return self.actions if self.focused else []
+
     def get_preferred_height(self, width: int) -> int:
         """Box adds 2 rows of height for borders (top/bottom), unless in compact unfocused or thread mode."""
         if self.inline_editor is not None:
@@ -200,7 +213,7 @@ class Box(Component):
             # line below the content, which pushes subsequent messages down.
             if self.thread_mode:
                 base = self.child.get_preferred_height(max(1, width - 2))
-                if self.focused and self.parent_msg and self.parent_msg.get_active_actions():
+                if self._visible_actions():
                     return base + 1
                 return base
             # In compact mode when unfocused, no borders
@@ -259,7 +272,7 @@ class Box(Component):
         if self.parent_msg:
             title = self.parent_msg.title
             fg = self.parent_msg.frame_color
-            actions = self.parent_msg.get_active_actions()
+            actions = self._visible_actions()
         else:
             title = self.current_title
             fg = self.fg
@@ -346,7 +359,7 @@ class Box(Component):
         bottom_content_parts = []
         if metrics_str:
             bottom_content_parts.append(f" {metrics_str} ")
-        if actions and self.focused:
+        if actions:
             actions_str = " ".join(action.format() for action in actions)
             bottom_content_parts.append(f" {actions_str} ")
         
@@ -525,8 +538,8 @@ class Box(Component):
         # Actions on a dedicated row below the content when focused. This row
         # is part of the box height (see get_preferred_height), so it pushes
         # subsequent messages down rather than overlaying content.
-        if self.focused and self.parent_msg:
-            actions = self.parent_msg.get_active_actions()
+        if self.parent_msg is not None or self.focused:
+            actions = self._visible_actions()
             if actions:
                 actions_str = " ".join(action.format() for action in actions)
                 self.subbuffer.write_str(2, self.height - 1, actions_str,

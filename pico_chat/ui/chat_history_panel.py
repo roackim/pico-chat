@@ -53,6 +53,13 @@ class ChatHistoryPanel(TextComponent):
         self.anchored_start_y: Optional[int] = None  # Absolute Y position when scrolled up (for stability)
         self.focused_message_index: Optional[int] = None  # Index of the currently focused message
         self.has_keyboard_focus = False  # Track if this panel should handle keyboard input
+        # Notified (no args) whenever the selected message changes, so the app
+        # can refresh its contextual mode line.
+        self.on_selection_changed = None
+        # Optional sink ``(text, level)`` for non-conversation notices
+        # (SysMsg/SysMsgError/SysMsgWarning). When set, those messages are
+        # routed out of the transcript into the activity surface.
+        self.activity_sink = None
         self._selection: Optional[SelectionState] = None  # Current text selection
         self._selection_dragging: bool = False  # Whether user is actively dragging to select
         # Cache for line map (invalidated on scroll, focus change, message add/remove)
@@ -124,6 +131,18 @@ class ChatHistoryPanel(TextComponent):
             if self.focused_message_index < len(self.messages) - 1:
                 self.auto_scroll = False
         self._request_repaint()
+        self._notify_selection_changed()
+
+    def _notify_selection_changed(self):
+        if self.on_selection_changed is not None:
+            self.on_selection_changed()
+
+    def current_actions(self) -> list:
+        """Actions for the selected message (empty when nothing is selected)."""
+        index = self.focused_message_index
+        if index is None or not (0 <= index < len(self.messages)):
+            return []
+        return list(self.messages[index].get_active_actions())
 
     # --- Text Selection ---
 
@@ -279,89 +298,6 @@ class ChatHistoryPanel(TextComponent):
         
         if self.on_action:
             self.on_action(message, action)
-        elif action == MsgAction.DELETE:
-            self.remove_message(message)
-
-    def _hit_test_action_bar(self, msg, event_x: int, event_y: int) -> Optional[MsgAction]:
-        """Check if a mouse click landed on an action button in the message's bottom border.
-        
-        Computes action hit regions on-demand (independent of focus/render state)
-        so clicks work even before the message is focused.
-        Returns the matched MsgAction or None.
-        """
-        box = msg.get_component()
-        # Bottom border row is at box.y + box.height - 1
-        bottom_y = box.y + box.height - 1
-        if event_y != bottom_y:
-            return None
-        
-        actions = msg.get_active_actions()
-        if not actions:
-            return None
-        
-        # Thread mode: actions render at box.x + 2 on the last row.
-        if getattr(box, "thread_mode", False):
-            actions_x_start = box.x + 2
-            local_x = event_x - actions_x_start
-            if local_x < 0:
-                return None
-            x_offset = 0
-            for action in actions:
-                formatted = action.format()
-                region_end = x_offset + len(formatted)
-                if x_offset <= local_x < region_end:
-                    return action
-                x_offset = region_end + 1  # +1 for space separator
-            return None
-        
-        # Replicate the layout from Box._render_to_subbuffer:
-        # available_width = box.width - 3
-        # bottom_str = " metrics_str " + "│" + " actions_str "  (or just actions)
-        available_width = box.width - 3
-        
-        metrics_str = None
-        if hasattr(msg, 'should_show_metrics') and msg.should_show_metrics():
-            metrics_str = msg.get_metrics_string()
-        
-        bottom_content_parts = []
-        if metrics_str:
-            bottom_content_parts.append(f" {metrics_str} ")
-        actions_str = " ".join(action.format() for action in actions)
-        bottom_content_parts.append(f" {actions_str} ")
-        
-        if len(bottom_content_parts) == 2:
-            bottom_str = bottom_content_parts[0] + "│" + bottom_content_parts[1]
-        else:
-            bottom_str = bottom_content_parts[0]
-        
-        bottom_width = len(bottom_str)
-        if bottom_width > available_width:
-            return None  # Actions didn't fit, just border drawn
-        
-        left_border_width = available_width - bottom_width
-        # Actions start after metrics (if present) in the bottom_str
-        actions_start_in_str = 0
-        if len(bottom_content_parts) == 2:
-            actions_start_in_str = len(bottom_content_parts[0]) + len("│")
-        
-        # Absolute x where actions string starts
-        actions_x_start = box.x + left_border_width + 1 + actions_start_in_str
-        # Local x within the panel
-        local_x = event_x - actions_x_start
-        
-        if local_x < 0:
-            return None
-        
-        # Walk through actions to find which one was hit
-        x_offset = 0
-        for action in actions:
-            formatted = action.format()
-            region_end = x_offset + len(formatted)
-            if x_offset <= local_x < region_end:
-                return action
-            x_offset = region_end + 1  # +1 for space separator
-        
-        return None
 
     def _cached_hit_test(self, screen_y: int) -> tuple[Optional[int], Optional[int]]:
         """Map a screen y coordinate to (msg_index, local_y) using a cached line map.
@@ -758,7 +694,15 @@ class ChatHistoryPanel(TextComponent):
 
             child.set_layout(self.x + msg.left_margin, child_y, child_w, child_h)
             child.render(buffer)
-            
+
+            # Selected message: draw a bright selection bar in the left margin.
+            if i == self.focused_message_index:
+                top = max(child_y, viewport_top)
+                bottom = min(child_bottom, viewport_bottom)
+                for row_y in range(top, bottom):
+                    buffer.write_str(self.x, row_y, "▌", fg=theme.FOCUSED,
+                                     bg=theme.get_bg(), max_width=1)
+
             # Render selection highlight if this message has an active selection
             sel = self._selection
             if sel is not None and sel.msg is msg:
@@ -881,6 +825,17 @@ class ChatHistoryPanel(TextComponent):
                 self._auto_copy_selection()
                 return True
             
+            # ESC clears an active text selection, then the message selection.
+            if event == '\x1b':
+                if self._selection is not None:
+                    self._selection = None
+                    self._request_repaint()
+                    return True
+                if self.focused_message_index is not None:
+                    self.clear_focus()
+                    return True
+                return False
+
             if event == '\x1b[A':  # Up arrow
                 return self.move_focus_up()
             elif event == '\x1b[B':  # Down arrow
@@ -922,19 +877,7 @@ class ChatHistoryPanel(TextComponent):
                             msg = self.messages[msg_index]
                             box = msg.get_component()
                             
-                            # 1) Check if click landed on an action button (bottom border)
-                            #    This works even when the message isn't focused yet.
-                            clicked_action = self._hit_test_action_bar(msg, event.x, event.y)
-                            if clicked_action is not None:
-                                # Focus the message then dispatch the action
-                                self.set_focused_message(msg_index)
-                                self._dispatch_action(msg, clicked_action)
-                                self._selection = None
-                                self._selection_dragging = False
-                                self._request_repaint()
-                                return True
-                            
-                            # 2) Otherwise, focus the message and start text selection
+                            # Focus the message and start text selection
                             self.set_focused_message(msg_index)
                             
                             content_y = local_y - 1  # subtract top border
@@ -1131,6 +1074,7 @@ class ChatHistoryPanel(TextComponent):
                     self.focused_message_index = None
                 else:
                     self.messages[self.focused_message_index].set_focused(True)
+            self._notify_selection_changed()
             self._message_height_cache.clear()
             self._line_map_cache = None
             self._line_map_cache_key = None
@@ -1184,6 +1128,7 @@ class ChatHistoryPanel(TextComponent):
             if (self.focused_message_index is not None
                     and 0 <= self.focused_message_index < len(self.messages)):
                 self.messages[self.focused_message_index].set_focused(True)
+            self._notify_selection_changed()
             self._request_repaint()
 
     def replace_message(self, current: Message, new: Message):
@@ -1231,8 +1176,24 @@ class ChatHistoryPanel(TextComponent):
             harness_message_ids: List of harness message IDs this UI message references
         
         Returns:
-            The created Message object.
+            The created Message object. When routed to the activity sink, the
+            returned message is detached (not part of the transcript).
         """
+        from pico_chat.ui.tui import msg_types
+
+        if self.activity_sink is not None and isinstance(msg_type, msg_types.SysMsg):
+            if isinstance(msg_type, msg_types.SysMsgError):
+                level = "error"
+            elif isinstance(msg_type, msg_types.SysMsgWarning):
+                level = "warning"
+            else:
+                level = "info"
+            self.activity_sink(message, level)
+            return self.new_message(message, msg_type=msg_type, title=title,
+                                    frame_color=frame_color, content_color=content_color,
+                                    left_margin=left_margin, right_margin=right_margin,
+                                    harness_message_ids=harness_message_ids, append=False)
+
         return self.new_message(message, msg_type=msg_type, title=title, frame_color=frame_color, content_color=content_color, left_margin=left_margin, right_margin=right_margin, harness_message_ids=harness_message_ids, append=True)
 
 
