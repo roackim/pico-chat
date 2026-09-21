@@ -153,7 +153,7 @@ def run_harness_tool_call(harness: Harness, tool_call: dict):
 
 
 def make_chunk_stream(*chunk_list):
-    """Return an async generator that yields the given chunks."""
+    """Return an async generator that yields the given events."""
     async def _gen():
         for chunk in chunk_list:
             yield chunk

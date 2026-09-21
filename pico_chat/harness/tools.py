@@ -5,7 +5,7 @@ Provides 4 core tools:
 - read: Read file content
 - write: Write file content
 - patch: Apply replace-block patch
-- run: Execute shell command (sandboxed)
+- run: Execute shell command in the workspace
 """
 import asyncio
 import inspect
@@ -330,100 +330,7 @@ class ShellTool:
         
         # Handle to the currently-running command (for stop/cancellation).
         self._active_proc: Optional["asyncio.subprocess.Process"] = None
-        
-        # Check bwrap availability if containerization is enabled
-        self._bwrap_available = None
-        if self.run_permissions.use_container:
-            self._bwrap_available = self._check_bwrap_available()
-    
-    @staticmethod
-    def _check_bwrap_available() -> bool:
-        """Check if bubblewrap (bwrap) is available on the system."""
-        try:
-            result = subprocess.run(
-                ['bwrap', '--version'],
-                capture_output=True,
-                timeout=2
-            )
-            return result.returncode == 0
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return False
-    
-    def _build_bwrap_command(self, command: str) -> list[str]:
-        """
-        Build bubblewrap command for containerized execution.
-        
-        Filesystem access:
-        - READ-WRITE: Workspace directory only
-        - READ-ONLY: Home directory and system directories
-        - Network: Controlled by container_network flag
-        
-        Args:
-            command: Shell command to execute
-            
-        Returns:
-            List of command arguments for bwrap execution
-        """
-        home = str(Path.home())
-        workspace = str(self.workspace)
-        
-        bwrap_args = [
-            'bwrap',
-            '--unshare-all',      # Start with full isolation
-            '--die-with-parent',  # Cleanup if parent process dies
-            
-            # System directories (read-only)
-            '--ro-bind', '/usr', '/usr',
-            '--ro-bind', '/lib', '/lib',
-            '--ro-bind', '/bin', '/bin',
-            '--ro-bind', '/sbin', '/sbin',
-            '--ro-bind', '/etc', '/etc',
-        ]
-        
-        # Add lib64 if it exists (not on all systems)
-        if Path('/lib64').exists():
-            bwrap_args.extend(['--ro-bind', '/lib64', '/lib64'])
-        
-        # Add /run if it exists (needed for DNS resolution via systemd-resolved)
-        if Path('/run').exists():
-            bwrap_args.extend(['--ro-bind', '/run', '/run'])
-        
-        # Home directory (read-only)
-        bwrap_args.extend(['--ro-bind', home, home])
-        
-        # Handle /tmp carefully - if workspace is under /tmp, bind it; otherwise use tmpfs
-        workspace_under_tmp = str(self.workspace).startswith('/tmp')
-        if workspace_under_tmp:
-            # Workspace is under /tmp (e.g., pytest temp dirs)
-            # Bind /tmp as-is to preserve workspace path
-            bwrap_args.extend(['--bind', '/tmp', '/tmp'])
-        else:
-            # Workspace is elsewhere, use isolated tmpfs for /tmp
-            bwrap_args.extend(['--tmpfs', '/tmp'])
-        
-        # Workspace (read-write) - if not already bound via /tmp
-        if not workspace_under_tmp:
-            bwrap_args.extend(['--bind', workspace, workspace])
-        
-        # Virtual filesystems
-        bwrap_args.extend([
-            '--proc', '/proc',     # Process information
-            '--dev', '/dev',       # Device files
-        ])
-        
-        # Network access
-        if self.run_permissions.container_network:
-            bwrap_args.append('--share-net')
-        # Note: --unshare-all already includes --unshare-net
-        
-        # Set working directory
-        bwrap_args.extend(['--chdir', workspace])
-        
-        # Execute command via shell
-        bwrap_args.extend(['--', 'sh', '-c', command])
-        
-        return bwrap_args
-    
+
     def run(self, command: str, timeout: int = 30) -> str:
         """
         Execute shell command in workspace.
@@ -446,29 +353,13 @@ class ShellTool:
         allowed, message = self.security_checker.check_chain(command)
         if not allowed:
             raise ToolError(message)
-        
-        # Check containerization requirements
-        if self.run_permissions.use_container:
-            if self._bwrap_available is False:
-                raise ToolError(
-                    "Containerization enabled but bubblewrap (bwrap) is not available. "
-                    "Install bubblewrap or disable containerization in permissions."
-                )
-            
-            # Build containerized command
-            exec_args = self._build_bwrap_command(command)
-            shell_mode = False  # bwrap args are already a list
-        else:
-            # Execute directly with shell
-            exec_args = command
-            shell_mode = True
-        
+
         # Execute command
         try:
             result = subprocess.run(
-                exec_args,
-                shell=shell_mode,
-                cwd=None if self.run_permissions.use_container else self.workspace,
+                command,
+                shell=True,
+                cwd=self.workspace,
                 capture_output=True,
                 text=True,
                 timeout=timeout
@@ -506,38 +397,15 @@ class ShellTool:
         if not allowed:
             raise ToolError(message)
 
-        if self.run_permissions.use_container:
-            if self._bwrap_available is False:
-                raise ToolError(
-                    "Containerization enabled but bubblewrap (bwrap) is not available. "
-                    "Install bubblewrap or disable containerization in permissions."
-                )
-            exec_args = self._build_bwrap_command(command)
-            shell = False
-            cwd = None
-        else:
-            exec_args = command
-            shell = True
-            cwd = self.workspace
-
         try:
-            if shell:
-                proc = await asyncio.create_subprocess_shell(
-                    exec_args,
-                    shell=True,
-                    cwd=cwd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    start_new_session=True,  # own process group so stop kills children
-                )
-            else:
-                proc = await asyncio.create_subprocess_exec(
-                    *exec_args,
-                    cwd=cwd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    start_new_session=True,
-                )
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                shell=True,
+                cwd=self.workspace,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                start_new_session=True,  # own process group so stop kills children
+            )
             self._active_proc = proc
 
             try:
@@ -673,206 +541,6 @@ class MinimalToolset:
         return self.shell_tool.cancel_active()
 
 
-class SearchTools:
-    """Web search operations using DuckDuckGo and Wikipedia"""
-    
-    def __init__(self):
-        """Initialize search tools with no configuration required."""
-        pass
-    
-    def search_web(self, query: str, max_results: int = 3, time_range: Optional[str] = None) -> str:
-        """
-        Search the web using DuckDuckGo.
-        
-        Args:
-            query: Search query string
-            max_results: Maximum number of results to return (default: 3)
-            time_range: Optional time filter: "day", "week", "month", "year" (default: None)
-            
-        Returns:
-            Formatted search results as text
-            
-        Example:
-            >>> tools.search_web("python asyncio tutorial", max_results=3)
-            '[1] Python asyncio Tutorial\\nURL: https://example.com\\nSnippet: ...'
-        """
-        try:
-            import httpx
-            import re
-            from html import unescape
-            
-            # Build URL with optional time range
-            params = {'q': query}
-            if time_range:
-                time_map = {'day': 'd', 'week': 'w', 'month': 'm', 'year': 'y'}
-                if time_range in time_map:
-                    params['df'] = time_map[time_range]
-            
-            # Make request
-            headers = {'User-Agent': 'Mozilla/5.0 (compatible)'}
-            response = httpx.get(
-                'https://html.duckduckgo.com/html/',
-                params=params,
-                headers=headers,
-                timeout=10.0,
-                follow_redirects=True
-            )
-            response.raise_for_status()
-            
-            html = response.text
-            
-            # Parse results using regex (lightweight alternative to HTML parser)
-            # DuckDuckGo HTML structure: results are in divs with class="result"
-            result_pattern = r'<a[^>]+class="result__a"[^>]+href="(.*?)"[^>]*>(.*?)</a>.*?<a[^>]+class="result__snippet"[^>]*>(.*?)</a>'
-            matches = re.findall(result_pattern, html, re.DOTALL)
-            
-            if not matches:
-                return (
-                    f"[search_web] No results found for query: '{query}'\n\n"
-                    "Suggestions:\n"
-                    "- Try different keywords or a more specific query\n"
-                    "- Check spelling and try alternative terms\n"
-                    "- Use the search_wiki tool for encyclopedia topics"
-                )
-            
-            # Format results
-            results = []
-            for idx, (url, title, snippet) in enumerate(matches[:max_results], 1):
-                # Clean HTML entities and tags
-                clean_title = unescape(re.sub(r'<.*?>', '', title)).strip()
-                clean_snippet = unescape(re.sub(r'<.*?>', '', snippet)).strip()
-                clean_url = unescape(url)
-                
-                # DuckDuckGo uses redirect URLs - extract real URL from uddg parameter
-                if 'uddg=' in clean_url:
-                    from urllib.parse import parse_qs, urlparse, unquote
-                    try:
-                        # Parse the redirect URL
-                        parsed = urlparse(clean_url if clean_url.startswith('http') else 'https:' + clean_url)
-                        params = parse_qs(parsed.query)
-                        if 'uddg' in params:
-                            clean_url = unquote(params['uddg'][0])
-                    except:
-                        pass  # Keep original URL if parsing fails
-                
-                # Ensure URL has scheme
-                if clean_url.startswith('//'):
-                    clean_url = 'https:' + clean_url
-                elif not clean_url.startswith(('http://', 'https://')):
-                    clean_url = 'https://' + clean_url
-                
-                results.append(
-                    f"[{idx}] {clean_title}\n"
-                    f"URL: {clean_url}\n"
-                    f"{clean_snippet}"
-                )
-            
-            if results:
-                header = f"DuckDuckGo search results for: {query}\n" + "=" * 60 + "\n\n"
-                return header + "\n\n".join(results)
-            else:
-                return (
-                    f"[search_web] No valid results found for query: '{query}'\n\n"
-                    "The search returned some matches but they could not be parsed. "
-                    "Try a different query or use search_wiki for encyclopedia topics."
-                )
-                
-        except ImportError:
-            raise ToolError("httpx library not available - required for search functionality")
-        except httpx.TimeoutException:
-            raise ToolError(f"Search timed out for query: {query}")
-        except httpx.HTTPError as e:
-            raise ToolError(f"Search request failed: {e}")
-        except Exception as e:
-            raise ToolError(f"Search error: {e}")
-    
-    def search_wiki(self, query: str, max_results: int = 3) -> str:
-        """
-        Search Wikipedia using the MediaWiki API.
-        
-        Args:
-            query: Search query string
-            max_results: Maximum number of results to return (default: 3)
-            
-        Returns:
-            Formatted search results as text
-            
-        Example:
-            >>> tools.search_wiki("Python programming language", max_results=3)
-            '[1] Python (programming language)\\nURL: https://en.wikipedia.org/wiki/Python_(programming_language)\\nSnippet: ...'
-        """
-        try:
-            import httpx
-            
-            # Use Wikipedia API
-            params = {
-                'action': 'query',
-                'list': 'search',
-                'srsearch': query,
-                'srlimit': max_results,
-                'srprop': 'snippet',
-                'format': 'json',
-                'utf8': 1
-            }
-            
-            headers = {'User-Agent': 'pico-chat/0.8.0 (Educational AI assistant)'}
-            response = httpx.get(
-                'https://en.wikipedia.org/w/api.php',
-                params=params,
-                headers=headers,
-                timeout=10.0
-            )
-            response.raise_for_status()
-            
-            data = response.json()
-            search_results = data.get('query', {}).get('search', [])
-            
-            if not search_results:
-                return (
-                    f"[search_wiki] No Wikipedia articles found for query: '{query}'\n\n"
-                    "Suggestions:\n"
-                    "- Try different keywords or check spelling\n"
-                    "- Use search_web for general web searches\n"
-                    "- Wikipedia may not have an article on this specific topic"
-                )
-            
-            # Format results
-            import re
-            from html import unescape
-            
-            results = []
-            for idx, item in enumerate(search_results[:max_results], 1):
-                title = item.get('title', 'Unknown')
-                snippet = item.get('snippet', 'No description available')
-                
-                # Clean HTML tags from snippet
-                clean_snippet = unescape(re.sub(r'<.*?>', '', snippet)).strip()
-                
-                # Build Wikipedia URL
-                url = f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}"
-                
-                results.append(
-                    f"[{idx}] {title}\n"
-                    f"URL: {url}\n"
-                    f"{clean_snippet}"
-                )
-            
-            if results:
-                header = f"Wikipedia search results for: {query}\n" + "=" * 60 + "\n\n"
-                return header + "\n\n".join(results)
-            else:
-                return f"[search_wiki] No results found for: {query}"
-                
-        except ImportError:
-            raise ToolError("httpx library not available - required for search functionality")
-        except httpx.TimeoutException:
-            raise ToolError(f"Wikipedia search timed out for query: {query}")
-        except httpx.HTTPError as e:
-            raise ToolError(f"Wikipedia search request failed: {e}")
-        except Exception as e:
-            raise ToolError(f"Wikipedia search error: {e}")
-
-
 # ---------------------------------------------------------------------------
 # Tool registry
 #
@@ -913,10 +581,6 @@ class ToolContext:
     workspace: Optional[Path] = None
     depth: int = 0
     pending_subagents: list = field(default_factory=list)
-    search_tools: Optional[SearchTools] = None
-    search_max_results: int = 3
-    search_limit: Optional[int] = None
-    state: dict[str, Any] = field(default_factory=dict)
 
 
 _REGISTRY: dict[str, ToolDefinition] = {}
@@ -1170,7 +834,7 @@ async def _run_tool_async(ctx: ToolContext, command: str) -> str:
     policy=ToolPolicySpec(
         "run",
         "deny",
-        {"others": "deny", "chain_policy": "ask", "use_container": False, "container_network": False},
+        {"others": "deny", "chain_policy": "ask"},
     ),
     async_handler=_run_tool_async,
     key="run_command",
@@ -1182,73 +846,6 @@ def _run_tool(ctx: ToolContext, command: str) -> str:
         return str(e)
 
 
-@tool(
-    name="search_web",
-    description=(
-        "Search the web using DuckDuckGo. Returns top search results with titles, URLs, and snippets. "
-        "Use this for: library documentation, API references, recent news, troubleshooting, "
-        "technical queries, comparisons, and general web searches. "
-        "Prefer this over search_wiki for most queries unless searching for a specific entity or concept."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Search query (e.g., 'python asyncio tutorial', 'rust error handling best practices')",
-            },
-            "time_range": {
-                "type": "string",
-                "enum": ["day", "week", "month", "year"],
-                "description": "Optional: filter results by recency (useful for news or recent library updates)",
-            },
-        },
-        "required": ["query"],
-    },
-    policy=ToolPolicySpec("search", "allow"),
-)
-def _search_web_tool(ctx: ToolContext, query: str, time_range: Optional[str] = None) -> str:
-    limit = ctx.search_limit
-    if limit is not None and ctx.state.get("search_web_count", 0) >= limit:
-        return f"[search_web] Rate limit reached ({limit} searches per session)"
-    ctx.state["search_web_count"] = ctx.state.get("search_web_count", 0) + 1
-    try:
-        return ctx.search_tools.search_web(query, max_results=ctx.search_max_results, time_range=time_range)
-    except ToolError as e:
-        return f"[search_web] {str(e)}"
-
-
-@tool(
-    name="search_wiki",
-    description=(
-        "Search Wikipedia for encyclopedic information. Returns top results with titles, URLs, and snippets. "
-        "Use this for: named entities (people, places, organizations), concepts with canonical definitions, "
-        "historical events, scientific concepts, algorithms, data structures, and programming paradigms. "
-        "NOT recommended for library-specific documentation or recent news."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Search query (e.g., 'Python programming language', 'Binary search algorithm')",
-            }
-        },
-        "required": ["query"],
-    },
-    policy=ToolPolicySpec("search", "allow"),
-)
-def _search_wiki_tool(ctx: ToolContext, query: str) -> str:
-    limit = ctx.search_limit
-    if limit is not None and ctx.state.get("search_wiki_count", 0) >= limit:
-        return f"[search_wiki] Rate limit reached ({limit} searches per session)"
-    ctx.state["search_wiki_count"] = ctx.state.get("search_wiki_count", 0) + 1
-    try:
-        return ctx.search_tools.search_wiki(query, max_results=ctx.search_max_results)
-    except ToolError as e:
-        return f"[search_wiki] {str(e)}"
-
-
 class _SubagentContextError(Exception):
     def __init__(self, tokens: int):
         self.tokens = tokens
@@ -1257,7 +854,7 @@ class _SubagentContextError(Exception):
 async def _run_subagent(ctx: ToolContext, task: str) -> str:
     from pico_chat import pico_cfg
     from pico_chat.harness.harness import Harness
-    from pico_chat.harness import chunks as chunk_types
+    from pico_chat.harness import events
 
     timeout = pico_cfg.config.subagent_timeout
     max_context = pico_cfg.config.subagent_max_context
@@ -1271,17 +868,17 @@ async def _run_subagent(ctx: ToolContext, task: str) -> str:
 
     async def _collect():
         nonlocal cumulative_tokens, last_call_tokens, in_assistant_turn
-        async for chunk in sub.chat(task):
-            if isinstance(chunk, chunk_types.MessageStart):
-                if chunk.role == "assistant":
+        async for event in sub.chat(task):
+            if isinstance(event, events.Start):
+                if event.role == "assistant":
                     if in_assistant_turn:
                         cumulative_tokens += last_call_tokens
                         last_call_tokens = 0
                     in_assistant_turn = True
-            elif isinstance(chunk, chunk_types.Content):
-                result_parts.append(chunk.content)
-            elif isinstance(chunk, chunk_types.GenerationMetrics):
-                last_call_tokens = chunk.tokens
+            elif isinstance(event, events.Token):
+                result_parts.append(event.text)
+            elif isinstance(event, events.Usage):
+                last_call_tokens = event.tokens
                 if max_context and (cumulative_tokens + last_call_tokens) > max_context:
                     raise _SubagentContextError(cumulative_tokens + last_call_tokens)
 
@@ -1377,22 +974,6 @@ def RunTool(toolset: MinimalToolset) -> RegisteredTool:
     return _build_tool("run_command", ToolContext(toolset=toolset))
 
 
-def SearchWebTool(search_tools: SearchTools, max_results: int = 3,
-                  search_limit: Optional[int] = None) -> RegisteredTool:
-    """Build the search_web tool bound to a search backend."""
-    return _build_tool("search_web", ToolContext(
-        search_tools=search_tools, search_max_results=max_results, search_limit=search_limit,
-    ))
-
-
-def SearchWikiTool(search_tools: SearchTools, max_results: int = 3,
-                   search_limit: Optional[int] = None) -> RegisteredTool:
-    """Build the search_wiki tool bound to a search backend."""
-    return _build_tool("search_wiki", ToolContext(
-        search_tools=search_tools, search_max_results=max_results, search_limit=search_limit,
-    ))
-
-
 def SubagentTool(workspace_path, depth: int, pending_subagents: list) -> RegisteredTool:
     """Build the subagent tool."""
     return _build_tool("subagent", ToolContext(
@@ -1431,23 +1012,11 @@ def create_toolset(
     """
     toolset = MinimalToolset(workspace_path, confirmation_callback, permissions=permissions)
 
-    if depth > 0:
-        # Subagent: more results per search, but limited number of searches
-        search_max_results = 10
-        search_limit = 3
-    else:
-        # Main agent: fewer results per search, unlimited searches
-        search_max_results = 3
-        search_limit = None
-
     context = ToolContext(
         toolset=toolset,
         workspace=Path(workspace_path).resolve(),
         depth=depth,
         pending_subagents=pending_subagents if pending_subagents is not None else [],
-        search_tools=SearchTools(),
-        search_max_results=search_max_results,
-        search_limit=search_limit,
     )
 
     return {
@@ -1462,7 +1031,6 @@ __all__ = [
     "FileTools",
     "ShellTool",
     "MinimalToolset",
-    "SearchTools",
     "ToolPolicySpec",
     "ToolContext",
     "RegisteredTool",
@@ -1470,8 +1038,6 @@ __all__ = [
     "registered_tool_specs",
     "create_toolset",
     "RunTool",
-    "SearchWebTool",
-    "SearchWikiTool",
     "SubagentTool",
     "WaitForSubagentsTool",
 ]

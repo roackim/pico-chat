@@ -39,9 +39,13 @@ class _UI:
         self.chat_history_panel = _Panel()
         self.compositor = _Compositor()
         self.refreshed = 0
+        self.popups = []
 
     def refresh_status_bar(self):
         self.refreshed += 1
+
+    def show_popup(self, title, content, content_padding=1):
+        self.popups.append((title, content))
 
 
 def test_resolve_editor_prefers_visual_then_editor(monkeypatch):
@@ -60,14 +64,14 @@ def test_edit_file_invokes_editor(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr("subprocess.call", lambda cmd: calls.append(cmd) or 0)
 
-    assert edit_file(tmp_path / "pico.toml") is True
-    assert calls == [["my-editor", str(tmp_path / "pico.toml")]]
+    assert edit_file(tmp_path / "ui.toml") is True
+    assert calls == [["my-editor", str(tmp_path / "ui.toml")]]
 
 
-def test_config_command_opens_editor_and_reloads(monkeypatch, tmp_path):
+def test_config_command_opens_section_and_reloads(monkeypatch, tmp_path):
     import pico_chat.pico_cfg as cfg_mod
 
-    monkeypatch.setattr(cfg_mod, "get_config_path", lambda: tmp_path / "pico.toml")
+    monkeypatch.setattr(cfg_mod, "get_config_dir", lambda: tmp_path)
     monkeypatch.setattr(cfg_mod, "get_state_path", lambda: tmp_path / "state.toml")
     monkeypatch.setenv("EDITOR", "my-editor")
     ui = _UI()
@@ -80,11 +84,28 @@ def test_config_command_opens_editor_and_reloads(monkeypatch, tmp_path):
 
     monkeypatch.setattr("pico_chat.ui.external_editor.open_editor", _fake_open)
 
+    asyncio.run(ConfigCommand().execute(ui, ["servers"]))
+
+    assert opened == [tmp_path / "servers.toml"]
+    assert (tmp_path / "servers.toml").exists()
+    assert any("Config reloaded" in m for m in ui.chat_history_panel.messages)
+
+
+def test_config_command_no_args_lists_sections(monkeypatch):
+    ui = _UI()
+
     asyncio.run(ConfigCommand().execute(ui, []))
 
-    assert opened == [tmp_path / "pico.toml"]
-    assert (tmp_path / "pico.toml").exists()
-    assert any("Config reloaded" in m for m in ui.chat_history_panel.messages)
+    assert ui.popups and ui.popups[0][0] == "config"
+    assert "ui.toml" in ui.popups[0][1]
+
+
+def test_config_command_unknown_section_reports_error(monkeypatch):
+    ui = _UI()
+
+    asyncio.run(ConfigCommand().execute(ui, ["nope"]))
+
+    assert any("Unknown section" in m for m in ui.chat_history_panel.messages)
 
 
 def test_config_command_without_editor_reports_error(monkeypatch):
@@ -93,7 +114,7 @@ def test_config_command_without_editor_reports_error(monkeypatch):
     monkeypatch.setattr("pico_chat.ui.external_editor.shutil.which", lambda _name: None)
     ui = _UI()
 
-    asyncio.run(ConfigCommand().execute(ui, []))
+    asyncio.run(ConfigCommand().execute(ui, ["ui"]))
 
     assert any("No editor" in m for m in ui.chat_history_panel.messages)
 
@@ -116,7 +137,7 @@ def test_edit_command_opens_requested_file(monkeypatch, tmp_path):
 def test_reload_command_success(monkeypatch, tmp_path):
     import pico_chat.pico_cfg as cfg_mod
 
-    monkeypatch.setattr(cfg_mod, "get_config_path", lambda: tmp_path / "pico.toml")
+    monkeypatch.setattr(cfg_mod, "get_config_dir", lambda: tmp_path)
     monkeypatch.setattr(cfg_mod, "get_state_path", lambda: tmp_path / "state.toml")
     ui = _UI()
 

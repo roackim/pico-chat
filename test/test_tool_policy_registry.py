@@ -28,16 +28,15 @@ def test_new_registered_tool_gets_default_role_policy(monkeypatch):
 
 def test_permission_gate_reads_enabled_and_simple_policies_from_role(tmp_path):
     role = default_role()
-    role.tools["search_wiki"].enabled = False
+    role.tools["subagent"].enabled = False
     gate = PermissionGate(
         str(tmp_path),
         enabled_tools=role.enabled_tool_names(),
         role=role,
     )
 
-    assert gate.check("search_web", {"query": "test"}) == "allow"
-    assert gate.check("search_wiki", {"query": "test"}) == "deny"
-    assert gate.check("subagent", {"task": "test"}) == "ask"
+    assert gate.check("subagent", {"task": "test"}) == "deny"
+    assert gate.check("wait_for_subagents", {}) == "ask"
 
 
 def test_permission_gate_reads_file_settings_from_role(tmp_path):

@@ -90,9 +90,8 @@ then passes through the application interceptor, semantic `ActionMap`, mouse
 hit path, focused widget, or root fallback as appropriate. Mouse paths are
 built from component rectangles and are tried child-first; a component stops
 propagation by returning `True`. The application interceptor handles policy
-and focus transitions; tab mouse selection and close actions flow through the
-generic hit path into `TabBar` and `TabView`. `FocusScope` selects the
-keyboard target and keeps modal focus bounded.
+and focus transitions. `FocusScope` selects the keyboard target and keeps
+modal focus bounded.
 
 ### Layout and Coordinates
 
@@ -115,7 +114,7 @@ hooks and overlay ownership are handled together.
 
 The stable library surface is the typed events, `Action`/`ActionMap`, focus
 scopes, `Component`, layout primitives, reusable components, `Screen`,
-`Navigator`, `ModalHost`, `TabView`, and standalone form models. Modules named
+`Navigator`, and `ModalHost`. Modules named
 as application adapters, private attributes (leading `_`), compositor internals,
 and legacy `chatTUI` callbacks remain internal and may change during migration.
 
@@ -325,26 +324,31 @@ form.show(
 
 Currently used by: `/server add` (no-args form mode)
 
-## Tab Views
+## Single Conversation
 
-`TabView` owns generic tab metadata and view instances, while application code
-owns domain models. Tab entries have stable IDs, titles, closability, and an
-active selection. Inactive views remain allocated and receive `Screen`
-`on_suspend()`/`on_resume()` lifecycle hooks; first activation uses
-`on_enter()`, and removal uses `on_leave()`. Tab selection and movement are
-available through the shared `ActionMap`.
+There is one conversation per process. The app (`chatTUI`) owns the agent,
+history panel, message queue, generation task, tool state, and pause/steer
+state directly; there is no `ConversationRuntime`, `TabView`, or `TabBar`.
+
+## Shutdown
+
+Ctrl+C is read as a raw `\x03` byte by the compositor's input loop
+(`_handle_shutdown_key`), which sets `running = False` and the app
+`shutdown_event`. `agent_worker` races its queue against `shutdown_event`, and a
+`shutdown_watcher` task cancels any in-flight generation, so one Ctrl+C exits
+promptly and cleanly. `main.py` also swallows a stray `KeyboardInterrupt` so a
+mis-timed interrupt never prints a traceback.
 
 ## Debug Panel
 
-The debug console is a `DebugLogPanel` (extends `TextComponent`) shown directly in the
-history slot of a closeable workspace tab, alongside the normal command input. Closing
-the tab returns to the active conversation; the debug log remains available when the tab
-is reopened.
+The debug console is a `DebugLogPanel` (extends `TextComponent`) wrapped in a
+`DebugPopup` compositor overlay.
 
 - `DebugLogPanel` receives log entries via `TuiLogHandler`
-- Toggled visible/hidden by replacing the `ChatScreen` workspace composition in `toggle_debug_console()`
+- `/debug panel` calls `toggle_debug_console()`, which shows/hides the overlay
+- The overlay occupies the bottom ~30% of the terminal, closes on Escape, and
+  passes unhandled input through to the chat
 - Auto-scrolls to bottom on new log entries
-- Planned: move to a separate conversation (not popup)
 
 ## Buffer (`tui/buffer.py`)
 

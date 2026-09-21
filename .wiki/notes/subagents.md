@@ -68,7 +68,7 @@ On expiry the subagent task is cancelled and the tool returns:
 ## Context Limit
 
 `pico_cfg.subagent_max_context` (default: `None` = unlimited).  
-Tokens are accumulated per assistant turn via `GenerationMetrics` chunks. When `cumulative_tokens + last_call_tokens > max_context`, a `_ContextLimitError` is raised internally and the tool returns:
+Tokens are accumulated per assistant turn via `events.Usage`. When `cumulative_tokens + last_call_tokens > max_context`, a `_ContextLimitError` is raised internally and the tool returns:
 
 ```
 [subagent aborted: context limit exceeded (<actual> > <max> tokens)]

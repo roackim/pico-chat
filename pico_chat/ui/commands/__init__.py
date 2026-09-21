@@ -1,7 +1,7 @@
 """Command package public API.
 
 Concrete commands live in per-domain modules (``core``, ``server``,
-``models``, ``roles``, ``debug``, ``conversation``, ``tabs``, ``tools``,
+``models``, ``roles``, ``debug``, ``conversation``, ``tools``,
 ``openrouter``). The registry in
 :mod:`pico_chat.ui.commands.registry` assembles them; this module is the
 public import path.

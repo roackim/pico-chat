@@ -109,8 +109,7 @@ def test_harness_stop_tool_kills_run(tmp_path):
         write=FilePermissions("allow", "allow"),
         patch=FilePermissions("allow", "allow"),
         run=RunPermissions(allow=set(), ask=set(), deny=set(),
-                           others="allow", chain_policy="ask", use_container=False),
-        search="allow",
+                           others="allow", chain_policy="ask"),
     )
 
     h = Harness.__new__(Harness)

@@ -54,6 +54,15 @@ rendering. `ListView` provides focusable keyboard/mouse navigation with
 scrolling, while `Select` adds a compact field that opens an inline list. These
 widgets consume canonical `KeyEvent` values while retaining raw-string input.
 
+### `list_modal.py`
+`ListModal` — centered modal list selector overlay wrapping a focusable
+`ListView`.
+- Arrow keys / mouse move the selection; Enter accepts (`on_accept(item)`), Esc
+	cancels (`on_cancel()`)
+- Traps all input while visible and suspends/restores background focus
+- `ListModalScreen` adapts it to `ModalHost` lifecycle ownership
+- Used by `/model` via `chatTUI.show_list_modal(...)`
+
 ### `table_view.py`
 `TableView` renders measured or explicitly sized columns with a fixed header,
 vertical row scrolling, horizontal clipping, and mouse/keyboard row selection.
@@ -174,30 +183,6 @@ Live markdown parser and renderer. Parses markdown into display lines of `Styled
 - `Markdown` — high-level wrapper; `parse(text)` returns `List[List[StyledSegment]]`; `_render_table()` renders `TableLine` groups via `AsciiTable`
 - `MarkdownComponent` — `Component` subclass; re-parses on every `update()` (suitable for streaming); segment-aware word wrapping with hard-break for code blocks
 See [notes/ui.md](../notes/ui.md) for the rendering overview.
-
-### `tab_bar.py`
-`TabBar` — single-line tab bar for multi-conversation support.
-- Renders tabs as: `[1] chat  [2] debug  [3] scratch ×`
-- Active tab highlighted with bold + underline
-- `×` close button on closeable tabs
-- Mouse click to select/close tabs
-- `set_callbacks(on_select, on_close)` — register tab event handlers
-- `add_tab(name, closeable)` / `remove_tab(index)` — manage tabs
-- `set_active(index)` — highlight a tab
-- Used by: `/tab new | close | switch | list`
-
-### `tab_view.py`
-`TabView` — generic owner of tab identity, titles, closability, active selection,
-and view instances. It preserves inactive views and calls `Screen` lifecycle
-hooks when views are entered, suspended, resumed, or closed.
-- `TabItem` — stable tab ID, title, view, and closeability metadata.
-- `ActionMap` integration supports activate, close, next, and previous actions.
-- Close callbacks run after the tab item and visual strip entry are removed,
-  so application domain state can synchronize before replacement selection.
-- Applications may keep zero tabs; `TabView.active_index` becomes `None` and
-	the tab bar still exposes its new-tab control.
-- `chatTUI` uses it for conversation and debug tabs while keeping
-	`ConversationState` outside the widget layer.
 
 ---
 

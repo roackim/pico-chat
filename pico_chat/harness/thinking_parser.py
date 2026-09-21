@@ -5,14 +5,13 @@ Extracts the inline thinking-tag state machine from `Harness._stream_llm_respons
 into a standalone, testable class.  Handles two input paths:
 
 - ``reasoning_content`` API field (DeepSeek/R1 style) — yielded directly as
-  ``Thinking`` chunks, no tag parsing needed.
+  ``Reasoning`` events, no tag parsing needed.
 - Inline content with ``<thinking>``/``</thinking>`` or ``<think>``/``</think>``
-  tags — a state machine that splits content into ``Content`` and ``Thinking``
+  tags — a state machine that splits content into ``Token`` and ``Reasoning``
   segments, buffering partial tags across chunk boundaries.
 
-Also encapsulates the periodic ``GenerationMetrics`` emission so the 6×
-duplicated metrics-yield block in the original method collapses into a single
-helper call.
+Also encapsulates the periodic ``Usage`` emission so the duplicated
+metrics-yield block in the original method collapses into a single helper call.
 """
 
 from __future__ import annotations
@@ -21,7 +20,7 @@ import time
 from dataclasses import dataclass
 from typing import AsyncGenerator, Dict, List, Optional, Tuple
 
-from pico_chat.harness import chunks
+from pico_chat.harness import events
 
 
 # Supported thinking tag delimiters (open, close)
@@ -54,9 +53,9 @@ class ThinkingTagParser:
         for text_chunk in stream:
             for segment in parser.feed(text_chunk):
                 if segment.is_thinking:
-                    yield chunks.Thinking(content=segment.text)
+                    yield events.Reasoning(text=segment.text)
                 else:
-                    yield chunks.Content(content=segment.text)
+                    yield events.Token(text=segment.text)
         for segment in parser.flush():
             ...
     """
@@ -177,12 +176,6 @@ class MetricsState:
     total_usage_tokens: Optional[int] = None
     reasoning_tokens: Optional[int] = None
 
-    def add_tokens(self, text: str, estimate_fn) -> int:
-        """Estimate and accumulate tokens for a text chunk. Returns the count."""
-        count = estimate_fn(text)
-        self.total_tokens += count
-        return count
-
     def ensure_started(self):
         """Mark the generation start time on first content."""
         if self.generation_start_time is None:
@@ -197,8 +190,8 @@ class MetricsState:
         if usage.completion_tokens is not None:
             self.total_tokens = usage.completion_tokens
 
-    def maybe_metrics(self, interval: float) -> Optional[chunks.GenerationMetrics]:
-        """Return a GenerationMetrics chunk if enough time has elapsed, else None."""
+    def maybe_metrics(self, interval: float) -> Optional[events.Usage]:
+        """Return a Usage event if enough time has elapsed, else None."""
         if self.generation_start_time is None:
             return None
         current = time.perf_counter()
@@ -206,7 +199,7 @@ class MetricsState:
             duration = current - self.generation_start_time
             tps = self.total_tokens / duration if duration > 0 else 0
             self.last_update = current
-            return chunks.GenerationMetrics(
+            return events.Usage(
                 tokens=self.total_tokens,
                 tokens_per_second=tps,
                 ttft_ms=self.ttft_ms,
@@ -218,13 +211,13 @@ class MetricsState:
             )
         return None
 
-    def final_metrics(self) -> Optional[chunks.GenerationMetrics]:
-        """Return the final GenerationMetrics chunk with duration_ms, or None."""
+    def final_metrics(self) -> Optional[events.Usage]:
+        """Return the final Usage event with duration_ms, or None."""
         if self.generation_start_time is None:
             return None
         duration = time.perf_counter() - self.generation_start_time
         tps = self.total_tokens / duration if duration > 0 else 0
-        return chunks.GenerationMetrics(
+        return events.Usage(
             tokens=self.total_tokens,
             tokens_per_second=tps,
             ttft_ms=self.ttft_ms,

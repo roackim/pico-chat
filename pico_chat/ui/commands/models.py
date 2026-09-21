@@ -50,6 +50,61 @@ async def _discover_all() -> List[Tuple[str, "ModelInfo"]]:
     return pairs
 
 
+def _current_selection(ui: ChatUIProtocol) -> Tuple[Optional[str], Optional[str]]:
+    """Return ``(active_server_name, selected_model_id)`` from the live agent."""
+    endpoint = getattr(ui.agent, "endpoint", None)
+    return getattr(endpoint, "name", None), getattr(endpoint, "selected_model", None)
+
+
+def _model_row(server: str, model: "ModelInfo", active: bool) -> str:
+    """One row for the model list / picker."""
+    marker = "*" if active else " "
+    context = f"  ({model.context_window:,} tokens)" if model.context_window else ""
+    return f"{marker} {model.id}{context}  [{server}]"
+
+
+async def _open_picker(ui: ChatUIProtocol) -> None:
+    """Discover models and present the modal list selector."""
+    pairs = await _discover_all()
+    if not pairs:
+        ui.chat_history_panel.add_message(
+            "No models discovered.\n\n"
+            "Configure a server with '/config servers', then check it is "
+            "reachable with '/server diagnose <name>'.",
+            msg_type=SysMsg(), title="model")
+        return
+
+    show_modal = getattr(ui, "show_list_modal", None)
+    if show_modal is None:
+        await ModelListCommand().execute(ui, [])
+        return
+
+    active_name, selected = _current_selection(ui)
+    pairs = sorted(pairs, key=lambda pair: (pair[0], pair[1].id))
+    initial_index = next(
+        (i for i, (server, model) in enumerate(pairs)
+         if server == active_name and model.id == selected),
+        0,
+    )
+
+    def _format(pair) -> str:
+        server, model = pair
+        return _model_row(server, model, server == active_name and model.id == selected)
+
+    def _accept(pair) -> None:
+        server, model = pair
+        try:
+            _activate(ui, server, model.id)
+            ui.chat_history_panel.add_message(
+                f"Selected {model.id} on {server}.", msg_type=SysMsg(), title="model")
+        except Exception as exc:
+            ui.chat_history_panel.add_message(
+                f"Could not select model: {exc}", msg_type=SysMsgError(), title="model")
+
+    show_modal("Select a model", pairs, formatter=_format, on_accept=_accept,
+               initial_index=initial_index)
+
+
 def _split_server_model(raw: str) -> Tuple[Optional[str], str]:
     """Split ``<server>:<model>`` using known server names.
 
@@ -108,10 +163,8 @@ class ModelListCommand(Command):
 
         lines = [f"{str(theme.DEFAULT)}Models:{theme.reset()}"]
         for server, model in sorted(pairs, key=lambda p: (p[0], p[1].id)):
-            marker = "*" if (server == active_name and model.id == selected) else " "
-            context = f" ({model.context_window:,} tokens)" if model.context_window else ""
-            lines.append(
-                f"{marker} {model.id}{context} {str(theme.MUTED)}[{server}]{theme.reset()}")
+            active = server == active_name and model.id == selected
+            lines.append(_model_row(server, model, active))
         ui.chat_history_panel.add_message("\n".join(lines), msg_type=SysMsg(), title="model")
 
 
@@ -181,7 +234,7 @@ class ModelCommand(Command):
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         if not args:
-            await self.subcommands["list"].execute(ui, [])
+            await _open_picker(ui)
             return
         subcommand = self.subcommands.get(args[0].lower())
         if subcommand is None:

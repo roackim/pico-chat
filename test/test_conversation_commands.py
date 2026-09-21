@@ -15,23 +15,6 @@ class FakeAgent:
         self.role = role
 
 
-class FakeRuntime:
-    def __init__(self):
-        self.agent = FakeAgent()
-        self.current_generation_task = None
-
-    @property
-    def is_generating(self):
-        return False
-
-    def ensure_agent(self):
-        return self.agent
-
-    def switch_role(self, role):
-        self.agent.set_role(role)
-        return role
-
-
 class FakePanel:
     def __init__(self):
         self.messages = []
@@ -54,15 +37,12 @@ class FakePanel:
 
 class FakeUI:
     def __init__(self):
-        self.runtime = FakeRuntime()
+        self.agent = FakeAgent()
         self.chat_history_panel = FakePanel()
 
-    @property
-    def agent(self):
-        return self.runtime.agent
-
-    def _active_runtime(self):
-        return self.runtime
+    def switch_role(self, role):
+        self.agent.set_role(role)
+        return role
 
 
 def test_conversation_export_includes_active_role(tmp_path):

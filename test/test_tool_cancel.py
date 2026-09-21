@@ -7,8 +7,8 @@ from pico_chat.harness.permissions import (
     ToolPermissionsProfile, FilePermissions, RunPermissions,
 )
 
-def _no_container_permissions():
-    """Permissive profile running commands directly (no bubblewrap)."""
+def _permissive_permissions():
+    """Permissive profile running commands directly."""
     return ToolPermissionsProfile(
         name="test",
         read=FilePermissions("allow", "allow"),
@@ -16,9 +16,8 @@ def _no_container_permissions():
         patch=FilePermissions("allow", "allow"),
         run=RunPermissions(
             allow=set(), ask=set(), deny=set(), others="allow",
-            chain_policy="ask", use_container=False,
+            chain_policy="ask",
         ),
-        search="allow",
     )
 
 def asyncio_run(coro):
@@ -26,14 +25,14 @@ def asyncio_run(coro):
 
 
 def test_run_async_returns_formatted_output(tmp_path):
-    tool = ShellTool(tmp_path, permissions=_no_container_permissions())
+    tool = ShellTool(tmp_path, permissions=_permissive_permissions())
     out = asyncio_run(tool.run_async("echo hello"))
     assert "hello" in out
     assert "[exit:0]" in out
 
 
 def test_cancel_active_run_kills_command(tmp_path):
-    tool = ShellTool(tmp_path, permissions=_no_container_permissions())
+    tool = ShellTool(tmp_path, permissions=_permissive_permissions())
 
     async def scenario():
         # Launch a long-running command.
@@ -52,7 +51,7 @@ def test_cancel_active_run_kills_command(tmp_path):
 
 
 def test_run_async_no_active_proc_when_cancelled(tmp_path):
-    tool = ShellTool(tmp_path, permissions=_no_container_permissions())
+    tool = ShellTool(tmp_path, permissions=_permissive_permissions())
 
     async def scenario():
         task = asyncio.create_task(tool.run_async("sleep 30"))
@@ -68,7 +67,7 @@ def test_run_async_no_active_proc_when_cancelled(tmp_path):
 
 
 def test_minimal_toolset_run_async_and_cancel(tmp_path):
-    ts = MinimalToolset(tmp_path, permissions=_no_container_permissions())
+    ts = MinimalToolset(tmp_path, permissions=_permissive_permissions())
     out = asyncio_run(ts.run_async("echo hi"))
     assert "hi" in out
 
@@ -85,7 +84,7 @@ def test_minimal_toolset_run_async_and_cancel(tmp_path):
 
 
 def test_run_async_timeout_cleans_up(tmp_path):
-    tool = ShellTool(tmp_path, permissions=_no_container_permissions())
+    tool = ShellTool(tmp_path, permissions=_permissive_permissions())
     with pytest.raises(ToolError):
         asyncio_run(tool.run_async("sleep 30", timeout=1))
     assert tool._active_proc is None

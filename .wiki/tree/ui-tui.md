@@ -49,8 +49,9 @@ screen model supplied by the application.
 present modal screens with lifecycle hooks.
 
 ### `chat_screen.py`
-`ChatScreen` composes the tab bar, chat history, and input workspace while
-leaving conversation state and callbacks in `chatTUI`.
+`ChatScreen` composes the chat history and input workspace (with the status bar
+pinned to the bottom) while leaving conversation state and callbacks in
+`chatTUI`.
 
 ### `example_screen.py`
 `ExampleScreen` — minimal library-only screen demonstrating component

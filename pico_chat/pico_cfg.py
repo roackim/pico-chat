@@ -1,17 +1,21 @@
 """Pico-Chat configuration.
 
-R4 of the simplification plan: configuration is files, split into
-hand-editable *intent* and disposable *state*.
+Configuration is split into small, single-concern files under
+``~/.config/pico-chat/`` so each one stays focused and easy to edit with
+``/config <section>`` or ``/edit``:
 
-- Intent lives in ``~/.config/pico-chat/pico.toml``; roles are one file each in
-  ``~/.config/pico-chat/roles/<name>.toml``.
-  It is validated; errors are collected and reported instead of being
-  silently swallowed.
-- Runtime state (last server, per-server model, discovery catalog) lives in
-  ``~/.config/pico-chat/state.toml``. It is machine-written and disposable:
-  deleting it only loses cached selections.
+- ``ui.toml`` — theme, padding, metrics, fps (flat keys)
+- ``context.toml`` — context building (flat keys)
+- ``subagents.toml`` — subagent limits (flat keys)
+- ``debug.toml`` — debug logging (flat keys)
+- ``styles.toml`` — ``[markdown_styles.*]`` / ``[syntax_highlight.*]``
+- ``servers.toml`` — one ``[servers.<name>]`` table per server
+- ``roles/<name>.toml`` — one file per role
+- ``state.toml`` — machine-written, disposable (last server/model, catalog)
 
-There are no project-local overrides. Reloading is explicit (``/reload``).
+Each file is validated independently; errors are collected and reported as
+``<file>: ...`` instead of being silently swallowed. There are no
+project-local overrides, and reloading is explicit (``/reload``).
 """
 
 from __future__ import annotations
@@ -53,10 +57,19 @@ DEFAULT_SYNTAX_HIGHLIGHT_STYLES: Dict[str, Dict[str, str]] = {
 }
 
 CONFIG_DIR_ENV = "PICO_CONFIG_DIR"
-CONFIG_FILENAME = "pico.toml"
 ROLES_DIRNAME = "roles"
 ROLE_EXAMPLE_FILENAME = "_example.toml"
 STATE_FILENAME = "state.toml"
+
+#: Config section -> file name. The section is what ``/config <section>`` takes.
+CONFIG_FILES = {
+    "ui": "ui.toml",
+    "context": "context.toml",
+    "subagents": "subagents.toml",
+    "debug": "debug.toml",
+    "styles": "styles.toml",
+    "servers": "servers.toml",
+}
 
 
 def get_config_dir() -> Path:
@@ -67,9 +80,9 @@ def get_config_dir() -> Path:
     return Path.home() / ".config" / "pico-chat"
 
 
-def get_config_path() -> Path:
-    """Path to the hand-edited intent file."""
-    return get_config_dir() / CONFIG_FILENAME
+def get_section_path(section: str) -> Path:
+    """Path to one config section file (e.g. ``ui`` -> ``ui.toml``)."""
+    return get_config_dir() / CONFIG_FILES[section]
 
 
 def get_roles_dir() -> Path:
@@ -87,25 +100,19 @@ def get_state_path() -> Path:
     return get_config_dir() / STATE_FILENAME
 
 
-# Template written when no pico.toml exists. Everything is commented out so the
-# built-in defaults apply until the user uncomments what they need.
-DEFAULT_PICO_TOML = """\
-# Pico-Chat configuration (hand-edited intent).
-#
-# Runtime state (last server/model, discovery cache) lives in state.toml and is
-# safe to delete. Apply changes with /reload, or /config (which reloads when the
-# editor exits). Unknown keys and wrong types are reported on reload.
+# Per-section templates written on first use. Everything is commented out so
+# the built-in defaults apply until the user uncomments what they need.
+DEFAULT_UI_TOML = """\
+# Pico-Chat UI settings (flat keys). Apply with /reload, or /config ui
+# (which reloads when the editor exits).
 
-# ---------------------------------------------------------------------------
-# UI
-# ---------------------------------------------------------------------------
-# [ui]
 # theme = "terminal"                  # "terminal" | "pastel"
 # use_bg_color = false                # paint the theme background
 # app_global_padding = 0
 # msg_h_padding = 1
 # msg_v_margin = 0
 # debug_console_height = 10
+# max_input_height = 8                # input grows with wrapped lines, then scrolls
 # box_style = "square"                # "square" | "double" | "rounded" | "ascii"
 # box_style_focused = "square"
 # scroll_lines_per_notch = 3
@@ -119,37 +126,48 @@ DEFAULT_PICO_TOML = """\
 # metrics_refresh_interval = 0.1
 # status_bar_fields = ["endpoint_model", "role", "context"]
 # target_fps = 60
+"""
 
-# ---------------------------------------------------------------------------
-# Context building
-# ---------------------------------------------------------------------------
-# [context]
+DEFAULT_CONTEXT_TOML = """\
+# Context building (flat keys). Apply with /reload, or /config context.
+
 # format = "tree"                     # "tree" (token-saving) | "flat"
 # max_files = 500
 # max_depth = 4
 # ignore_gitignore = false
 # preserve_reasoning_traces = false
+"""
 
-# ---------------------------------------------------------------------------
-# Subagents
-# ---------------------------------------------------------------------------
-# [subagents]
+DEFAULT_SUBAGENTS_TOML = """\
+# Subagents (flat keys). Apply with /reload, or /config subagents.
+
 # max_depth = 1
 # server = "local"                    # server subagents run on (default: active)
 # timeout = 120
 # max_context = 32000                 # omit for unlimited
+"""
 
-# ---------------------------------------------------------------------------
-# Debug
-# ---------------------------------------------------------------------------
-# [debug]
+DEFAULT_DEBUG_TOML = """\
+# Debug (flat keys). Apply with /reload, or /config debug.
+
 # log_enabled = false                 # write debug_stream.log
+"""
 
-# ---------------------------------------------------------------------------
-# Servers
-# ---------------------------------------------------------------------------
-# A server is referenced by its table name (e.g. [servers.local]) and selected
-# with /server use <name>. Available types: llamacpp, ollama, openrouter, openai.
+DEFAULT_STYLES_TOML = """\
+# Optional markdown / syntax-highlight overrides. Apply with /reload, or
+# /config styles. Uncomment and edit what you need.
+
+# [markdown_styles.header1]
+# fg = "#CCA700"
+# bold = true
+
+# [syntax_highlight.keyword]
+# fg = "#FF6464"
+"""
+
+DEFAULT_SERVERS_TOML = """\
+# Pico-Chat servers. One table per server; select with /server use <name>.
+# Available types: llamacpp, ollama, openrouter, openai.
 # Common keys: base_url, api_key (or api_key_env), model, max_context, timeout,
 # retry_attempts, retry_delay.
 
@@ -190,17 +208,16 @@ DEFAULT_PICO_TOML = """\
 # base_url = "https://api.openai.com/v1"
 # api_key_env = "OPENAI_API_KEY"
 # model = "gpt-4o"
-
-# ---------------------------------------------------------------------------
-# Markdown / syntax styling (optional overrides)
-# ---------------------------------------------------------------------------
-# [markdown_styles.header1]
-# fg = "#CCA700"
-# bold = true
-#
-# [syntax_highlight.keyword]
-# fg = "#FF6464"
 """
+
+DEFAULT_CONFIG_TEMPLATES = {
+    "ui": DEFAULT_UI_TOML,
+    "context": DEFAULT_CONTEXT_TOML,
+    "subagents": DEFAULT_SUBAGENTS_TOML,
+    "debug": DEFAULT_DEBUG_TOML,
+    "styles": DEFAULT_STYLES_TOML,
+    "servers": DEFAULT_SERVERS_TOML,
+}
 
 
 # Example role file, written as ``roles/_example.toml`` on first use. Copy it
@@ -213,8 +230,8 @@ DEFAULT_ROLE_TOML = """\
 # (default, reviewer, researcher, scaffolder) overrides it. Select a role with
 # /role use <name>.
 #
-# Tools: read, write, patch, run_command, search_web, search_wiki, subagent,
-# wait_for_subagents. `permission` is the fallback decision:
+# Tools: read, write, patch, run_command, subagent, wait_for_subagents.
+# `permission` is the fallback decision:
 # "allow" | "ask" | "deny".
 #
 # `disabled = true` hides this role; remove the line to enable it.
@@ -252,12 +269,10 @@ ask = ["git", "python3"]
 deny = ["sudo", "rm"]
 others = "deny"        # fallback for commands not listed
 chain_policy = "ask"   # decision for chained commands (a && b)
-use_container = true
-container_network = false
 """
 
 
-# --- pico.toml schema -------------------------------------------------------
+# --- config schema ----------------------------------------------------------
 # Each spec maps a TOML key to (runtime attribute, kind). Kinds drive both
 # validation and coercion so a malformed value yields a reported error rather
 # than a silently ignored setting.
@@ -269,6 +284,7 @@ _UI_SPEC: Dict[str, tuple[str, str]] = {
     "msg_h_padding": ("ui_msg_h_padding", "int"),
     "msg_v_margin": ("ui_msg_v_margin", "int"),
     "debug_console_height": ("ui_debug_console_height", "int"),
+    "max_input_height": ("ui_max_input_height", "int"),
     "box_style": ("ui_box_style", "str"),
     "box_style_focused": ("ui_box_style_focused", "str"),
     "scroll_lines_per_notch": ("ui_scroll_lines_per_notch", "int"),
@@ -303,10 +319,7 @@ _DEBUG_SPEC: Dict[str, tuple[str, str]] = {
     "log_enabled": ("debug_log_enabled", "bool"),
 }
 
-_TOP_LEVEL_SECTIONS = {
-    "ui", "servers", "context", "subagents", "debug",
-    "markdown_styles", "syntax_highlight",
-}
+_STYLE_SECTIONS = {"markdown_styles", "syntax_highlight"}
 
 _SERVER_KEYS = {
     "type", "base_url", "api_key", "api_key_env", "model", "max_context",
@@ -361,11 +374,11 @@ def _coerce(kind: str, value: Any) -> tuple[Any, Optional[str]]:
 
 
 class Config:
-    """Validated view of ``pico.toml`` plus disposable ``state.toml``."""
+    """Validated view of the split config files plus disposable ``state.toml``."""
 
-    def __init__(self, config_path: str | Path | None = None,
+    def __init__(self, config_dir: str | Path | None = None,
                  state_path: str | Path | None = None):
-        self._config_path = Path(config_path) if config_path else None
+        self._config_dir = Path(config_dir) if config_dir else None
         self._state_path = Path(state_path) if state_path else None
         self.load_errors: list[str] = []
         self._apply_defaults()
@@ -384,6 +397,7 @@ class Config:
 
         # UI settings.
         self.ui_debug_console_height: int = 10
+        self.ui_max_input_height: int = 8
         self.ui_use_bg_color: bool = False
         self.ui_theme: str = "terminal"
         self.ui_app_global_padding: int = 0
@@ -429,21 +443,30 @@ class Config:
 
     # -- loading -------------------------------------------------------------
 
-    def _config_file(self) -> Path:
-        return self._config_path or get_config_path()
+    def _dir(self) -> Path:
+        return self._config_dir or get_config_dir()
+
+    def section_file(self, section: str) -> Path:
+        """Path to a section file within this config's directory."""
+        return self._dir() / CONFIG_FILES[section]
 
     def _state_file(self) -> Path:
         return self._state_path or get_state_path()
 
     def reload(self) -> list[str]:
-        """Reload intent and state from disk, returning any validation errors.
+        """Reload every section file and state from disk, returning errors.
 
         Any value that fails validation keeps its default; the rest of the
         file is still applied.
         """
         self._apply_defaults()
         self.load_errors = []
-        _load_pico_file(self._config_file(), self, self.load_errors)
+        _load_flat_file(self.section_file("ui"), _UI_SPEC, self, self.load_errors)
+        _load_flat_file(self.section_file("context"), _CONTEXT_SPEC, self, self.load_errors)
+        _load_flat_file(self.section_file("subagents"), _SUBAGENT_SPEC, self, self.load_errors)
+        _load_flat_file(self.section_file("debug"), _DEBUG_SPEC, self, self.load_errors)
+        _load_styles_file(self.section_file("styles"), self, self.load_errors)
+        _load_servers_file(self.section_file("servers"), self, self.load_errors)
         _load_state_file(self._state_file(), self, self.load_errors)
         return self.load_errors
 
@@ -451,8 +474,8 @@ class Config:
 
     def save_server(self, name: str, server_config: Dict[str, Any],
                     set_active: bool = True) -> None:
-        """Write a server definition to ``pico.toml`` (intent)."""
-        path = self._config_file()
+        """Write a server definition to ``servers.toml`` (intent)."""
+        path = self.section_file("servers")
         path.parent.mkdir(parents=True, exist_ok=True)
         data = toml.load(path) if path.exists() else {}
         data.setdefault("servers", {})[name] = dict(server_config)
@@ -508,10 +531,10 @@ class Config:
         self._save_state()
 
     def remove_server(self, name: str) -> bool:
-        """Delete a server from ``pico.toml``; returns False if unknown."""
+        """Delete a server from ``servers.toml``; returns False if unknown."""
         if name not in self.servers:
             return False
-        path = self._config_file()
+        path = self.section_file("servers")
         data = toml.load(path) if path.exists() else {}
         data.get("servers", {}).pop(name, None)
         path.write_text(toml.dumps(data), encoding="utf-8")
@@ -525,13 +548,19 @@ class Config:
         self._save_state()
         return True
 
-    def ensure_config_file(self) -> Path:
-        """Create ``pico.toml`` from the commented template if it is missing."""
-        path = self._config_file()
+    def ensure_section_file(self, section: str) -> Path:
+        """Create a section file from its commented template if missing."""
+        if section not in CONFIG_FILES:
+            raise KeyError(section)
+        path = self.section_file(section)
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(DEFAULT_PICO_TOML, encoding="utf-8")
+            path.write_text(DEFAULT_CONFIG_TEMPLATES[section], encoding="utf-8")
         return path
+
+    def ensure_config_files(self) -> list[Path]:
+        """Create every missing section file from its commented template."""
+        return [self.ensure_section_file(section) for section in CONFIG_FILES]
 
     # -- read helpers --------------------------------------------------------
 
@@ -549,52 +578,63 @@ class Config:
         return self.servers.get(self.active_server)
 
 
-def _load_pico_file(path: Path, config: Config, errors: list[str]) -> None:
+def _read_toml(path: Path, errors: list[str]) -> Optional[dict]:
+    """Read a TOML file into a dict, reporting parse/shape errors."""
     if not path.exists():
-        return
+        return None
     try:
         data = toml.load(path)
     except (toml.TomlDecodeError, OSError) as exc:
         errors.append(f"{path.name}: {exc}")
-        return
+        return None
     if not isinstance(data, dict):
         errors.append(f"{path.name}: top level must be a table")
+        return None
+    return data
+
+
+def _load_flat_file(path: Path, spec: Dict[str, tuple[str, str]],
+                    config: Config, errors: list[str]) -> None:
+    """Load a whole-file flat key/value section (ui/context/subagents/debug)."""
+    data = _read_toml(path, errors)
+    if data is None:
         return
+    for key, value in data.items():
+        entry = spec.get(key)
+        if entry is None:
+            errors.append(f"{path.name}: unknown key '{key}'")
+            continue
+        attr, kind = entry
+        coerced, error = _coerce(kind, value)
+        if error:
+            errors.append(f"{path.name}: {key} {error}")
+            continue
+        setattr(config, attr, coerced)
 
+
+def _load_styles_file(path: Path, config: Config, errors: list[str]) -> None:
+    """Load ``styles.toml`` with its two style tables."""
+    data = _read_toml(path, errors)
+    if data is None:
+        return
     for section in data:
-        if section not in _TOP_LEVEL_SECTIONS:
+        if section not in _STYLE_SECTIONS:
             errors.append(f"{path.name}: unknown section [{section}]")
-
-    _apply_spec_table(config, data, path.name, "ui", _UI_SPEC, errors)
-    _apply_spec_table(config, data, path.name, "context", _CONTEXT_SPEC, errors)
-    _apply_spec_table(config, data, path.name, "subagents", _SUBAGENT_SPEC, errors)
-    _apply_spec_table(config, data, path.name, "debug", _DEBUG_SPEC, errors)
-    _load_servers(config, data, path.name, errors)
     _merge_style_table(config, data, path.name, "markdown_styles",
                        config.markdown_styles, errors)
     _merge_style_table(config, data, path.name, "syntax_highlight",
                        config.syntax_highlight_styles, errors)
 
 
-def _apply_spec_table(config: Config, data: dict, filename: str, section: str,
-                      spec: Dict[str, tuple[str, str]], errors: list[str]) -> None:
-    table = data.get(section)
-    if table is None:
+def _load_servers_file(path: Path, config: Config, errors: list[str]) -> None:
+    """Load ``servers.toml`` (one ``[servers.<name>]`` table per server)."""
+    data = _read_toml(path, errors)
+    if data is None:
         return
-    if not isinstance(table, dict):
-        errors.append(f"{filename}: [{section}] must be a table")
-        return
-    for key, value in table.items():
-        entry = spec.get(key)
-        if entry is None:
-            errors.append(f"{filename}: [{section}] unknown key '{key}'")
-            continue
-        attr, kind = entry
-        coerced, error = _coerce(kind, value)
-        if error:
-            errors.append(f"{filename}: [{section}].{key} {error}")
-            continue
-        setattr(config, attr, coerced)
+    for section in data:
+        if section != "servers":
+            errors.append(f"{path.name}: unknown section [{section}]")
+    _load_servers(config, data, path.name, errors)
 
 
 def _load_servers(config: Config, data: dict, filename: str,

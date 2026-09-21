@@ -6,7 +6,6 @@ from pico_chat.ui.tui.focus import FocusScope
 from pico_chat.ui.tui.navigation import ModalHost, Navigator
 from pico_chat.ui.tui.screen import Screen
 from pico_chat.ui.tui.chat_screen import ChatScreen
-from pico_chat.ui.tui.components.tab_bar import TabBar
 from pico_chat.ui.tui.events import KeyEvent
 
 
@@ -141,19 +140,15 @@ def test_modal_host_replaces_active_modal_screen_with_lifecycle_hooks():
     assert second.events == ["enter", "leave"]
 
 
-def test_chat_screen_composes_tab_bar_workspace_and_focus_scope():
-    tab_bar = TabBar()
+def test_chat_screen_composes_workspace_and_focus_scope():
     history = RecordingComponent()
     input_box = RecordingComponent()
     focus_scope = FocusScope([])
-    model = object()
 
-    screen = ChatScreen(tab_bar, history, input_box, focus_scope, model)
+    screen = ChatScreen(history, input_box, focus_scope)
 
     assert screen.focus_scope is focus_scope
-    assert screen.model is model
     assert screen.root is screen.scaffold
-    assert screen.scaffold.top is tab_bar
     assert screen.scaffold.bottom is screen.status_bar
     assert screen.workspace.children == [history, input_box]
     assert history.parent is screen.workspace

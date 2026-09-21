@@ -8,7 +8,7 @@ import asyncio
 import json
 import pytest
 from pathlib import Path
-from pico_chat.harness import chunks
+from pico_chat.harness import events as harness_events
 from pico_chat.harness.harness import Harness
 from pico_chat.harness.llm_status import AgentState
 from pico_chat.harness.tools import MinimalToolset, ToolError
@@ -36,7 +36,6 @@ def test_delegation_tools_require_approval():
         write=FilePermissions("ask", "ask"),
         patch=FilePermissions("ask", "ask"),
         run=RunPermissions(allow=set(), ask=set(), deny=set(), others="ask"),
-        search="ask",
     )
     gate = PermissionGate(".", permissions=profile)
 
@@ -254,11 +253,12 @@ class TestHarnessReadPermissionFlow:
         }
 
         events, messages = run_harness_tool_call(harness, tool_call)
-        statuses = [e.status for e in events]
 
-        assert statuses == [chunks.ToolStatus.PERMISSION_REQUESTED, chunks.ToolStatus.DENIED]
-        assert events[0].auto_decision is True
-        assert events[1].denial_reason == "Auto-denied by security policy"
+        assert isinstance(events[0], harness_events.PermissionRequest)
+        assert isinstance(events[1], harness_events.ToolResult)
+        assert events[0].auto is True
+        assert events[1].outcome == "denied"
+        assert events[1].output == "Auto-denied by security policy"
         assert read_tool.called is False
         # Check that denial message contains key information
         denial_content = messages[-1]["content"]
@@ -288,11 +288,12 @@ class TestHarnessReadPermissionFlow:
         }
 
         events, messages = run_harness_tool_call(harness, tool_call)
-        statuses = [e.status for e in events]
 
-        assert statuses == [chunks.ToolStatus.PERMISSION_REQUESTED, chunks.ToolStatus.DENIED]
-        assert events[0].auto_decision is False
-        assert events[1].denial_reason == "User denied"
+        assert isinstance(events[0], harness_events.PermissionRequest)
+        assert isinstance(events[1], harness_events.ToolResult)
+        assert events[0].auto is False
+        assert events[1].outcome == "denied"
+        assert events[1].output == "User denied"
         assert read_tool.called is False
         # Check that denial message contains key information
         denial_content = messages[-1]["content"]
@@ -321,17 +322,13 @@ class TestHarnessReadPermissionFlow:
         }
 
         events, messages = run_harness_tool_call(harness, tool_call)
-        statuses = [e.status for e in events]
 
-        assert statuses == [
-            chunks.ToolStatus.PERMISSION_REQUESTED,
-            chunks.ToolStatus.APPROVED,
-            chunks.ToolStatus.EXECUTING,
-            chunks.ToolStatus.COMPLETED,
-        ]
-        assert events[0].auto_decision is True
+        assert isinstance(events[0], harness_events.PermissionRequest)
+        assert isinstance(events[-1], harness_events.ToolResult)
+        assert events[0].auto is True
+        assert events[-1].outcome == "completed"
         assert read_tool.called is True
-        assert events[-1].result == "stubbed content"
+        assert events[-1].output == "stubbed content"
         assert messages[-1]["content"] == "stubbed content"
 
 
@@ -788,16 +785,12 @@ class TestHarnessRunPermissionFlow:
         }
 
         events, messages = run_harness_tool_call(harness, tool_call)
-        statuses = [e.status for e in events]
 
         # Should auto-approve and execute
-        assert statuses == [
-            chunks.ToolStatus.PERMISSION_REQUESTED,
-            chunks.ToolStatus.APPROVED,
-            chunks.ToolStatus.EXECUTING,
-            chunks.ToolStatus.COMPLETED,
-        ]
-        assert events[0].auto_decision is True
+        assert isinstance(events[0], harness_events.PermissionRequest)
+        assert isinstance(events[-1], harness_events.ToolResult)
+        assert events[0].auto is True
+        assert events[-1].outcome == "completed"
         assert run_tool.called is True
         assert run_tool.called_with["command"] == "find . -maxdepth 1"
 
@@ -840,16 +833,12 @@ class TestHarnessRunPermissionFlow:
         }
 
         events, messages = run_harness_tool_call(harness, tool_call)
-        statuses = [e.status for e in events]
 
         # Should ask user (dangerous pattern detected)
-        assert statuses == [
-            chunks.ToolStatus.PERMISSION_REQUESTED,
-            chunks.ToolStatus.APPROVED,
-            chunks.ToolStatus.EXECUTING,
-            chunks.ToolStatus.COMPLETED,
-        ]
-        assert events[0].auto_decision is False  # User must approve
+        assert isinstance(events[0], harness_events.PermissionRequest)
+        assert isinstance(events[-1], harness_events.ToolResult)
+        assert events[0].auto is False  # User must approve
+        assert events[-1].outcome == "completed"
         assert run_tool.called is True
 
     def test_auto_ask_command_in_ask_list(self, tmp_path, monkeypatch):
@@ -891,16 +880,12 @@ class TestHarnessRunPermissionFlow:
         }
 
         events, messages = run_harness_tool_call(harness, tool_call)
-        statuses = [e.status for e in events]
 
         # Should ask user (git in ASK list)
-        assert statuses == [
-            chunks.ToolStatus.PERMISSION_REQUESTED,
-            chunks.ToolStatus.APPROVED,
-            chunks.ToolStatus.EXECUTING,
-            chunks.ToolStatus.COMPLETED,
-        ]
-        assert events[0].auto_decision is False
+        assert isinstance(events[0], harness_events.PermissionRequest)
+        assert isinstance(events[-1], harness_events.ToolResult)
+        assert events[0].auto is False
+        assert events[-1].outcome == "completed"
         assert run_tool.called is True
 
     def test_auto_deny_blocked_command(self, tmp_path, monkeypatch):
@@ -941,12 +926,13 @@ class TestHarnessRunPermissionFlow:
         }
 
         events, messages = run_harness_tool_call(harness, tool_call)
-        statuses = [e.status for e in events]
 
         # Should auto-deny
-        assert statuses == [chunks.ToolStatus.PERMISSION_REQUESTED, chunks.ToolStatus.DENIED]
-        assert events[0].auto_decision is True
-        assert events[1].denial_reason == "Auto-denied by security policy"
+        assert isinstance(events[0], harness_events.PermissionRequest)
+        assert isinstance(events[1], harness_events.ToolResult)
+        assert events[0].auto is True
+        assert events[1].outcome == "denied"
+        assert events[1].output == "Auto-denied by security policy"
         assert run_tool.called is False
         # Check that denial message contains key information
         denial_content = messages[-1]["content"]
@@ -992,12 +978,13 @@ class TestHarnessRunPermissionFlow:
         }
 
         events, messages = run_harness_tool_call(harness, tool_call)
-        statuses = [e.status for e in events]
 
         # Should ask user, then deny
-        assert statuses == [chunks.ToolStatus.PERMISSION_REQUESTED, chunks.ToolStatus.DENIED]
-        assert events[0].auto_decision is False
-        assert events[1].denial_reason == "User denied"
+        assert isinstance(events[0], harness_events.PermissionRequest)
+        assert isinstance(events[1], harness_events.ToolResult)
+        assert events[0].auto is False
+        assert events[1].outcome == "denied"
+        assert events[1].output == "User denied"
         assert run_tool.called is False
         # Check that denial message contains key information
         denial_content = messages[-1]["content"]
@@ -1044,14 +1031,10 @@ class TestHarnessRunPermissionFlow:
         }
 
         events, messages = run_harness_tool_call(harness, tool_call)
-        statuses = [e.status for e in events]
 
         # Should ask user (chain detected)
-        assert statuses == [
-            chunks.ToolStatus.PERMISSION_REQUESTED,
-            chunks.ToolStatus.APPROVED,
-            chunks.ToolStatus.EXECUTING,
-            chunks.ToolStatus.COMPLETED,
-        ]
-        assert events[0].auto_decision is False  # Chain requires confirmation
+        assert isinstance(events[0], harness_events.PermissionRequest)
+        assert isinstance(events[-1], harness_events.ToolResult)
+        assert events[0].auto is False  # Chain requires confirmation
+        assert events[-1].outcome == "completed"
         assert run_tool.called is True

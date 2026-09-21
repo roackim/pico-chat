@@ -16,7 +16,7 @@ import toml
 def cfg(monkeypatch, tmp_path):
     import pico_chat.pico_cfg as cfg_mod
 
-    monkeypatch.setattr(cfg_mod, "get_config_path", lambda: tmp_path / "pico.toml")
+    monkeypatch.setattr(cfg_mod, "get_config_dir", lambda: tmp_path)
     monkeypatch.setattr(cfg_mod, "get_state_path", lambda: tmp_path / "state.toml")
     monkeypatch.setattr(cfg_mod.config, "servers", {}, raising=False)
     monkeypatch.setattr(cfg_mod.config, "model_selection", {}, raising=False)
@@ -54,7 +54,7 @@ def test_get_endpoint_falls_back_to_legacy_model(cfg):
 
 
 def test_remove_server_drops_config_and_catalog(cfg, tmp_path):
-    config_path = tmp_path / "pico.toml"
+    config_path = tmp_path / "servers.toml"
     config_path.write_text(toml.dumps({
         "servers": {
             "a": {"type": "ollama", "base_url": "http://a/v1", "model": "ma"},

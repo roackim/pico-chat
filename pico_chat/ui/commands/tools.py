@@ -48,8 +48,7 @@ class ToolsCommand(Command):
                 f"enabled allow={len(settings.get('allow', []))} "
                 f"ask={len(settings.get('ask', []))} deny={len(settings.get('deny', []))} "
                 f"others={settings.get('others', policy.permission)} "
-                f"chain={settings.get('chain_policy', 'ask')} "
-                f"container={settings.get('use_container', False)}"
+                f"chain={settings.get('chain_policy', 'ask')}"
             )
         return f"enabled permission={policy.permission}"
 

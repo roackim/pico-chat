@@ -112,19 +112,12 @@ class ConversationImportCommand(Command):
             role_warning = None
             if role_name:
                 from pico_chat.harness import roles
-                runtime = ui._active_runtime() if hasattr(ui, "_active_runtime") else None
                 try:
                     role = roles.load_role(role_name)
-                    if runtime is not None:
-                        runtime.switch_role(role)
-                    else:
-                        ui.agent.set_role(role)
+                    ui.switch_role(role)
                 except KeyError:
                     default_role = roles.load_role("default")
-                    if runtime is not None:
-                        runtime.switch_role(default_role)
-                    else:
-                        ui.agent.set_role(default_role)
+                    ui.switch_role(default_role)
                     role_warning = (
                         f"Role '{role_name}' no longer exists — defaulted to 'default'."
                     )

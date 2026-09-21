@@ -1,142 +1,86 @@
 # Configuration
 
-Configuration is split across two separate systems that do not share a base class or interface. This is the current state — it is not fully clean.
+Configuration is files. Everything hand-edited lives under
+`~/.config/pico-chat/` (override the directory with `PICO_CONFIG_DIR`), split
+into small single-concern files so each stays easy to edit. There is **no
+project-local config** and no trust model.
 
----
+## Files
 
-## System 1 — `pico_cfg.Config` (runtime settings)
+| File | Contents | Shape |
+|------|----------|-------|
+| `ui.toml` | theme, padding, metrics, fps | flat keys |
+| `context.toml` | context building | flat keys |
+| `subagents.toml` | subagent limits | flat keys |
+| `debug.toml` | debug logging | flat keys |
+| `styles.toml` | `[markdown_styles.*]` / `[syntax_highlight.*]` | tables |
+| `servers.toml` | one `[servers.<name>]` table per server | tables |
+| `roles/<name>.toml` | one role per file; file name is the role name | role body |
+| `state.toml` | last server/model, discovery catalog | machine-written |
 
-**File:** `pico_chat/pico_cfg.py`
+`state.toml` is disposable: deleting it only loses cached selections.
+`roles/` mirrors the same one-thing-per-file idea (see
+[tools-and-permissions.md](./tools-and-permissions.md)).
 
-`Config` is a plain class (not a dataclass) with flat attributes. It is instantiated once at module load time as a global singleton:
+Missing files are created from fully commented templates
+(`pico_cfg.DEFAULT_CONFIG_TEMPLATES`) by `Config.ensure_section_file()` /
+`ensure_config_files()`, and `roles/_example.toml` by `ensure_roles_dir()`.
 
-```python
-config: Config = Config(config_path=None)
-```
+## Loader (`pico_cfg.py`)
 
-Everything in the codebase accesses it as:
-```python
-from pico_chat import pico_cfg
-pico_cfg.config.some_setting
-```
+`Config` is a plain class with a flat attribute surface (`pico_cfg.config.<attr>`),
+instantiated once at module load as `config`. The split files map onto flat
+attributes via per-section specs (`_UI_SPEC`, `_CONTEXT_SPEC`,
+`_SUBAGENT_SPEC`, `_DEBUG_SPEC`); `styles.toml` and `servers.toml` are merged
+into the `markdown_styles` / `syntax_highlight_styles` / `servers` tables.
 
-### TOML file location
+- `reload()` re-reads every section file plus `state.toml` and returns a list of
+  validation errors. Invalid entries keep their defaults; valid ones still
+  apply. Errors are prefixed with the file name (`ui.toml: ...`).
+- Unknown keys/sections/servers/types are reported rather than swallowed.
+- After editing with `/config <section>`, the command reloads; `/reload` also
+  reloads explicitly. Nothing is watched.
 
-`~/.config/pico-chat/config.toml`
+### Intent vs state
 
-Loaded at startup. **No live-reload** — changes require a restart. If the file is missing or malformed, loading silently fails and all defaults are used (no error, no warning).
+- **Intent** (hand-edited): the section files above. `save_server()` writes
+  `servers.toml`; `remove_server()` deletes from it.
+- **State** (machine-written, disposable): `state.toml` holds `last_server`,
+  `active_model`, `[last_model]` (per-server selection) and `[model_catalog]`
+  (discovery cache). Written by `save_active_model` / `save_model_selection` /
+  `save_model_catalog`. The catalog is only a completion/offline cache — model
+  selection is live discovery.
 
-### TOML structure vs in-memory layout
+## Editing
 
-The TOML file has three top-level sections; the in-memory `Config` object collapses them flat:
+- `/config <section>` opens the section file in `$VISUAL`/`$EDITOR` and reloads
+  on exit; no argument lists the sections. `section` is one of `ui`, `context`,
+  `subagents`, `debug`, `styles`, `servers`.
+- `/edit <path>` opens any file. `/server edit` opens `servers.toml`.
+- `/roles edit [name]` opens `roles/<name>.toml` (or `_example.toml`).
+- The TUI suspends/resumes around the editor (`ui/external_editor.py`,
+  `ui/tui/terminal.py`).
 
-| TOML section | In-memory | Example |
-|---|---|---|
-| `[servers]` or `[endpoints]` | `config.servers: Dict[str, Dict]` | `config.servers["my-claude"]` |
-| `[settings]` | direct attrs on `Config` | `config.active_server`, `config.target_fps` |
-| `[ui]` | `ui_`-prefixed attrs | `config.ui_theme`, `config.ui_box_style` |
-| `[model_selection]` | `config.model_selection: Dict[server, model]` | `config.model_selection["my-ollama"]` |
-| `[model_catalog]` | `config.models_by_server: Dict[server, list]` | `config.models_by_server["my-ollama"]` |
+## Roles
 
-The `ui_` prefix is applied automatically: a TOML key `theme` under `[ui]` maps to `config.ui_theme`.
+Tool policies (ALLOW/ASK/DENY) are a separate system: a `Role` owns enabled
+tools, per-tool policies and the role prompt, stored one file per role under
+`roles/<name>.toml`. `PermissionGate` (`harness/permissions.py`) is the single
+decision point. See [security.md](./security.md) and
+[tools-and-permissions.md](./tools-and-permissions.md).
 
-`[model_selection]` records the **per-server** last-used model — the model you last picked for a given endpoint, independent of the endpoint definition. `[model_catalog]` caches the discovery catalog per server so `/model` fuzzy completion and `ModelInfo` metadata survive a restart without re-querying; it is refreshed by `/model` (live, before resolving), `/model list`, `server add`, and discovery. Catalog entries are pruned when a server is removed and invalidated when an OpenRouter server's `enabled_models` changes, so stale models cannot be resolved to the wrong server.
+## Key settings
 
-### Key settings
+**Servers:** `config.servers`, `config.active_server`, `config.active_model`,
+`config.model_selection` (`server -> model`), `config.models_by_server`
+(catalog), `config.get_model_for_server(server)`,
+`config.get_active_server_config()`.
 
-**Servers:**
-- `config.servers` — dict of named server configs (raw dicts, not typed objects)
-- `config.active_server` — name key into `servers`; saved to `[settings] active_server`
-- `config.get_active_server_config()` — returns the active server's raw dict, or `None`
-- `config.active_model` — legacy global selected model; kept in sync for backward compatibility
-- `config.model_selection` — per-server model choice (`server_name -> model id`). Preferred over the legacy global `active_model`.
-- `config.models_by_server` — cached discovery catalog (`server_name -> list[ModelInfo-dict]`)
-- `config.get_model_for_server(server)` — effective model for a server, preferring `model_selection`, then the legacy per-server `model` default
-- `config.save_model_selection(server, model)` — persist a per-server model choice to `[model_selection]`
-- `config.save_model_catalog()` — persist the current discovery catalog to `[model_catalog]`
+**Context / subagents / ui:** `context_format`, `context_max_files`,
+`context_max_depth`, `context_ignore_gitignore`, `preserve_reasoning_traces`;
+`subagent_max_depth`, `subagent_server`, `subagent_timeout`,
+`subagent_max_context`; `ui_theme`, `ui_box_style`, `ui_show_metrics`,
+`ui_status_bar_fields`, `ui_max_input_height` (input box caps + scrolls past
+this many wrapped lines), `target_fps`, and the rest of the `ui_*` attrs.
 
-Endpoints and models are separate at runtime. `LLMServerConfig` describes the
-connection endpoint, while the server instance owns the selected model and its
-model-aware context cache. Existing `[servers]` configs remain supported;
-`[endpoints]` is the preferred spelling for new configurations.
-
-`[settings] active_server` reflects the last-used endpoint. Selecting a model
-via `/model` also sets that model's serving server as the active endpooint so
-the last-used model is restored as the default on the next launch.
-
-**Model selection resolution order** (`get_server_config` and
-`get_server_config_by_name`, so switching servers restores each one's choice):
-1. per-server model choice in `config.model_selection`
-2. legacy global `config.active_model`
-3. per-server `model` default in the server config dict
-
-**OpenRouter model allowlist:** an OpenRouter server config can set
-`enabled_models = ["provider/model", ...]`. OpenRouter models are **disabled
-by default** — only explicitly-enabled models are surfaced by `/model` and
-`discover_models`. `add_openrouter` stores the single model passed at add time
-in `enabled_models`. The Settings → OpenRouter page edits this list and
-per-model provider routing; saving drops the cached catalog and rebuilds the
-live server if it is the one the active conversation uses. A server
-config without `enabled_models` falls back to its `model` key. For Ollama
-endpoints, `model_catalog` entries carry the full `/api/tags` metadata (size,
-family, etc.) plus a resolved context window.
-
-**General:**
-- `config.preserve_reasoning_traces` — preserve `<think>` tags and `reasoning_content` in history for multi-turn reasoning
-- `config.max_file_size`, `config.max_search_results`, `config.command_timeout`
-- `config.context_format` — `"tree"` or `"flat"` for context injection
-- `config.context_max_files` — max entries listed by the `@` file picker / context tree (default 500)
-- `config.context_max_depth` — max directory depth walked when listing files (default 4)
-- `config.context_ignore_gitignore` — if `True`, list gitignored files too (default `False`)
-- `config.target_fps` — compositor render rate
-- `config.subagent_max_depth`, `config.subagent_timeout`, `config.subagent_max_context`, `config.subagent_server` — subagent limits (see [subagents.md](./subagents.md))
-
-**UI:**
-- `config.ui_theme` — `"default"` or `"terminal"`
-- `config.ui_use_bg_color` — use theme background color (false = terminal default)
-- `config.ui_box_style` — border style: `"square"`, `"double"`, `"rounded"`, `"ascii"`
-- `config.ui_max_input_height`, `config.ui_debug_console_height`
-- `config.ui_msg_h_padding`, `config.ui_msg_v_margin`
-- `config.ui_cursor_frequency`, `config.ui_cursor_pulse_delay`
-- `config.ui_show_metrics`, `config.ui_metrics_show_speed`, etc.
-- `config.ui_status_bar_fields` — ordered status-bar fields; default is `['endpoint_model', 'role', 'context']`
-
-**Markdown styles:**
-- `config.markdown_styles` — dict of per-element style dicts (`fg`/`bg`/`bold`/`reverse`) loaded from the `[markdown_styles]` TOML section. Elements: `header1`–`header6`, `bold`, `italic`, `code`, `code_block`, `quote`, `list`, `hr`, `table`, `link`, `paragraph`. See [ui.md](./ui.md#markdown-rendering).
-
-### What can be saved at runtime
-
-Server/endpoint configs have a write-back path through `config.save_server(name, server_dict, set_active=True)`. The selected model can be persisted independently with `config.save_active_model(model)`.
-All other settings are read-only at runtime — no save mechanism exists for UI or general settings.
-
-### Known gaps / unplugged settings
-
-- `config.ui_box_style_focused` — defined but not wired up to any renderer
-
----
-
-## System 2 — roles (tool policies)
-
-**Files:** `pico_chat/harness/roles.py`, `pico_chat/harness/permissions.py`
-
-Tool policies (`ALLOW` / `ASK` / `DENY`) are a separate system, not stored in the main TOML file and not part of `Config`. They live on a `Role` (`roles.py`); the low-level execution primitives and the single decision point live in `permissions.py`.
-
-Permission checking is handled by `PermissionGate` (`harness/permissions.py`), which owns the user-response queue and checks the active role's policies.
-
-In practice this means:
-- Permission policies cannot be set via `config.toml`. They are edited through `/permissions` (or the settings tab), and roles persist in `~/.config/pico-chat/roles.toml`.
-- The no-argument `/permissions` popup is a live role editor: selecting,
-  creating, duplicating, renaming, removing, or changing a policy applies the
-  active role immediately through `RoleEditorModel`.
-- For permission architecture details, see [notes/security.md](./security.md) and [notes/tools-and-permissions.md](./tools-and-permissions.md)
-
----
-
-## Summary of the split
-
-| Concern | Where it lives | Configurable via TOML? |
-|---------|---------------|----------------------|
-| Server definitions | `pico_cfg.Config.servers` | Yes |
-| UI settings | `pico_cfg.Config.ui_*` | Yes |
-| General settings | `pico_cfg.Config.*` | Yes |
-| Tool permissions | `roles.py` / `roles.toml` | Via `/permissions`, not `config.toml` |
+**Styles:** `config.markdown_styles`, `config.syntax_highlight_styles`.

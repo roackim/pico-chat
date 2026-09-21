@@ -21,7 +21,7 @@ def test_reviewer_role_combines_tools_permissions_and_prompt():
     reviewer = builtin_roles()["reviewer"]
 
     assert reviewer.enabled_tool_names() == {
-        "read", "search_web", "search_wiki", "subagent", "wait_for_subagents",
+        "read", "subagent", "wait_for_subagents",
     }
     assert reviewer.prompt
     assert reviewer.policy_for("write").settings["inside_repo"] == "deny"

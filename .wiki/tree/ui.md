@@ -11,31 +11,26 @@ See [notes/ui.md](../notes/ui.md) for the full architecture overview.
 ### `app.py`
 `chatTUI` — main application class.
 - Sets up layout, compositor, and component tree
-- Manages conversation tabs and the closeable debug-console workspace tab
-- Uses generic `TabView` entries for tab identity and view ownership while keeping `ConversationState` as application-level domain state
-- Uses `TabView` as the sole production tab-selection and close state path
-- Uses an empty workspace when no tabs exist; the first ordinary message creates a closeable conversation tab
-- Queued-message styling and concurrent generation output are scoped to the conversation that owns the active generation
-- The selected `ConversationRuntime` history panel is mounted directly into the
-	live workspace, keeping visible messages independent across tabs
-- Ordinary, edited, retried, and resumed messages share one runtime enqueue path, preserving consistent queued state and FIFO ordering
-- Application startup launches only `ConversationRuntime` workers; no legacy global worker remains
-- Application startup also launches one app-level command worker; slash commands
-	are consumed independently of per-conversation generation workers
-- Popup and form input are routed by registered EventRouter overlays rather than duplicated in `handle_global_input`
+- Owns a **single conversation**: `agent`, `chat_history_panel`, `message_queue`,
+	`current_generation_task`, `active_tool_messages`, `pending_permission_prompt`,
+	and pause/steer state live directly on the app (no `ConversationRuntime`)
+- Installs one `ChatScreen` (history + input + status bar) through `Navigator`
+- The debug console is a `DebugPopup` compositor overlay toggled by `/debug panel`
+	(`toggle_debug_console`), not a workspace tab
+- Ordinary, edited, retried, and resumed messages share one enqueue path,
+	preserving consistent queued state and FIFO ordering
+- Application startup launches one `agent_worker` plus one app-level command
+	worker; slash commands are consumed independently of generation
+- Popup input is routed by registered EventRouter overlays rather than duplicated in `handle_global_input`
 - History/input mouse focus is selected through the reusable `FocusScope.focus_at()` API
 - Application focus adapters delegate layout geometry to their wrapped components for mouse hit testing
 - Completion-menu input is dispatched directly to the input component; no root-handler compatibility fallback remains
 - Application focus navigation consumes canonical `KeyEvent` metadata while accepting legacy raw strings
-- `ConversationRuntime` owns each tab's agent, message panel, queue, worker, generation task, tool state, permissions, and pause state
-- Installs chat and debug workspace layouts through `ChatScreen` as Navigator-managed screen instances
-- Delegates runtime chat/debug workspace replacement to `Navigator`; pre-run setup only constructs the screen root
-- Passes active conversation state to `ChatScreen` as an external screen model
+- `switch_role(role)` applies a role and emits a de-duped role-change notice
 - Runs the async event loop
-- Routes incoming `Chunk` objects from the harness to the chat display
+- Routes incoming `events.*` from the harness to the chat display
 - Dispatches user input to the harness or command handler
 - Manages popup overlay via `show_popup()` / `hide_popup()`; input is routed by registered EventRouter overlays
-- Leaves tab mouse hit testing to `EventRouter` and the `TabBar`/`TabView` component path
 
 The application-specific panels and command callbacks remain outside the
 library contract; reusable widgets and screens are documented in

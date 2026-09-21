@@ -58,7 +58,7 @@ export OPENROUTER_API_KEY=sk-or-...
 /model anthropic/claude-3.5-sonnet
 ```
 
-Server definitions are saved to `~/.config/pico-chat/pico.toml` and persist between sessions. Selecting a model with `/model` automatically switches to the server that serves it.
+Server definitions are saved to `~/.config/pico-chat/servers.toml` and persist between sessions. Selecting a model with `/model` automatically switches to the server that serves it.
 
 ---
 
@@ -67,12 +67,12 @@ Server definitions are saved to `~/.config/pico-chat/pico.toml` and persist betw
 | Command | Description |
 |---------|-------------|
 | `/help` | List all available commands |
-| `/config` | Edit `pico.toml` in `$EDITOR` and reload |
-| `/edit [file]` | Open a file in `$EDITOR` |
-| `/reload` | Reload `pico.toml` and `roles/` from disk |
+| `/config [section]` | Edit a config section (`ui`, `context`, `subagents`, `debug`, `styles`, `servers`) and reload |
+| `/edit <file>` | Open a file in `$EDITOR` |
+| `/reload` | Reload config files and `roles/` from disk |
 | `/status` | Show server, model, context usage, and memory |
 | `/server` | Manage servers (list/use/edit/info/remove/diagnose) |
-| `/model` | Discover or select a model (switches to its server) |
+| `/model` | Open a modal model picker (also `/model list`, `/model <id>`) |
 | `/tools` | Show available agent tools and their permission levels |
 | `/roles` | Select and inspect roles (`roles/<name>.toml`) |
 | `/compact` | Summarize conversation history to free context space |
@@ -85,13 +85,13 @@ Server definitions are saved to `~/.config/pico-chat/pico.toml` and persist betw
 
 ### Server Management
 
-Servers are defined in `pico.toml`; edit them with `/config` (or `/server edit`)
-and the config is reloaded when the editor exits.
+Servers are defined in `servers.toml`; edit them with `/config servers` (or
+`/server edit`) and the config is reloaded when the editor exits.
 
 ```
 /server list
 /server use <name>
-/server edit          # opens pico.toml in $EDITOR
+/server edit          # opens servers.toml in $EDITOR
 /server info <name>
 /server remove <name>
 /server diagnose <name>
@@ -100,7 +100,7 @@ and the config is reloaded when the editor exits.
 /model <server>:<model>
 ```
 
-Examples (`pico.toml`):
+Examples (`servers.toml`):
 ```toml
 [servers.local]
 type = "llamacpp"
@@ -140,7 +140,6 @@ Then:
 - **Mouse click** — focus a message directly
 - When a message is focused, a footer appears with available actions:
   - **`c`** — copy message content to clipboard
-  - **`e`** — edit the message (user messages only; removes everything after it)
   - **`r`** — retry the response (assistant messages only)
 
 ---
@@ -165,10 +164,6 @@ You can approve or deny with mouse click or keyboard.
 
 Use `/tools` to see the current permission level for each tool. The full policy — per-tool settings and per-command allow/ask/deny lists — lives in the active role file (`roles/<name>.toml`); edit it with `/roles edit <name>`.
 
-### Sandboxing
-
-Shell commands can be run inside a [Bubblewrap](https://github.com/containers/bubblewrap) sandbox for extra isolation. This is configurable via the permission profile.
-
 ---
 
 ## Agent Memory
@@ -187,37 +182,43 @@ Use `/status` at any time to see the full picture.
 
 ---
 
-## Configuration File
+## Configuration Files
 
-Hand-edited configuration lives in `~/.config/pico-chat/`:
+Hand-edited configuration lives in `~/.config/pico-chat/`, split into small
+single-concern files:
 
-- `pico.toml` — server definitions and UI/behavior settings.
+- `ui.toml` — theme, padding, metrics, fps (flat keys).
+- `context.toml` — context building (flat keys).
+- `subagents.toml` — subagent limits (flat keys).
+- `debug.toml` — debug logging (flat keys).
+- `styles.toml` — `[markdown_styles.*]` / `[syntax_highlight.*]` overrides.
+- `servers.toml` — one `[servers.<name>]` table per server.
 - `roles/<name>.toml` — one file per conversation role (tools, permissions,
   prompts). The file name is the role name; `_example.toml` is a commented
   starting point.
 - `state.toml` — disposable runtime state (last server/model, discovery
   catalog). Safe to delete.
 
-Missing files are created from fully commented templates: `pico.toml`
-documents every option and includes example `llamacpp`, `ollama`, `openrouter`
-and `openai` server blocks, and `roles/_example.toml` documents a role. Edit
-either with `/config` and `/roles edit <name>`. Configuration is read at startup
-and only re-applied when you run `/reload` or restart. The loader validates the files
-and reports unknown keys, wrong types, and unparsable TOML; invalid entries
-fall back to defaults while the rest of the file still applies.
+Missing files are created from fully commented templates (the `servers.toml`
+template includes example `llamacpp`, `ollama`, `openrouter` and `openai`
+blocks). Edit them with `/config <section>` or `/edit <path>`, and roles with
+`/roles edit <name>`. Configuration is read at startup and only re-applied when
+you run `/reload` or restart. The loader validates each file and reports unknown
+keys, wrong types, and unparsable TOML (`<file>: ...`); invalid entries fall
+back to defaults while the rest of the file still applies.
 
 ```toml
-# pico.toml
-[ui]
+# ui.toml
 theme = "terminal"
 
-[context]
+# context.toml
 format = "tree"
 max_files = 500
 
-[subagents]
+# subagents.toml
 max_depth = 1
 
+# servers.toml
 [servers.local]
 type = "llamacpp"
 base_url = "http://localhost:8080/v1"

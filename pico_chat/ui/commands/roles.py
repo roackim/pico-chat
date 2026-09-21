@@ -17,8 +17,7 @@ class RolesCommand(Command):
         from pico_chat.harness import roles
 
         if not args or args[0].lower() == "list":
-            runtime = ui._active_runtime() if hasattr(ui, "_active_runtime") else None
-            active = getattr(getattr(runtime, "agent", None), "role", None)
+            active = getattr(getattr(ui, "agent", None), "role", None)
             active_name = active.name if active else "default"
             lines = [f"active: {active_name}"]
             for name in roles.list_roles():
@@ -45,14 +44,9 @@ class RolesCommand(Command):
             return
 
         if action == "use" and len(args) == 2:
-            runtime = ui._active_runtime() if hasattr(ui, "_active_runtime") else None
-            if runtime is None:
-                ui.chat_history_panel.add_message(
-                    "No active conversation.", msg_type=SysMsgError())
-                return
             try:
                 role = roles.load_role(args[1])
-                runtime.switch_role(role)
+                ui.switch_role(role)
             except (KeyError, OSError, TypeError, RuntimeError) as exc:
                 ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
                 return

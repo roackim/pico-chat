@@ -1,6 +1,6 @@
 """Server commands.
 
-Servers are defined in ``pico.toml``. There is no in-TUI editor for them:
+Servers are defined in ``servers.toml``. There is no in-TUI editor for them:
 ``/server edit`` opens the file in ``$EDITOR`` and the config is reloaded when
 the editor exits. ``/server use`` selects an endpoint at runtime.
 """
@@ -89,12 +89,12 @@ class ServerUseCommand(Command):
 
 class ServerEditCommand(Command):
     def __init__(self):
-        super().__init__("edit", "Open pico.toml in your editor and reload it")
+        super().__init__("edit", "Open servers.toml in your editor and reload it")
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         from pico_chat.ui.external_editor import open_editor
 
-        path = pico_cfg.config.ensure_config_file()
+        path = pico_cfg.config.ensure_section_file("servers")
         open_editor(ui, path)
         errors = pico_cfg.reload_config()
         if errors:

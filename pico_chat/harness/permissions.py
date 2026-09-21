@@ -5,7 +5,7 @@ This module is the single place that answers "may I run this?" for a tool
 call.  It combines what used to live in three separate modules:
 
 - ``security.py``       — quote-aware command parsing and allowlist checks.
-- ``tool_permissions.py`` — policy data (file/run/search) and defaults.
+- ``tool_permissions.py`` — policy data (file/run) and defaults.
 - ``permission_gate.py`` — the role-aware gate and prompt building.
 
 ``Role`` (see :mod:`pico_chat.harness.roles`) is the source of truth for a
@@ -101,10 +101,6 @@ class RunPermissions:
     #   ask: Always ask when operators detected (even in strings)
     #   deny: Block any command with operators
 
-    # Containerization (bubblewrap)
-    use_container: bool = False
-    container_network: bool = False  # Allow network access in container
-
 
 @dataclass
 class ToolPermissionsProfile:
@@ -118,10 +114,6 @@ class ToolPermissionsProfile:
 
     # Shell execution
     run: RunPermissions
-
-    # Search operations (search_web/search_wiki)
-    # Safe read-only external API calls, typically allowed
-    search: Permission = "allow"
 
     def get_read_permission(self, is_inside_repo: bool) -> Permission:
         """Get read permission for a path."""
@@ -139,10 +131,6 @@ class ToolPermissionsProfile:
         """Get run permissions."""
         return self.run
 
-    def get_search_permission(self) -> Permission:
-        """Get search operation permission."""
-        return self.search
-
 
 # --- Predefined low-level profiles (used by tests and tool defaults) ---
 
@@ -157,10 +145,7 @@ strict = ToolPermissionsProfile(
         deny=set(),
         ask=set(),
         others="ask",
-        use_container=True,
-        container_network=True,
     ),
-    search="ask",
 )
 
 # Permissive profile: allow operations inside repo, ask for outside/commands.
@@ -173,10 +158,7 @@ permissive = ToolPermissionsProfile(
         allow=CMD_DEFAULT_ALLOW,
         ask=CMD_DEFAULT_ASK,
         deny=CMD_DEFAULT_DENY,
-        use_container=True,
-        container_network=True,
     ),
-    search="allow",  # Search is safe read-only external API
 )
 
 # Unrestricted profile: allow everything (use with caution!).
@@ -190,10 +172,7 @@ unrestricted = ToolPermissionsProfile(
         deny=set(),
         ask=set(),
         others="allow",  # allow all commands
-        use_container=True,
-        container_network=True,
     ),
-    search="allow",
 )
 
 # Locked profile: deny everything.
@@ -207,10 +186,7 @@ locked = ToolPermissionsProfile(
         deny=CMD_DEFAULT_ALLOW | CMD_DEFAULT_ASK | CMD_DEFAULT_DENY,
         ask=set(),
         others="deny",
-        use_container=True,
-        container_network=True,
     ),
-    search="deny",
 )
 
 TESTING = ToolPermissionsProfile(
@@ -223,10 +199,7 @@ TESTING = ToolPermissionsProfile(
         deny=set(),
         ask=set(),
         others="ask",
-        use_container=True,
-        container_network=True,
     ),
-    search="ask",
 )
 
 # Scaffolder profile: read-only inside repo, deny everything else.
@@ -242,7 +215,6 @@ scaffolder = ToolPermissionsProfile(
         ask=set(),
         others="deny",
     ),
-    search="allow",  # Subagents can search for library docs and research
 )
 
 # Global permissions profile used when no role policy is supplied.
@@ -288,19 +260,8 @@ def resolve_run_permissions(policy) -> RunPermissions:
             deny=set(settings.get("deny", ())),
             others=settings.get("others", tool.permission),
             chain_policy=settings.get("chain_policy", "ask"),
-            use_container=bool(settings.get("use_container", False)),
-            container_network=bool(settings.get("container_network", False)),
         )
     return policy.get_run_permission()
-
-
-def search_permission(policy) -> Permission:
-    """Return the effective search permission for a role or profile."""
-    if _is_role_policy(policy):
-        web = policy.policy_for("search_web")
-        wiki = policy.policy_for("search_wiki")
-        return web.permission if (web.enabled or wiki.enabled) else "deny"
-    return policy.get_search_permission()
 
 
 # ---------------------------------------------------------------------------
@@ -715,7 +676,7 @@ class PermissionGate:
             policy = self._role.policy_for(tool_name)
             if not policy.enabled:
                 return "deny"
-            if tool_name in ("search_web", "search_wiki", "subagent", "wait_for_subagents"):
+            if tool_name in ("subagent", "wait_for_subagents"):
                 return policy.permission
 
         perms = self.permissions
@@ -738,9 +699,6 @@ class PermissionGate:
             if self._role is not None:
                 return self._check_role_run_permission(args)
             return self._check_run_permission(args, perms.get_run_permission())
-
-        elif tool_name in ("search_web", "search_wiki"):
-            return perms.get_search_permission()
 
         elif tool_name in ("subagent", "wait_for_subagents"):
             # Delegation can execute tools in a child harness, so it must not
@@ -773,8 +731,6 @@ class PermissionGate:
             deny=set(settings.get("deny", ())),
             others=settings.get("others", policy.permission),
             chain_policy=settings.get("chain_policy", "ask"),
-            use_container=bool(settings.get("use_container", False)),
-            container_network=bool(settings.get("container_network", False)),
         )
         return self._check_run_permission(args, run_permissions)
 

@@ -28,11 +28,17 @@ def main():
     tui = chatTUI(harness)
     try:
         asyncio.run(tui.run())
+    except KeyboardInterrupt:
+        # Ctrl+C is normally handled inside the TUI (raw \x03); this is a
+        # fallback for an interrupt that arrives before/around the event loop.
+        pass
     except BaseExceptionGroup as group:
         # asyncio.TaskGroup wraps failures in an ExceptionGroup whose box-drawing
         # traceback format is noisy. Unwrap to the first real exception so the
         # terminal shows a clean, standard traceback.
-        raise group.exceptions[0] from None
+        first = group.exceptions[0]
+        if not isinstance(first, (KeyboardInterrupt, asyncio.CancelledError)):
+            raise first from None
     return 0
 
 

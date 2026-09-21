@@ -29,7 +29,7 @@ Pico is a thin runtime over hand-editable configuration:
 
 ## Resolved decisions
 
-### R1 — One event protocol
+### R1 — One event protocol *(done 2026-09-21)*
 Replace `chunks.py` + the `_process_generation` dispatch + thinking/usage
 plumbing with one event union: `Token`, `Reasoning`, `ToolCall`, `ToolResult`,
 `PermissionRequest`, `Usage`, `Error`, `Done`. The harness yields events; the UI
@@ -55,6 +55,12 @@ TUI terminal suspends/resumes around the editor (`ui/tui/terminal.py`,
 One registry of `(name, description, params, handler)`. Classes only where a
 subcommand tree plus state is real.
 
+### R4b — Split intent into per-section files *(done 2026-09-21)*
+`pico.toml` was replaced by single-concern files (`ui.toml`, `context.toml`,
+`subagents.toml`, `debug.toml`, `styles.toml`, `servers.toml`) so `/config
+<section>` edits a small focused file. `servers.toml` is still one file for all
+servers. No back-compat with `pico.toml` (P6).
+
 ### R4 — Config: `pico.toml` + `roles/<name>.toml` (user-level only)
 - User: `~/.config/pico-chat/pico.toml` and `~/.config/pico-chat/roles/<name>.toml`.
   `PICO_CONFIG_DIR` overrides the directory.
@@ -78,18 +84,20 @@ interactive UI left is the text popup and the permission `[a]`/`[x]` prompt.
 `commands/base.py` (the latter had no callers).
 Keep interactive **only** for permission approval and destructive confirmation.
 
-### R6 — Remove tabs entirely
+### R6 — Remove tabs entirely *(done 2026-09-21)*
 One conversation per process. Collapses `_tabs`, `ConversationState`,
 `_active_runtime`, `_initial_agent`, the settings tab, and the
 "which agent is active" bug class. Parallelism is another process (or a
 subagent).
 
-### R7 — Remove conversation persistence
+### R7 — Remove conversation persistence *(done 2026-09-21)*
 Drop autosave for now. Keep `/export`. Re-add later if missed.
 
-### R8 — Features are deleted outright
+### R8 — Features are deleted outright *(done 2026-09-21)*
 No plugin layer. UI-only features are removed; headless features are kept or
-deleted per R7-style judgment (see "Definition needed", P4).
+deleted per R7-style judgment (see "Definition needed", P4). Deleted:
+`search_web`/`search_wiki`, containerization (bubblewrap), token estimation.
+Kept: compaction, subagents.
 
 ### R9 — No `core` → `ui` imports
 Enforced by a guard test. Enables the future middle-ground TUI.
@@ -193,9 +201,11 @@ item.
 
 1. **R4** config schema + loader + validation + `/reload`. *(done 2026-09-21)*
 2. **R2** `Endpoint`; delete the server/service/llm-config split. *(done 2026-09-21)*
-3. **R1** event union; harness yields, UI consumes.
+3. **R1** event union; harness yields, UI consumes. *(done 2026-09-21)*
 4. **R3** command registry as data; prune command classes.
-5. **R5** delete forms/settings; single-conversation app. *(R5 done 2026-09-21; R6 pending)*
-6. Revisit deferred items.
+5. **R5** delete forms/settings. *(done 2026-09-21)*
+6. **R6** remove tabs; one conversation per process. *(done 2026-09-21)*
+7. **R7/R8** delete autosave, search, containerization, token estimation. *(done 2026-09-21)*
+8. Revisit deferred items.
 
 Each phase ends with fewer files and fewer layers.

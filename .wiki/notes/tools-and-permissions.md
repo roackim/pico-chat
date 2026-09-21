@@ -11,7 +11,6 @@ The tool system exposes file and shell operations to the LLM agent. Every tool c
 | `MinimalToolset` | Base; read file, list directory |
 | `FileTools` | Extends minimal; write file, patch file |
 | `ShellTool` | Run shell command |
-| `SearchTools` | Web search; DuckDuckGo and Wikipedia |
 
 `ToolError` — exception raised by tool functions on failure.
 
@@ -39,10 +38,8 @@ role policy entries are created.
 
 `create_toolset(depth)` — factory that binds registered tools to a context.
 Registers: `read`, `write`, `patch`, `run_command` (LLM name `run`),
-`search_web`, `search_wiki`, `subagent` (depth permitting),
-`wait_for_subagents`. Public factories `RunTool`, `SearchWebTool`,
-`SearchWikiTool`, `SubagentTool`, `WaitForSubagentsTool` remain for direct
-construction.
+`subagent` (depth permitting), `wait_for_subagents`. Public factories `RunTool`,
+`SubagentTool`, `WaitForSubagentsTool` remain for direct construction.
 
 ## Permission Flow
 
@@ -100,27 +97,6 @@ Subagents always run under the **`scaffolder`** built-in role: read-only inside
 the repo, deny everything else. The main agent's role is not inherited.
 
 See [notes/subagents.md](./subagents.md) for the full lifecycle, depth limit, timeout, and config reference.
-
-## Search Tools (`tools.py`)
-
-`SearchTools` provides two web search operations:
-
-**`search_web(query, max_results, time_range)`** — DuckDuckGo HTML search
-- Parses HTML results (title/URL/snippet) via regex
-- Optional time range filter: `"day"`, `"week"`, `"month"`, `"year"`
-- Use for: library docs, API references, news, troubleshooting, technical queries
-
-**`search_wiki(query, max_results)`** — Wikipedia MediaWiki API
-- Returns structured JSON results from Wikipedia search
-- Use for: named entities, concepts, algorithms, historical events
-
-**Rate limiting** (enforced in the registered search tools):
-- Main agent (depth=0): 3 results per search, unlimited searches
-- Subagents (depth>0): 10 results per search, max 3 searches
-
-Rationale: Subagents return only their final summary to the main context, so they can research deeply (10 results × 3 searches = 30 total results) without polluting the main conversation. Main agent uses smaller result sets to keep context clean.
-
-**Permissions**: Search operations default to `ALLOW` (safe read-only external API calls). Configurable per profile. Subagents (`scaffolder` profile) can search to enable library research.
 
 ## Patch Tool (`patch_parser.py`)
 

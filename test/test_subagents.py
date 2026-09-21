@@ -105,9 +105,9 @@ class TestSubagentDepthLimit:
     def test_depth_below_limit_proceeds(self, tmp_path):
         """At depth 0 with max_depth=1 the tool must NOT be blocked."""
         async def _chat(task):
-            from pico_chat.harness import chunks
-            yield chunks.MessageStart(message_id="test", role="assistant")
-            yield chunks.Content(content="findings")
+            from pico_chat.harness import events
+            yield events.Start(message_id="test", role="assistant")
+            yield events.Token(text="findings")
 
         with _cfg(max_depth=1, timeout=5):
             tool = _make_tool(tmp_path, depth=0)
@@ -162,10 +162,10 @@ class TestSubagentContextLimit:
 
     def test_context_limit_returns_abort_message(self, tmp_path):
         async def _heavy(task):
-            from pico_chat.harness import chunks
-            yield chunks.MessageStart(message_id="test", role="assistant")
-            yield chunks.Content(content="x")
-            yield chunks.GenerationMetrics(tokens=100, tokens_per_second=50.0, ttft_ms=10.0)
+            from pico_chat.harness import events
+            yield events.Start(message_id="test", role="assistant")
+            yield events.Token(text="x")
+            yield events.Usage(tokens=100, tokens_per_second=50.0, ttft_ms=10.0)
 
         with _cfg(max_depth=2, timeout=10, max_context=5):
             tool = _make_tool(tmp_path, depth=0)
@@ -178,10 +178,10 @@ class TestSubagentContextLimit:
     def test_no_context_limit_when_none(self, tmp_path):
         """When subagent_max_context is None, large token counts must not abort."""
         async def _big(task):
-            from pico_chat.harness import chunks
-            yield chunks.MessageStart(message_id="test", role="assistant")
-            yield chunks.Content(content="large output")
-            yield chunks.GenerationMetrics(tokens=999999, tokens_per_second=50.0, ttft_ms=10.0)
+            from pico_chat.harness import events
+            yield events.Start(message_id="test", role="assistant")
+            yield events.Token(text="large output")
+            yield events.Usage(tokens=999999, tokens_per_second=50.0, ttft_ms=10.0)
 
         with _cfg(max_depth=2, timeout=10, max_context=None):
             tool = _make_tool(tmp_path, depth=0)
@@ -202,10 +202,10 @@ class TestSubagentForeground:
 
     def test_foreground_returns_content(self, tmp_path):
         async def _chat(task):
-            from pico_chat.harness import chunks
-            yield chunks.MessageStart(message_id="test", role="assistant")
-            yield chunks.Content(content="hello ")
-            yield chunks.Content(content="world")
+            from pico_chat.harness import events
+            yield events.Start(message_id="test", role="assistant")
+            yield events.Token(text="hello ")
+            yield events.Token(text="world")
 
         with _cfg(max_depth=2, timeout=10):
             tool = _make_tool(tmp_path, depth=0)
@@ -238,8 +238,8 @@ class TestSubagentBackground:
 
     def test_background_returns_queued_message(self, tmp_path):
         async def _chat(task):
-            from pico_chat.harness import chunks
-            yield chunks.Content(content="result")
+            from pico_chat.harness import events
+            yield events.Token(text="result")
 
         async def _run():
             pending = []
@@ -258,8 +258,8 @@ class TestSubagentBackground:
     def test_background_index_increments(self, tmp_path):
         """Each background subagent gets the next sequential index."""
         async def _chat(task):
-            from pico_chat.harness import chunks
-            yield chunks.Content(content="done")
+            from pico_chat.harness import events
+            yield events.Token(text="done")
 
         async def _run():
             pending = []
@@ -415,39 +415,6 @@ class TestHarnessSubagentIntegration:
 
         assert "Active Role: reviewer" in prompt
         assert "You are a strict code reviewer." in prompt
-
-    def test_context_usage_starts_at_zero_before_any_message(self, tmp_path):
-        """With no history the context estimate must be 0, not the system
-        prompt size (the system prompt is only sent with the first message)."""
-        from pico_chat.harness.harness import Harness
-
-        with patch("pico_chat.harness.harness.get_active_endpoint", return_value=Endpoint(name="test", type="llamacpp")):
-            h = Harness(workspace_path=str(tmp_path), depth=0)
-
-        h.endpoint._cached_context_window = 32768
-        used, maximum, percentage = h.estimate_context_usage()
-
-        assert used == 0
-        assert percentage == 0.0
-        assert maximum > 0
-
-    def test_context_usage_includes_role_prompt(self, tmp_path):
-        """A role with a prompt must increase the estimated context, since the
-        role prompt is part of the system prompt sent on the next turn."""
-        from pico_chat.harness.harness import Harness
-        from pico_chat.harness.roles import Role
-
-        with patch("pico_chat.harness.harness.get_active_endpoint", return_value=Endpoint(name="test", type="llamacpp")):
-            h = Harness(workspace_path=str(tmp_path), depth=0)
-
-        h.endpoint._cached_context_window = 32768
-        h.history = [{"role": "user", "content": "hello"}]
-        base_used, _, _ = h.estimate_context_usage()
-
-        h.set_role(Role("reviewer", prompt="You are a strict code reviewer."))
-        role_used, _, _ = h.estimate_context_usage()
-
-        assert role_used > base_used
 
     def test_subagent_role_isolated_from_parent_role(self, tmp_path):
         """A child harness keeps scaffolder policy even when a parent role is supplied."""

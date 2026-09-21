@@ -99,16 +99,21 @@ class ChatHistoryPanel(TextComponent):
             index: Index of message to focus, or None to clear focus
         """
         # Clear previous focus
-        if self.focused_message_index is not None and self.focused_message_index < len(self.messages):
+        if (self.focused_message_index is not None
+                and 0 <= self.focused_message_index < len(self.messages)):
             prev = self.messages[self.focused_message_index]
             prev.set_focused(False)
             # Collapsible messages (thinking) fold back when unfocused.
             if hasattr(prev, "set_collapsed") and getattr(prev, "collapsible", False):
                 prev.set_collapsed(True)
-        
+
+        # Normalize an out-of-range index to "no focus".
+        if index is not None and not (0 <= index < len(self.messages)):
+            index = None
+
         # Set new focus
         self.focused_message_index = index
-        if self.focused_message_index is not None and self.focused_message_index < len(self.messages):
+        if self.focused_message_index is not None:
             current = self.messages[self.focused_message_index]
             current.set_focused(True)
             # Collapsible messages (thinking) expand when focused.
@@ -886,7 +891,7 @@ class ChatHistoryPanel(TextComponent):
                 # Guard against a stale index (e.g. messages cleared or
                 # truncated while focus was held) so we never index out of
                 # range.
-                if self.focused_message_index >= len(self.messages):
+                if not (0 <= self.focused_message_index < len(self.messages)):
                     self.focused_message_index = None
                 else:
                     focused_msg = self.messages[self.focused_message_index]
@@ -1120,6 +1125,12 @@ class ChatHistoryPanel(TextComponent):
         """Remove the last message from the chat history."""
         if self.messages:
             self.messages.pop()
+            # Keep focus valid: drop it if the focused message was removed.
+            if self.focused_message_index is not None:
+                if not (0 <= self.focused_message_index < len(self.messages)):
+                    self.focused_message_index = None
+                else:
+                    self.messages[self.focused_message_index].set_focused(True)
             self._message_height_cache.clear()
             self._line_map_cache = None
             self._line_map_cache_key = None
@@ -1170,7 +1181,8 @@ class ChatHistoryPanel(TextComponent):
             self._line_map_cache_key = None
             
             # Update focus state after deletion
-            if self.focused_message_index is not None and self.focused_message_index < len(self.messages):
+            if (self.focused_message_index is not None
+                    and 0 <= self.focused_message_index < len(self.messages)):
                 self.messages[self.focused_message_index].set_focused(True)
             self._request_repaint()
 

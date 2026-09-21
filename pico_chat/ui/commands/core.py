@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, List, Optional
 from pico_chat.ui.tui.colors import theme
 from pico_chat.ui.tui.msg_types import SysMsg, SysMsgError, SysMsgWarning
 
-from .base import ChatUIProtocol, Command, Param
+from .base import ChatUIProtocol, Command, Param, config_section_completions
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ class ReloadCommand(Command):
     """Reload hand-edited configuration from disk (explicit, no watcher)."""
 
     def __init__(self):
-        super().__init__("reload", "Reload pico.toml and the roles directory from disk")
+        super().__init__("reload", "Reload config files and the roles directory from disk")
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         from pico_chat import pico_cfg
@@ -83,21 +83,38 @@ class ReloadCommand(Command):
 
 
 class ConfigCommand(Command):
-    """Open ``pico.toml`` in the user's editor, then reload it."""
+    """Open one config section file in the user's editor, then reload it."""
 
     def __init__(self):
-        super().__init__("config", "Edit pico.toml in $EDITOR and reload it")
+        super().__init__(
+            "config", "Edit a config file in $EDITOR and reload it",
+            params=[Param("SECTION", completions=config_section_completions)],
+        )
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         from pico_chat import pico_cfg
         from pico_chat.ui.external_editor import open_editor, resolve_editor
+
+        if not args:
+            lines = [f"{section.ljust(10)} {pico_cfg.CONFIG_FILES[section]}"
+                     for section in pico_cfg.CONFIG_FILES]
+            ui.show_popup("config", "Sections:\n" + "\n".join(lines))
+            return
+
+        section = args[0].lower()
+        if section not in pico_cfg.CONFIG_FILES:
+            ui.chat_history_panel.add_message(
+                f"Unknown section '{section}'. Valid: "
+                + ", ".join(pico_cfg.CONFIG_FILES),
+                msg_type=SysMsgError(), title="config")
+            return
 
         if not resolve_editor():
             ui.chat_history_panel.add_message(
                 "No editor found. Set $VISUAL or $EDITOR.",
                 msg_type=SysMsgError(), title="config")
             return
-        path = pico_cfg.config.ensure_config_file()
+        path = pico_cfg.config.ensure_section_file(section)
         open_editor(ui, path)
         errors = pico_cfg.reload_config()
         if errors:
@@ -120,15 +137,19 @@ class EditCommand(Command):
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         from pathlib import Path
 
-        from pico_chat import pico_cfg
         from pico_chat.ui.external_editor import open_editor, resolve_editor
 
+        if not args:
+            ui.chat_history_panel.add_message(
+                "Usage: /edit <file>. For config files use /config <section>.",
+                msg_type=SysMsgError(), title="edit")
+            return
         if not resolve_editor():
             ui.chat_history_panel.add_message(
                 "No editor found. Set $VISUAL or $EDITOR.",
                 msg_type=SysMsgError(), title="edit")
             return
-        path = Path(args[0]).expanduser() if args else pico_cfg.config.ensure_config_file()
+        path = Path(args[0]).expanduser()
         open_editor(ui, path)
 
 

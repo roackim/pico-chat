@@ -10,7 +10,6 @@ from pico_chat.ui.tui.components.bars import ActionBar, ActionItem, BarStyle, St
 from pico_chat.ui.tui.components.input import InputComponent, LineInput, BoxInput
 from pico_chat.ui.tui.components.menu import SelectionMenu
 from pico_chat.ui.tui.components.markdown import MarkdownComponent
-from pico_chat.ui.tui.components.tab_view import TabItem, TabView
 
 __all__ = [
     'Component',
@@ -27,5 +26,4 @@ __all__ = [
     'LineInput', 'BoxInput',
     'SelectionMenu',
     'MarkdownComponent',
-    'TabItem', 'TabView',
 ]

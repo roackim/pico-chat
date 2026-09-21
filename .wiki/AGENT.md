@@ -79,4 +79,7 @@ Checklist:
 
 ## Skill Reference
 
-The `wiki` skill is defined at `.github/skills/wiki/SKILL.md`. Load it for the full update procedure and general rules.
+The wiki maintenance skills are defined under `.agents/skills/`:
+`auto-wiki-search` (read the wiki before grepping source) and
+`auto-wiki-update` (keep it in sync after code changes). Load them for the full
+procedure and general rules.

@@ -38,19 +38,19 @@ Pico is a terminal-based AI agent that connects to local (llama.cpp) or cloud (O
 
 The core reasoning loop:
 1. Build context (system prompt + conversation history + file tree)
-2. Send to LLM (`llm_server.py`)
-3. Stream response chunks (`chunks.py`)
-4. If tool calls present → check permissions → execute tools
-5. Append tool results to history → repeat from step 2 until no more tool calls
+2. Send to the active `Endpoint` (`endpoint.py`)
+3. Stream response events (`events.py`): `Token`/`Reasoning`/`ToolCall`/`Usage`
+4. If tool calls present → `PermissionRequest` → check permissions → execute tools → `ToolResult`
+5. Append tool results to history → repeat from step 2 until no more tool calls → `Done`
 
 ## Data Flow: User Message → Response
 
 ```
 User types → InputComponent
            → chatTUI.handle_submit()
-           → Harness.run_iteration()
-           → LLMServer.stream_chat()
-           → chunks yielded → UI renders streaming tokens
+           → Harness.chat()
+           → Endpoint.create_completion()
+           → events yielded → UI renders streaming tokens
            → tool call detected → PermissionGate checks the active Role policy
            → tool executed → result appended to history
            → next iteration until IDLE
@@ -58,7 +58,10 @@ User types → InputComponent
 
 ## Config
 
-`~/.config/pico-chat/config.toml` loaded by `pico_cfg.py`. Contains server definitions, UI preferences, and permission defaults. See [notes/config.md](./config.md).
+`~/.config/pico-chat/` — single-concern files (`ui.toml`, `context.toml`,
+`subagents.toml`, `debug.toml`, `styles.toml`, `servers.toml`), one role per
+file at `roles/<name>.toml`, and a disposable `state.toml`; loaded by
+`pico_cfg.py`. See [notes/config.md](./config.md).
 
 ## Key Design Decisions
 

@@ -29,19 +29,12 @@ pytest test/test_permissions.py
 | `test_dangerous_patterns.py` | Escalation from ALLOW→ASK for dangerous shell patterns |
 | `test_benign_dangerous_commands.py` | Safe usages of commands that superficially match dangerous patterns |
 | `test_permission_chain_policy.py` | Quote-aware chain operator detection and chain_policy enforcement |
-| `test_containerization.py` | bwrap (bubblewrap) sandboxing and command isolation |
 | `test_buffer.py` | Buffer/SubBuffer rendering (cell operations, ANSI clipping, text writing) |
 | `test_compaction.py` | Conversation history compaction (summarization via LLM) |
 | `test_context_builder.py` | Git repo detection, file tree building guardrails |
 | `test_patch_parser.py` | `parse_patch` format validation, `apply_patch` 3-mode cascade (exact, whitespace, indentation) |
-| `test_token_estimation.py` | Heuristic token counting (code ratio, language vs. prose) |
-| `test_token_estimation_samples.py` | Regression tests on real code/text samples |
 | `test_ui_permission_submit.py` | Input blocked while awaiting permission prompt |
 | `test_ollama_server.py` | Ollama backend adapter: `/api/tags` model discovery, context-window parsing, native chat response adaptation |
-
-## Notes on `test_containerization.py`
-
-Requires `bwrap` (bubblewrap) to be installed. Tests are skipped if not available.
 
 ## Notes on `test_compaction.py`
 

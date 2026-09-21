@@ -41,10 +41,6 @@ Dangerous pattern detection can **escalate** an `ALLOW` policy to `ASK` (never d
 
 `chain_policy` in the permissions profile controls how chained commands (`&&`, `||`, `;`, `|`) are handled. Behavior depends on the operators present and the policy for each segment.
 
-## Sandboxing (`test_containerization.py`)
-
-Commands can be sandboxed with `bwrap` (bubblewrap). Tests verify isolation behavior. This is optional and depends on bubblewrap being available on the system.
-
 ## Path Restrictions
 
 File read/write tools validate paths against the repo root. Operations outside the working directory are blocked or escalated to `ASK` depending on policy.
@@ -57,4 +53,3 @@ File read/write tools validate paths against the repo root. Operations outside t
 | `test_dangerous_patterns.py` | Escalation from ALLOW→ASK for dangerous patterns |
 | `test_benign_dangerous_commands.py` | Safe usages of potentially dangerous commands |
 | `test_permission_chain_policy.py` | Chain operator detection and chain_policy enforcement |
-| `test_containerization.py` | bwrap sandboxing isolation |

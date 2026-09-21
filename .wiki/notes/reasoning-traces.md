@@ -18,7 +18,7 @@ The streaming entry point is `Harness._stream_llm_response()` in `harness.py`. T
 reasoning = getattr(delta, "reasoning_content", None)
 if reasoning:
     full_reasoning += reasoning
-    yield chunks.Thinking(content=reasoning)
+    yield events.Reasoning(text=reasoning)
     continue
 ```
 
@@ -35,7 +35,7 @@ THINKING_TAGS = [
 ]
 ```
 
-When an opening tag is found in the content stream, content before the tag goes to `chunks.Content` (and is accumulated into `full_content`), while content *between* the tags goes to `chunks.Thinking` **and** is accumulated into `full_reasoning`. The tag delimiters themselves are consumed and discarded.
+When an opening tag is found in the content stream, content before the tag goes to `events.Token` (and is accumulated into `full_content`), while content *between* the tags goes to `events.Reasoning` **and** is accumulated into `full_reasoning`. The tag delimiters themselves are consumed and discarded.
 
 ---
 
@@ -102,5 +102,5 @@ The flag defaults to `false` for backward compatibility. Existing users are not 
 
 - [architecture.md](../notes/architecture.md) — High-level data flow
 - [config.md](../notes/config.md) — Configuration reference
-- `chunks.py` — Defines `Thinking` and `Content` chunk types
+- `events.py` — Defines the `Reasoning` and `Token` event types
 - `harness.py` — `_stream_llm_response()` and `chat()` methods

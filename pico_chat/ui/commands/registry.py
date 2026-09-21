@@ -49,13 +49,6 @@ from .server import (
     ServerRemoveCommand,
     ServerUseCommand,
 )
-from .tabs import (
-    TabCloseCommand,
-    TabCommand,
-    TabListCommand,
-    TabNewCommand,
-    TabSwitchCommand,
-)
 from .tools import ToolsCommand
 
 # Command Registry
@@ -79,7 +72,6 @@ COMMANDS: Dict[str, Command] = {
     "cd":           CdCommand(),
     "pwd":          PwdCommand(),
     "conversation": ConversationCommand(),
-    "tab":          TabCommand(),
 }
 
 
@@ -135,7 +127,5 @@ __all__ = [
     "DebugCommand", "DebugPanelCommand", "DebugGetContextCommand",
     "DebugLogCommand", "DebugSystemPromptCommand",
     "ConversationCommand", "ConversationExportCommand", "ConversationImportCommand",
-    "TabCommand", "TabNewCommand", "TabCloseCommand", "TabListCommand",
-    "TabSwitchCommand",
 ]
 

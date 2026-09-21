@@ -488,7 +488,7 @@ class Endpoint:
 
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "Endpoint":
-        """Build an endpoint from a ``pico.toml`` ``[servers.<name>]`` table."""
+        """Build an endpoint from a ``servers.toml`` ``[servers.<name>]`` table."""
         api_key = data.get("api_key", "")
         api_key_env = data.get("api_key_env")
         if api_key_env:
@@ -509,7 +509,7 @@ class Endpoint:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        """Serializable form for ``pico.toml`` (secrets stripped)."""
+        """Serializable form for ``servers.toml`` (secrets stripped)."""
         data: dict[str, Any] = {
             "type": self.type,
             "base_url": self._original_base_url,
@@ -1081,11 +1081,27 @@ class Endpoint:
                 return [ModelInfo(id=e) for e in enabled]
         catalog = response.json().get("data", [])
         by_id = {m.get("id"): m for m in catalog}
+
+        def _match(eid: str) -> dict:
+            if eid in by_id:
+                return by_id[eid]
+            # Accept a bare id (no provider namespace) by suffix match, so
+            # ``deepseek-v4-flash`` resolves ``deepseek/deepseek-v4-flash``.
+            # Prefer non-alias entries (ids not prefixed with ``~``).
+            suffix = "/" + eid
+            fallback = None
+            for cid, info in by_id.items():
+                if cid.endswith(suffix):
+                    if not cid.startswith("~"):
+                        return info
+                    fallback = fallback or info
+            return fallback or {}
+
         result = []
         for eid in enabled:
-            info = by_id.get(eid) or {}
+            info = _match(eid)
             result.append(ModelInfo(
-                id=eid,
+                id=info.get("id") or eid,
                 context_window=info.get("context_length"),
                 owned_by=info.get("owned_by"),
                 metadata=info,
@@ -1099,11 +1115,21 @@ class Endpoint:
                 timeout=self.timeout,
             )
             if response.status_code == 200:
-                for model in response.json().get("data", []):
-                    if model.get("id") == model_name:
-                        ctx = model.get("context_length")
-                        if ctx:
-                            return ctx
+                catalog = response.json().get("data", [])
+                suffix = "/" + model_name
+                fallback = None
+                for model in catalog:
+                    mid = model.get("id", "")
+                    if mid != model_name and not mid.endswith(suffix):
+                        continue
+                    ctx = model.get("context_length")
+                    if not ctx:
+                        continue
+                    if mid == model_name or not mid.startswith("~"):
+                        return ctx
+                    fallback = fallback or ctx
+                if fallback:
+                    return fallback
         raise RuntimeError("Could not determine context window from OpenRouter")
 
     # -- OpenAI / llama.cpp --------------------------------------------------

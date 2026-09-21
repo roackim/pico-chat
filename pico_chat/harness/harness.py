@@ -11,7 +11,7 @@ from pico_chat.harness.llm_status import AgentState
 from pico_chat.harness.debug import get_debug_stream
 from pico_chat.harness.context_builder import build_harness_context
 from pico_chat.harness.system_prompt import get_system_message
-from pico_chat.harness import chunks
+from pico_chat.harness import events
 from pico_chat.harness.endpoint import Endpoint, get_active_endpoint, get_endpoint
 from pico_chat.harness.permissions import PermissionGate
 from pico_chat.harness.thinking_parser import ThinkingTagParser, MetricsState, THINKING_TAGS
@@ -374,55 +374,6 @@ class Harness:
         self._file_list_cache_key = cache_key
         return entries
 
-    def estimate_context_usage(self) -> tuple[int, int, float]:
-        """
-        Estimate current context usage in tokens.
-        Returns: (current_tokens, max_tokens, percentage)
-        """
-        from pico_chat.harness.token_estimation import estimate_messages_tokens, estimate_tokens
-        
-        effective_history = self._get_effective_history()
-        
-        # Before any message the context is empty: start at 0. The system
-        # prompt is only sent alongside the first user message, so it is not
-        # counted until there is history to send.
-        if not effective_history:
-            max_tokens = self.endpoint._cached_context_window or 32768
-            return 0, max_tokens, 0.0
-        
-        # Check if the first message is a compaction marker
-        compacted_tokens = 0
-        if self._is_compaction_message(effective_history[0]):
-            # Extract original token count from compaction marker if available
-            content = effective_history[0].get("content", "")
-            import re
-            match = re.search(r"original_tokens=(\d+)", content)
-            if match:
-                compacted_tokens = int(match.group(1))
-        
-        # Estimate tokens for effective history (from latest compaction marker onward)
-        current_tokens = estimate_messages_tokens(effective_history)
-        
-        # If we have compacted history, add the original token count (subtracting the marker itself)
-        if compacted_tokens > 0:
-            # Subtract the compaction marker's tokens to avoid double-counting
-            marker_tokens = estimate_messages_tokens([effective_history[0]])
-            current_tokens = current_tokens - marker_tokens + compacted_tokens
-        
-        # Add system prompt estimation (system message is added during _build_messages).
-        # Include the active role's prompt so a role change (which swaps the
-        # system prompt) is reflected in the estimate.
-        role_prompt = getattr(getattr(self, "role", None), "prompt", "") or ""
-        system_estimate = estimate_tokens(self.project_context) + estimate_tokens(role_prompt) + 500
-        
-        current_tokens += system_estimate
-        
-        # Get max context from server's cached value (will be queried on first use)
-        max_tokens = self.endpoint._cached_context_window or 32768
-        
-        percentage = (current_tokens / max_tokens) * 100 if max_tokens > 0 else 0
-        return current_tokens, max_tokens, percentage
-
     async def compact_history(self) -> Dict[str, Any]:
         """Summarize effective history with one LLM call and insert compaction marker.
 
@@ -492,14 +443,9 @@ class Harness:
         if not summary_text:
             raise RuntimeError("Compaction failed: model returned empty summary")
 
-        # Estimate tokens in the original effective history to preserve context accounting
-        from pico_chat.harness.token_estimation import estimate_messages_tokens
-        original_tokens = estimate_messages_tokens(effective_history)
-
         compact_message = (
             f"{COMPACTION_MARKER_PREFIX}\n"
-            f"compacted_messages={len(effective_history)}\n"
-            f"original_tokens={original_tokens}\n\n"
+            f"compacted_messages={len(effective_history)}\n\n"
             f"{summary_text}"
         )
 
@@ -632,14 +578,13 @@ class Harness:
             })
         return calls
 
-    async def _stream_llm_response(self, messages: List[Dict[str, Any]]) -> AsyncGenerator[chunks.Chunk, None]:
+    async def _stream_llm_response(self, messages: List[Dict[str, Any]]) -> AsyncGenerator[events.Event, None]:
         """Stream LLM response and collect content/tool calls.
 
-        Yields: chunks.Chunk subclasses (Thinking, Content, ToolDraft, GenerationMetrics).
+        Yields: Reasoning, Token, ToolCall, Usage events.
         Sets: self._last_full_content, _last_full_reasoning, _last_tool_calls,
               _last_detected_thinking_tag.
         """
-        from pico_chat.harness.token_estimation import estimate_tokens
         from pico_chat import pico_cfg
 
         self.state = AgentState.THINKING
@@ -714,9 +659,8 @@ class Harness:
                 if self.state != AgentState.THINKING:
                     self.state = AgentState.THINKING
                 metrics.ensure_started()
-                metrics.add_tokens(reasoning, estimate_tokens)
                 self._current_reasoning += reasoning
-                yield chunks.Thinking(content=reasoning)
+                yield events.Reasoning(text=reasoning)
                 m = metrics.maybe_metrics(metrics_interval)
                 if m:
                     yield m
@@ -726,18 +670,17 @@ class Harness:
             content = delta.content
             if content:
                 metrics.ensure_started()
-                metrics.add_tokens(content, estimate_tokens)
 
                 for segment in parser.feed(content):
                     if segment.is_thinking:
                         if self.state != AgentState.THINKING:
                             self.state = AgentState.THINKING
                         self._current_reasoning += segment.text
-                        yield chunks.Thinking(content=segment.text)
+                        yield events.Reasoning(text=segment.text)
                     else:
                         if self.state != AgentState.ANSWERING:
                             self.state = AgentState.ANSWERING
-                        yield chunks.Content(content=segment.text)
+                        yield events.Token(text=segment.text)
                     m = metrics.maybe_metrics(metrics_interval)
                     if m:
                         yield m
@@ -786,10 +729,10 @@ class Harness:
 
                     tc_data = tool_calls_buffer[key]
                     tool_call_id = tc_data["id"] or f"idx_{tc_data['index']}"
-                    yield chunks.ToolDraft(
-                        tool_call_id=tool_call_id,
-                        tool_name=tc_data["function"]["name"],
-                        tool_args=tc_data["function"]["arguments"]
+                    yield events.ToolCall(
+                        id=tool_call_id,
+                        name=tc_data["function"]["name"],
+                        args=tc_data["function"]["arguments"]
                     )
 
         # Flush any remaining content buffer at end of stream
@@ -798,11 +741,11 @@ class Harness:
                 if self.state != AgentState.THINKING:
                     self.state = AgentState.THINKING
                 self._current_reasoning += segment.text
-                yield chunks.Thinking(content=segment.text)
+                yield events.Reasoning(text=segment.text)
             else:
                 if self.state != AgentState.ANSWERING:
                     self.state = AgentState.ANSWERING
-                yield chunks.Content(content=segment.text)
+                yield events.Token(text=segment.text)
 
         # Yield final metrics
         m = metrics.final_metrics()
@@ -841,11 +784,11 @@ class Harness:
         self, 
         tool_calls_list: List[Dict[str, Any]], 
         messages: List[Dict[str, Any]]
-    ) -> AsyncGenerator[chunks.Chunk, None]:
+    ) -> AsyncGenerator[events.Event, None]:
         """
         Execute all tool calls following the state machine flow.
-        
-        Yields: chunks.ToolStatusChange for each state transition
+
+        Yields PermissionRequest and ToolResult events.
         """
         self.state = AgentState.THINKING
         
@@ -862,12 +805,11 @@ class Harness:
             except json.JSONDecodeError:
                 # Invalid JSON - treat as error
                 error_msg = f"Invalid JSON arguments: {tool_args}"
-                yield chunks.ToolStatusChange(
-                    tool_call_id=tool_call_id,
-                    tool_name=tool_name,
-                    tool_args=tool_args,
-                    status=chunks.ToolStatus.ERROR,
-                    error=error_msg
+                yield events.ToolResult(
+                    id=tool_call_id,
+                    name=tool_name,
+                    outcome="error",
+                    output=error_msg,
                 )
                 self._add_message_to_history(
                     role="tool",
@@ -884,16 +826,15 @@ class Harness:
             permission_decision = self._check_tool_permission(tool_name, args)
             prompt = self._build_permission_prompt(tool_name, args)
             
-            # Emit permission request state
+            # Emit permission request (auto or user-facing)
             if permission_decision == "ask":
                 # Need user input
-                yield chunks.ToolStatusChange(
-                    tool_call_id=tool_call_id,
-                    tool_name=tool_name,
-                    tool_args=tool_args,
-                    status=chunks.ToolStatus.PERMISSION_REQUESTED,
-                    permission_prompt=prompt,
-                    auto_decision=False
+                yield events.PermissionRequest(
+                    id=tool_call_id,
+                    name=tool_name,
+                    args=tool_args,
+                    prompt=prompt,
+                    auto=False,
                 )
                 
                 # Wait for user response
@@ -902,31 +843,22 @@ class Harness:
             else:
                 # Auto-approve or auto-deny
                 approved = (permission_decision == "allow")
-                yield chunks.ToolStatusChange(
-                    tool_call_id=tool_call_id,
-                    tool_name=tool_name,
-                    tool_args=tool_args,
-                    status=chunks.ToolStatus.PERMISSION_REQUESTED,
-                    permission_prompt=prompt,
-                    auto_decision=True
+                yield events.PermissionRequest(
+                    id=tool_call_id,
+                    name=tool_name,
+                    args=tool_args,
+                    prompt=prompt,
+                    auto=True,
                 )
             
-            # STEP 2: Emit approval/denial
-            if approved:
-                yield chunks.ToolStatusChange(
-                    tool_call_id=tool_call_id,
-                    tool_name=tool_name,
-                    tool_args=tool_args,
-                    status=chunks.ToolStatus.APPROVED
-                )
-            else:
+            # STEP 2: Emit denial
+            if not approved:
                 denial_reason = "User denied" if permission_decision == "ask" else "Auto-denied by security policy"
-                yield chunks.ToolStatusChange(
-                    tool_call_id=tool_call_id,
-                    tool_name=tool_name,
-                    tool_args=tool_args,
-                    status=chunks.ToolStatus.DENIED,
-                    denial_reason=denial_reason
+                yield events.ToolResult(
+                    id=tool_call_id,
+                    name=tool_name,
+                    outcome="denied",
+                    output=denial_reason,
                 )
                 # Add to history and continue to next tool
                 # Make the denial message more explicit to help LLM understand what to do
@@ -945,12 +877,6 @@ class Harness:
                 continue
             
             # STEP 3: Execute tool
-            yield chunks.ToolStatusChange(
-                tool_call_id=tool_call_id,
-                tool_name=tool_name,
-                tool_args=tool_args,
-                status=chunks.ToolStatus.EXECUTING
-            )
             
             try:
                 # Execute the tool
@@ -979,12 +905,11 @@ class Harness:
                 # STEP 4: Success
                 self.debug_stream.log("TOOL_RESULT", {"call_id": tool_call_id, "result": result})
                 
-                yield chunks.ToolStatusChange(
-                    tool_call_id=tool_call_id,
-                    tool_name=tool_name,
-                    tool_args=tool_args,
-                    status=chunks.ToolStatus.COMPLETED,
-                    result=result
+                yield events.ToolResult(
+                    id=tool_call_id,
+                    name=tool_name,
+                    outcome="completed",
+                    output=result,
                 )
                 self._add_message_to_history(
                     role="tool",
@@ -1001,12 +926,11 @@ class Harness:
                 # STEP 4: Error
                 error_msg = str(e)
                 self.debug_stream.log("TOOL_ERROR", {"call_id": tool_call_id, "error": error_msg})
-                yield chunks.ToolStatusChange(
-                    tool_call_id=tool_call_id,
-                    tool_name=tool_name,
-                    tool_args=tool_args,
-                    status=chunks.ToolStatus.ERROR,
-                    error=error_msg
+                yield events.ToolResult(
+                    id=tool_call_id,
+                    name=tool_name,
+                    outcome="error",
+                    output=error_msg,
                 )
                 self._add_message_to_history(
                     role="tool",
@@ -1054,12 +978,11 @@ class Harness:
             except Exception as e:
                 logger.warning(f"Failed to query context window: {e}")
             
-            # Estimate context usage
+            # Context usage is exact only when the provider reports prompt
+            # tokens; otherwise there is nothing to show.
             try:
-                current_tokens, max_tokens, percentage = self.estimate_context_usage()
-                status["context_used"] = current_tokens
+                max_tokens = self.endpoint._cached_context_window or 0
                 status["context_max"] = max_tokens
-                status["context_percentage"] = percentage
                 if self._last_usage and self._last_usage.prompt_tokens is not None:
                     status["context_used"] = self._last_usage.prompt_tokens
                     status["context_percentage"] = (
@@ -1071,22 +994,17 @@ class Harness:
                 )
                 status["usage"] = self._last_usage
             except Exception as e:
-                logger.warning(f"Failed to estimate context usage: {e}")
+                logger.warning(f"Failed to read context usage: {e}")
         
         return status
 
-    async def _auto_wait_subagents(self) -> AsyncGenerator[chunks.Chunk, None]:
-        """Auto-wait for any background subagents still running after the LLM loop ends."""
+    async def _auto_wait_subagents(self) -> None:
+        """Wait for any background subagents still running after the LLM loop ends."""
         if not self._pending_subagents:
             return
 
         pending = list(self._pending_subagents)
-        yield chunks.SubagentsWaiting(count=len(pending))
-
-        futures_map = {p["future"]: p for p in pending}
-        remaining = set(futures_map.keys())
-        completed = 0
-        aborted = 0
+        remaining = {p["future"] for p in pending}
 
         abort_task = asyncio.create_task(self._abort_subagents_event.wait())
         try:
@@ -1099,37 +1017,26 @@ class Harness:
                 if abort_task in done:
                     for f in remaining:
                         f.cancel()
-                    aborted = len(remaining)
                     remaining.clear()
                     break
 
-                for f in done - {abort_task}:
-                    remaining.discard(f)
-                    p = futures_map[f]
-                    try:
-                        result = f.result()
-                    except Exception as e:
-                        result = f"[error: {e}]"
-                    yield chunks.SubagentResult(index=p["index"], task=p["task"], result=result)
-                    completed += 1
+                remaining -= done - {abort_task}
         finally:
             abort_task.cancel()
             self._abort_subagents_event.clear()
             self._pending_subagents.clear()
 
-        yield chunks.SubagentsDone(completed=completed, aborted=aborted)
-
-    async def chat(self, user_input: str) -> AsyncGenerator[chunks.Chunk, None]:
+    async def chat(self, user_input: str) -> AsyncGenerator[events.Event, None]:
         """
         Main chat loop orchestrator.
         Handles: User Input -> LLM -> [Tool Calls -> Tool Execution -> LLM]* -> Final Answer
-        
-        Yields: chunks.Chunk objects - see chunks.py for all chunk types.
+
+        Yields: events from ``pico_chat.harness.events``.
         """
         messages = await self._build_messages(user_input)
         
         # Emit user message start with its ID
-        yield chunks.MessageStart(message_id=self._last_user_message_id, role="user")
+        yield events.Start(message_id=self._last_user_message_id, role="user")
 
         # Agent Loop (Handle Multi-step Tool Calls)
         while True:
@@ -1138,7 +1045,7 @@ class Harness:
                 
                 # Generate assistant message ID upfront so UI can track it
                 assistant_msg_id = str(uuid.uuid4())
-                yield chunks.MessageStart(message_id=assistant_msg_id, role="assistant")
+                yield events.Start(message_id=assistant_msg_id, role="assistant")
                 
                 # Log request about to be sent
                 logger.debug(f"Calling LLM with {len(messages)} messages in context")
@@ -1238,13 +1145,17 @@ class Harness:
                 logger.debug("Tool execution complete - continuing loop")
 
             except Exception as e:
-                raise e
+                logger.error("Generation failed: %s", e, exc_info=True)
+                self.state = AgentState.IDLE
+                yield events.Error(message=str(e))
+                return
             
         self.state = AgentState.IDLE
 
         # Auto-wait for any background subagents still running
-        async for chunk in self._auto_wait_subagents():
-            yield chunk
+        await self._auto_wait_subagents()
+
+        yield events.Done()
 
 _harness = None
 
