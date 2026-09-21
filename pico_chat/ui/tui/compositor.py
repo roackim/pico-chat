@@ -289,8 +289,9 @@ class Compositor:
                         overlay.render(self.buffer)
                     self.buffer.clear_clip()
         
-        # Use Buffer's built-in render method
-        output = self.buffer.render()
+        # Use Buffer's built-in render method. Wrap the frame in synchronized
+        # output so supporting terminals present it atomically.
+        output = ANSI.SYNC_START + self.buffer.render() + ANSI.SYNC_END
         sys.stdout.write(output)
         sys.stdout.flush()
 

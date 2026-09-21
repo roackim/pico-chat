@@ -20,6 +20,11 @@ class ANSI:
     CLEAR_SCREEN = "\033[2J"
     MOVE_HOME = "\033[H"
     RESET = "\033[0m"
+    # Synchronized output (DEC private mode 2026): terminals that support it
+    # present the frame atomically, removing tearing and perceived lag.
+    # Terminals that don't support it ignore the sequence.
+    SYNC_START = "\033[?2026h"
+    SYNC_END = "\033[?2026l"
 
     @staticmethod
     def move_to(row: int, col: int) -> str:

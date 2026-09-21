@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional, Any, List
 from pico_chat.ui.tui.components.base import Component
-from pico_chat.ui.tui.buffer import Buffer, SubBuffer
+from pico_chat.ui.tui.buffer import Buffer, SubBuffer, Cell
 from pico_chat.ui.tui.events import MouseEvent
 from pico_chat.ui.tui.msg_types import MsgAction
 
@@ -10,6 +10,72 @@ from pico_chat.ui.tui.colors import theme
 
 # Braille spinner frames for animating in-progress thinking.
 SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+
+class SubBufferCellsProxy:
+    """Proxy for cell access that translates absolute coordinates to SubBuffer-local."""
+
+    def __init__(self, cells, x_offset, y_offset):
+        self.cells = cells
+        self.x_offset = x_offset
+        self.y_offset = y_offset
+        self._rows = {}
+
+    def __getitem__(self, y):
+        local_y = y - self.y_offset
+        if 0 <= local_y < len(self.cells):
+            row = self._rows.get(local_y)
+            if row is None:
+                row = SubBufferRowProxy(self.cells[local_y], self.x_offset)
+                self._rows[local_y] = row
+            return row
+        return []
+
+
+class SubBufferRowProxy:
+    """Proxy for row access that translates x coordinates."""
+
+    def __init__(self, row, x_offset):
+        self.row = row
+        self.x_offset = x_offset
+
+    def __getitem__(self, x):
+        local_x = x - self.x_offset
+        if 0 <= local_x < len(self.row):
+            return self.row[local_x]
+        return Cell()
+
+
+class SubBufferWrapper:
+    """Buffer-compatible wrapper that redirects to a SubBuffer with coordinate translation."""
+
+    def __init__(self, subbuffer, x_offset, y_offset):
+        self.subbuffer = subbuffer
+        self.x_offset = x_offset
+        self.y_offset = y_offset
+        self.width = subbuffer.width
+        self.height = subbuffer.height
+        self._cells_proxy = SubBufferCellsProxy(subbuffer.cells, x_offset, y_offset)
+
+    @property
+    def cells(self):
+        return self._cells_proxy
+
+    def set(self, x, y, char, fg=None, bg=None, bold=False, reverse=False):
+        self.subbuffer.set(x - self.x_offset, y - self.y_offset, char, fg, bg, bold, reverse)
+
+    def write_str(self, x, y, s, fg=None, bg=None, bold=False, reverse=False, max_width=None):
+        self.subbuffer.write_str(x - self.x_offset, y - self.y_offset, s, fg, bg, bold, reverse, max_width)
+
+    def fill(self, x, y, width, height, char=" ", fg=None, bg=None):
+        self.subbuffer.fill(x - self.x_offset, y - self.y_offset, width, height, char, fg, bg)
+
+    def set_clip(self, x, y, w, h):
+        self.subbuffer.set_clip(x - self.x_offset, y - self.y_offset, w, h)
+
+    def clear_clip(self):
+        self.subbuffer.clear_clip()
+
 
 class Box(Component):
     def __init__(self, child: Component, title: str = "", id: Optional[str] = None, bg=None, fg=None, focused: bool = False, actions: Optional[List] = None, parent_msg=None, compact_when_unfocused: bool = False, padding: int = 0, padding_y: Optional[int] = None, focus_in_padding: bool = False, focus_color=None, thread_mode: bool = False, gutter: str = "▸", gutter_color=None, lines_only: bool = False, title_provider: Optional[callable] = None, color_provider: Optional[callable] = None, content_pad_left: int = 0, content_pad_right: int = 0, full_height_gutter: bool = False):
@@ -591,73 +657,7 @@ class Box(Component):
                                  bg=bg, max_width=max(0, self.width - 2))
 
     def _create_subbuffer_wrapper(self):
-        """Create a Buffer-compatible wrapper that redirects to SubBuffer with coordinate translation."""
-        class SubBufferWrapper:
-            def __init__(self, subbuffer, x_offset, y_offset):
-                self.subbuffer = subbuffer
-                self.x_offset = x_offset
-                self.y_offset = y_offset
-                self.width = subbuffer.width
-                self.height = subbuffer.height
-            
-            @property
-            def cells(self):
-                """Expose subbuffer cells - note: direct indexing uses absolute coords and needs translation."""
-                # Return a proxy object that translates coordinates
-                return SubBufferCellsProxy(self.subbuffer.cells, self.x_offset, self.y_offset)
-            
-            def set(self, x, y, char, fg=None, bg=None, bold=False, reverse=False):
-                # Translate from absolute coordinates to SubBuffer-local coordinates
-                local_x = x - self.x_offset
-                local_y = y - self.y_offset
-                self.subbuffer.set(local_x, local_y, char, fg, bg, bold, reverse)
-            
-            def write_str(self, x, y, s, fg=None, bg=None, bold=False, reverse=False, max_width=None):
-                local_x = x - self.x_offset
-                local_y = y - self.y_offset
-                self.subbuffer.write_str(local_x, local_y, s, fg, bg, bold, reverse, max_width)
-            
-            def fill(self, x, y, width, height, char=" ", fg=None, bg=None):
-                local_x = x - self.x_offset
-                local_y = y - self.y_offset
-                self.subbuffer.fill(local_x, local_y, width, height, char, fg, bg)
-            
-            def set_clip(self, x, y, w, h):
-                self.subbuffer.set_clip(x - self.x_offset, y - self.y_offset, w, h)
-            
-            def clear_clip(self):
-                self.subbuffer.clear_clip()
-        
-        class SubBufferCellsProxy:
-            """Proxy for cell access that translates absolute coordinates to SubBuffer-local."""
-            def __init__(self, cells, x_offset, y_offset):
-                self.cells = cells
-                self.x_offset = x_offset
-                self.y_offset = y_offset
-            
-            def __getitem__(self, y):
-                """Return a row proxy that translates x coordinates."""
-                local_y = y - self.y_offset
-                if 0 <= local_y < len(self.cells):
-                    return SubBufferRowProxy(self.cells[local_y], self.x_offset)
-                # Return empty row if out of bounds
-                return []
-        
-        class SubBufferRowProxy:
-            """Proxy for row access that translates x coordinates."""
-            def __init__(self, row, x_offset):
-                self.row = row
-                self.x_offset = x_offset
-            
-            def __getitem__(self, x):
-                """Get cell at translated x coordinate."""
-                local_x = x - self.x_offset
-                if 0 <= local_x < len(self.row):
-                    return self.row[local_x]
-                # Return empty cell if out of bounds
-                from pico_chat.ui.tui.buffer import Cell
-                return Cell()
-        
+        """Create a Buffer-compatible wrapper redirecting to this Box's SubBuffer."""
         return SubBufferWrapper(self.subbuffer, self.x, self.y)
 
     def handle_input(self, event: Any) -> bool:

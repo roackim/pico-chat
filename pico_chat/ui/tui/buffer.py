@@ -7,7 +7,11 @@ from pico_chat.ui.tui.colors import RGB, theme
 from pico_chat.ui.tui.terminal import ANSI
 from pico_chat import pico_cfg
 
-@dataclass
+# Compiled once: write_str runs for every text fragment on every repaint.
+_ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+
+@dataclass(slots=True)
 class Cell:
     char: str = " "
     fg: Optional[tuple[int, int, int]] = None
@@ -72,9 +76,8 @@ class Buffer:
         horizontal space in the grid.
         Properly handles emoji and wide character widths using wcwidth.
         """
-        # Regex for standard ANSI escape sequences
-        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-        
+        ansi_escape = _ANSI_ESCAPE
+
         curr_x = x
         pending_ansi = "" # Accumulates ANSI sequences to be attached to the next character
         i = 0
@@ -144,9 +147,16 @@ class Buffer:
                 self.set(curr_x, y, pending_ansi + " ", fg, bg, bold, reverse, underline)
 
     def clear(self):
-        for y in range(self.height):
-            for x in range(self.width):
-                self.cells[y][x] = Cell(bg=self.default_bg)
+        bg = self.default_bg
+        for row in self.cells:
+            for cell in row:
+                cell.char = " "
+                cell.fg = None
+                cell.bg = bg
+                cell.bold = False
+                cell.reverse = False
+                cell.underline = False
+                cell.is_wide_char_continuation = False
 
     def clear_rect(self, x: int, y: int, width: int, height: int):
         """Clear a rectangular area to default background."""
@@ -155,9 +165,19 @@ class Buffer:
         end_x = min(self.width, x + width)
         end_y = min(self.height, y + height)
 
+        bg = self.default_bg
+        cells = self.cells
         for iy in range(start_y, end_y):
+            row = cells[iy]
             for ix in range(start_x, end_x):
-                self.cells[iy][ix] = Cell(bg=self.default_bg)
+                cell = row[ix]
+                cell.char = " "
+                cell.fg = None
+                cell.bg = bg
+                cell.bold = False
+                cell.reverse = False
+                cell.underline = False
+                cell.is_wide_char_continuation = False
 
     def render(self) -> str:
         """
@@ -330,8 +350,8 @@ class SubBuffer:
         Write a string to the buffer starting at (x, y).
         ANSI-aware and handles wide characters (emoji) properly.
         """
-        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-        
+        ansi_escape = _ANSI_ESCAPE
+
         curr_x = x
         pending_ansi = ""
         i = 0
@@ -392,9 +412,16 @@ class SubBuffer:
     
     def clear(self):
         """Clear all cells in the buffer."""
-        for y in range(self.height):
-            for x in range(self.width):
-                self.cells[y][x] = Cell(bg=self.default_bg)
+        bg = self.default_bg
+        for row in self.cells:
+            for cell in row:
+                cell.char = " "
+                cell.fg = None
+                cell.bg = bg
+                cell.bold = False
+                cell.reverse = False
+                cell.underline = False
+                cell.is_wide_char_continuation = False
     
     def grow(self, new_height: int):
         """
@@ -436,7 +463,7 @@ class SubBuffer:
         blit_y = y_offset if y_offset is not None else self.y
 
         # Visible rect in target coordinates = intersection of:
-        # target bounds, blit bounds, and optional clip rect.
+        # target bounds, blit bounds, optional clip rect, and target's own clip.
         visible_x0 = max(0, blit_x)
         visible_y0 = max(0, blit_y)
         visible_x1 = min(target.width, blit_x + self.width)
@@ -444,6 +471,14 @@ class SubBuffer:
 
         if clip_rect is not None:
             cx, cy, cw, ch = clip_rect
+            visible_x0 = max(visible_x0, cx)
+            visible_y0 = max(visible_y0, cy)
+            visible_x1 = min(visible_x1, cx + cw)
+            visible_y1 = min(visible_y1, cy + ch)
+
+        target_clip = getattr(target, "clip_rect", None)
+        if target_clip is not None:
+            cx, cy, cw, ch = target_clip
             visible_x0 = max(visible_x0, cx)
             visible_y0 = max(visible_y0, cy)
             visible_x1 = min(visible_x1, cx + cw)
@@ -458,18 +493,29 @@ class SubBuffer:
         src_start_y = visible_y0 - blit_y
         src_end_y = visible_y1 - blit_y
 
+        # Fast path: a real Buffer exposes plain lists, so whole row slices can
+        # be replaced at once. Copy cells into freshly-built Cells: they must
+        # never be shared with this SubBuffer, because the panel mutates target
+        # cells in place for selection highlighting, which would corrupt the
+        # cached surface. Non-Buffer targets (a parent Box's SubBufferWrapper)
+        # have no assignable cell grid and use the generic path.
+        if isinstance(target, Buffer):
+            target_cells = target.cells
+            for src_y in range(src_start_y, src_end_y):
+                target_y = blit_y + src_y
+                src_row = self.cells[src_y]
+                target_cells[target_y][visible_x0:visible_x1] = [
+                    Cell(c.char, c.fg, c.bg, c.bold, c.reverse, c.underline,
+                         c.is_wide_char_continuation)
+                    for c in src_row[src_start_x:src_end_x]
+                ]
+            return
+
         for src_y in range(src_start_y, src_end_y):
             target_y = blit_y + src_y
-            row_slice = self.cells[src_y][src_start_x:src_end_x]
+            src_row = self.cells[src_y]
             target_x = visible_x0
-            for cell in row_slice:
-                target.set(
-                    target_x,
-                    target_y,
-                    cell.char,
-                    fg=cell.fg,
-                    bg=cell.bg,
-                    bold=cell.bold,
-                    reverse=cell.reverse,
-                )
+            for cell in src_row[src_start_x:src_end_x]:
+                target.set(target_x, target_y, cell.char, fg=cell.fg, bg=cell.bg,
+                           bold=cell.bold, reverse=cell.reverse)
                 target_x += 1
