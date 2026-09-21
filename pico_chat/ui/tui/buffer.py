@@ -422,6 +422,30 @@ class SubBuffer:
                 cell.reverse = False
                 cell.underline = False
                 cell.is_wide_char_continuation = False
+
+    def clear_region(self, x: int, y: int, width: int, height: int):
+        """Reset a rectangular region in place (used for incremental raster)."""
+        bg = self.default_bg
+        end_x = min(self.width, x + width)
+        end_y = min(self.height, y + height)
+        for iy in range(max(0, y), end_y):
+            row = self.cells[iy]
+            for ix in range(max(0, x), end_x):
+                cell = row[ix]
+                cell.char = " "
+                cell.fg = None
+                cell.bg = bg
+                cell.bold = False
+                cell.reverse = False
+                cell.underline = False
+                cell.is_wide_char_continuation = False
+
+    def shrink(self, new_height: int):
+        """Shrink the buffer from the bottom (inverse of :meth:`grow`)."""
+        if new_height < self.height:
+            del self.cells[new_height:]
+            self.height = new_height
+            self.has_changed = True
     
     def grow(self, new_height: int):
         """

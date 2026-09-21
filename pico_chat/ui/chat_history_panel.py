@@ -1,5 +1,6 @@
 """Chat history panel for the Pico-Chat TUI."""
 
+import bisect
 import time
 from dataclasses import dataclass
 from typing import Optional, Any
@@ -62,9 +63,6 @@ class ChatHistoryPanel(TextComponent):
         self.activity_sink = None
         self._selection: Optional[SelectionState] = None  # Current text selection
         self._selection_dragging: bool = False  # Whether user is actively dragging to select
-        # Cache for line map (invalidated on scroll, focus change, message add/remove)
-        self._line_map_cache: Optional[list] = None
-        self._line_map_cache_key: Optional[tuple] = None  # (auto_scroll, anchored_start_y, msg_count)
         self._message_height_cache: dict[tuple[int, int, int], int] = {}
         
         # Action click feedback: flash an action with inverted colors briefly
@@ -300,37 +298,25 @@ class ChatHistoryPanel(TextComponent):
             self.on_action(message, action)
 
     def _cached_hit_test(self, screen_y: int) -> tuple[Optional[int], Optional[int]]:
-        """Map a screen y coordinate to (msg_index, local_y) using a cached line map.
-        
+        """Map a screen y coordinate to (msg_index, local_y) using the row index.
+
         Returns (None, None) if the y is on a gap or outside content.
         """
-        # Build cache key from scroll state + message count
-        if self.auto_scroll or self.anchored_start_y is None:
-            anchor = None
-        else:
-            anchor = self.anchored_start_y
-        cache_key = (self.auto_scroll, anchor, len(self.messages))
-        
-        if self._line_map_cache_key != cache_key or self._line_map_cache is None:
-            self._line_map_cache = self._build_line_map()
-            self._line_map_cache_key = cache_key
-        
-        line_map = self._line_map_cache
-        total_height = len(line_map)
-        max_scroll = max(0, total_height - self.height)
-        
+        starts, ends, total = self._row_index()
+        max_scroll = max(0, total - self.height)
+
         if self.auto_scroll or self.anchored_start_y is None:
             start_y = max_scroll
         else:
             start_y = self.anchored_start_y
-        
+
         virtual_y = (screen_y - self.y) + start_y
-        if 0 <= virtual_y < len(line_map):
-            entry = line_map[virtual_y]
-            if entry is not None:
-                msg_index, local_y = entry
-                return msg_index, local_y
-        return None, None
+        if virtual_y < 0 or virtual_y >= total:
+            return None, None
+        index = bisect.bisect_right(starts, virtual_y) - 1
+        if index < 0 or virtual_y >= ends[index]:
+            return None, None  # inside the gap after a message
+        return index, virtual_y - starts[index]
 
     def _screen_to_display_col(self, msg, box, content_y: int, screen_x: int) -> Optional[int]:
         """Convert a screen x coordinate to a display column within a message's wrapped content.
@@ -459,13 +445,6 @@ class ChatHistoryPanel(TextComponent):
         self._message_height_cache.clear()
         self._request_repaint()
 
-    def _get_all_rows(self) -> int:
-        """Calculate total number of rows across all message boxes."""
-        total = 0
-        for msg in self.messages:
-            total += self._get_message_height(msg)
-        return total
-
     def _get_message_height(self, msg: Message) -> int:
         """Return a cached message height for the current width and content revision."""
         width = self.width - msg.left_margin - msg.right_margin
@@ -476,70 +455,35 @@ class ChatHistoryPanel(TextComponent):
             height = msg.get_component().get_preferred_height(width)
             self._message_height_cache[key] = height
         return height
-    
-    def _build_line_map(self) -> list[Optional[tuple[int, int]]]:
-        """Build a map of virtual y-coordinates to message references.
-        
-        Returns:
-            A list where each index represents a virtual y-coordinate (relative to the top
-            of the content area), and the value is either:
-            - None for gap lines
-            - (msg_index, local_y) tuple for lines belonging to a message,
-              where local_y is the y-offset within that message's box
+
+    def _row_index(self) -> tuple[list[int], list[int], int]:
+        """Virtual-y layout for all messages: (starts, ends, total).
+
+        ``starts[i]``/``ends[i]`` are the virtual y of message *i*'s top and
+        bottom (the inter-message gap is included at the start of each message
+        after the first). ``total`` is the full virtual height.
+
+        This is O(number of messages) using the height cache, replacing the
+        old O(total rows) line-map that was materialized per scroll event.
         """
-        line_map = []
         gap = pico_cfg.config.ui_msg_v_margin
-        
+        starts: list[int] = []
+        ends: list[int] = []
+        y = 0
         for i, msg in enumerate(self.messages):
-            # Add gap lines before this message (skip for the first message)
             if i > 0:
-                for _ in range(gap):
-                    line_map.append(None)
-            
-            # Add lines for this message
-            child = msg.get_component()
-            child_w = self.width - msg.left_margin - msg.right_margin
-            child_h = self._get_message_height(msg)
-            
-            for local_y in range(child_h):
-                line_map.append((i, local_y))
-        
-        return line_map
-    
+                y += gap
+            starts.append(y)
+            y += self._get_message_height(msg)
+            ends.append(y)
+        return starts, ends, y
+
     def _get_message_virtual_y_range(self, msg_index: int) -> tuple[int, int]:
-        """Get the virtual y-coordinate range for a message.
-        
-        Args:
-            msg_index: Index of the message
-            
-        Returns:
-            Tuple of (start_y, end_y) in virtual coordinates (exclusive end)
-        """
+        """Get the virtual y-coordinate range for a message (exclusive end)."""
         if msg_index < 0 or msg_index >= len(self.messages):
             return (0, 0)
-        
-        gap = pico_cfg.config.ui_msg_v_margin
-        virtual_y = 0
-        
-        for i, msg in enumerate(self.messages):
-            # Add gap before this message (skip for the first message)
-            if i > 0:
-                virtual_y += gap
-            
-            if i == msg_index:
-                # Found our message
-                child = msg.get_component()
-                child_w = self.width - msg.left_margin - msg.right_margin
-                child_h = self._get_message_height(msg)
-                return (virtual_y, virtual_y + child_h)
-            
-            # Move past this message
-            child = msg.get_component()
-            child_w = self.width - msg.left_margin - msg.right_margin
-            child_h = self._get_message_height(msg)
-            virtual_y += child_h
-        
-        return (0, 0)
+        starts, ends, _ = self._row_index()
+        return (starts[msg_index], ends[msg_index])
     
     def _scroll_to_show_message(self, msg_index: int, prefer_top: bool = True):
         """Scroll to ensure a message is visible.
@@ -563,8 +507,7 @@ class ChatHistoryPanel(TextComponent):
         # last message is streaming and total_height/max_scroll keep growing). Using a
         # stale scroll_offset yields a wrong start_y, which makes the "already visible"
         # check pass incorrectly and the view fail to follow the newly focused message.
-        line_map = self._build_line_map()
-        total_height = len(line_map)
+        _, _, total_height = self._row_index()
         max_scroll = max(0, total_height - self.height)
         if self.auto_scroll or self.anchored_start_y is None:
             start_y = max_scroll
@@ -640,14 +583,12 @@ class ChatHistoryPanel(TextComponent):
         # Clear background first (to prevent artifacts from previous frames/scrolls)
         buffer.fill(self.x, self.y, self.width, self.height, " ", bg=theme.get_bg())
 
-        # Avoid building full per-line map on every render (expensive for long streams)
-        total_height = self._get_all_rows()
-        
-        gap = pico_cfg.config.ui_msg_v_margin
-        
+        # Virtual layout: (starts, ends, total). O(messages), no per-row map.
+        starts, ends, total_height = self._row_index()
+
         # Base offset (how much we need to scroll to see the bottom)
         max_scroll = max(0, total_height - self.height)
-        
+
         # If auto-scroll is on, we always show the bottom
         if self.auto_scroll:
             self.scroll_offset = 0
@@ -659,34 +600,28 @@ class ChatHistoryPanel(TextComponent):
             if self.anchored_start_y is None:
                 # First time entering manual scroll mode, anchor current position
                 self.anchored_start_y = max_scroll - self.scroll_offset
-            
+
             # Clamp anchored position to valid range
             self.anchored_start_y = max(0, min(max_scroll, self.anchored_start_y))
             start_y = self.anchored_start_y
-            
+
             # Keep scroll_offset in sync for compatibility
             self.scroll_offset = max_scroll - start_y
-        
-        # Reset any previous layout of the container children to prevent stale rendering
-        curr_y = self.y - start_y
+
         viewport_top = self.y
         viewport_bottom = self.y + self.height
-        for i, msg in enumerate(self.messages):
-            # Add gap before this message (skip for the first message)
-            if i > 0:
-                curr_y += gap
-            
+
+        # Only touch messages intersecting the viewport. ``ends`` and ``starts``
+        # are strictly increasing, so bisect to the visible window instead of
+        # walking every message (the bottom-up early-exit, generalized).
+        first = bisect.bisect_right(ends, start_y)
+        last = min(len(self.messages), bisect.bisect_left(starts, start_y + self.height))
+        for i in range(first, last):
+            msg = self.messages[i]
             child = msg.get_component()
             child_w = self.width - msg.left_margin - msg.right_margin
-            child_h = self._get_message_height(msg)
-
-            child_y = curr_y
-            child_bottom = child_y + child_h
-
-            # Skip fully offscreen messages (vertical culling)
-            if child_bottom <= viewport_top or child_y >= viewport_bottom:
-                curr_y += child_h
-                continue
+            child_h = ends[i] - starts[i]
+            child_y = self.y - start_y + starts[i]
 
             child.set_layout(self.x + msg.left_margin, child_y, child_w, child_h)
             child.render(buffer)
@@ -694,7 +629,7 @@ class ChatHistoryPanel(TextComponent):
             # Selected message: draw a bright selection bar in the left margin.
             if i == self.focused_message_index:
                 top = max(child_y, viewport_top)
-                bottom = min(child_bottom, viewport_bottom)
+                bottom = min(child_y + child_h, viewport_bottom)
                 for row_y in range(top, bottom):
                     buffer.write_str(self.x, row_y, "▌", fg=theme.FOCUSED,
                                      bg=theme.get_bg(), max_width=1)
@@ -703,9 +638,7 @@ class ChatHistoryPanel(TextComponent):
             sel = self._selection
             if sel is not None and sel.msg is msg:
                 self._render_selection(buffer, msg, child, child_y, child_w, child_h)
-            
-            curr_y += child_h
-            
+
         # Clear clipping region
         if hasattr(buffer, 'clear_clip'):
             buffer.clear_clip()
@@ -936,8 +869,7 @@ class ChatHistoryPanel(TextComponent):
                 
                 # Button 64 is scroll up, 65 is scroll down
                 if event.button == 64: # Scroll Up
-                    line_map = self._build_line_map()
-                    total_height = len(line_map)
+                    _, _, total_height = self._row_index()
                     max_scroll = max(0, total_height - self.height)
                     
                     # Get current start_y
@@ -952,15 +884,11 @@ class ChatHistoryPanel(TextComponent):
                     self.anchored_start_y = new_start_y
                     self.scroll_offset = max_scroll - new_start_y
                     self.auto_scroll = False # Scrolling up disables auto-scroll
-                    # Invalidate cache on scroll
-                    self._line_map_cache = None
-                    self._line_map_cache_key = None
                     self._request_repaint()
                     return True
                     
                 elif event.button == 65: # Scroll Down
-                    line_map = self._build_line_map()
-                    total_height = len(line_map)
+                    _, _, total_height = self._row_index()
                     max_scroll = max(0, total_height - self.height)
                     
                     # Get current start_y
@@ -979,9 +907,6 @@ class ChatHistoryPanel(TextComponent):
                     if self.scroll_offset == 0:
                         self.auto_scroll = True
                         self.anchored_start_y = None
-                    # Invalidate cache on scroll
-                    self._line_map_cache = None
-                    self._line_map_cache_key = None
                     self._request_repaint()
                     return True
                     
@@ -1055,8 +980,6 @@ class ChatHistoryPanel(TextComponent):
                 if self.focused_message_index >= len(self.messages):
                     self.focused_message_index = None
 
-        self._line_map_cache = None
-        self._line_map_cache_key = None
         self._request_repaint()
         
         return new_message
@@ -1073,8 +996,6 @@ class ChatHistoryPanel(TextComponent):
                     self.messages[self.focused_message_index].set_focused(True)
             self._notify_selection_changed()
             self._message_height_cache.clear()
-            self._line_map_cache = None
-            self._line_map_cache_key = None
             self._request_repaint()
 
     def remove_message(self, message: Message):
@@ -1118,8 +1039,6 @@ class ChatHistoryPanel(TextComponent):
             # Remove the message
             self.messages.pop(index)
             self._message_height_cache.clear()
-            self._line_map_cache = None
-            self._line_map_cache_key = None
             
             # Update focus state after deletion
             if (self.focused_message_index is not None
@@ -1215,8 +1134,6 @@ class ChatHistoryPanel(TextComponent):
         self._selection = None
         self._selection_dragging = False
         self._message_height_cache.clear()
-        self._line_map_cache = None
-        self._line_map_cache_key = None
         self.scroll_offset = 0
         self.auto_scroll = True
         self.anchored_start_y = None

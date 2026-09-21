@@ -153,6 +153,12 @@ class BlockParser:
     def parse(self, text: str) -> List[Block]:
         blocks: List[Block] = []
         lines = text.split("\n")
+        # A trailing newline does not start a new (empty) line; drop the phantom
+        # element so "a\n\n" parses as [paragraph, blank] rather than
+        # [paragraph, blank, blank]. Keeps incremental prefix parsing identical
+        # to a full-document parse.
+        if len(lines) > 1 and lines[-1] == "" and text.endswith("\n"):
+            lines.pop()
         i = 0
         in_code_block = False
         code_fence = ""  # the opening fence (``` or ~~~) optionally with lang
@@ -504,8 +510,13 @@ class Markdown:
         self._block_parser = BlockParser()
         self._inline_parser = InlineParser()
 
-    def parse(self, text: str) -> List[List[StyledSegment]]:
-        """Return a list of lines; each line is a list of StyledSegment."""
+    def parse(self, text: str, strip_trailing: bool = True) -> List[List[StyledSegment]]:
+        """Return a list of lines; each line is a list of StyledSegment.
+
+        ``strip_trailing`` removes trailing blank lines (the default for a
+        complete document). Incremental append parsing passes ``False`` for the
+        stable prefix so its separating blank line is retained.
+        """
         if not text:
             return []
 
@@ -531,8 +542,9 @@ class Markdown:
             i += 1
 
         # Strip trailing empty lines
-        while result and not result[-1]:
-            result.pop()
+        if strip_trailing:
+            while result and not result[-1]:
+                result.pop()
 
         return result
 
@@ -670,11 +682,39 @@ class Markdown:
 # MarkdownComponent — TUI component
 # ---------------------------------------------------------------------------
 
+def _last_stable_blank(text: str) -> int:
+    """Char offset just after the last blank line that can never be changed by
+    appending more text (i.e. not inside an open fenced code block).
+
+    Returns 0 when there is no such boundary, in which case callers must fall
+    back to a full re-parse. A boundary must be followed by real content, so a
+    document ending on a blank line yields the previous internal boundary.
+    """
+    lines = text.split("\n")
+    fence_parity = 0
+    last_blank = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            fence_parity ^= 1
+            continue
+        if stripped == "" and fence_parity == 0:
+            last_blank = i
+    if last_blank is None:
+        return 0
+    # The boundary is only useful if real content follows it.
+    if not any(line.strip() for line in lines[last_blank + 1:]):
+        return 0
+    return sum(len(line) + 1 for line in lines[:last_blank + 1])
+
+
 class MarkdownComponent(Component):
     """Renders markdown text as styled segments with segment-aware wrapping.
 
     Parses on every `update()` call, making it suitable for live streaming
-    where the full text changes between calls.
+    where the full text changes between calls. Append-only updates take an
+    incremental path: everything up to the last stable block boundary is
+    re-used, and only the pending tail is re-parsed/wrapped.
     """
 
     def __init__(self, text: str = "", fg=None, bg=None, id: Optional[str] = None, left_pad: int = 0):
@@ -687,14 +727,85 @@ class MarkdownComponent(Component):
         self._wrapped_lines: List[List[StyledSegment]] = []
         self._last_wrap_width = -1
         self.left_pad = left_pad
+        # Incremental state: rendered stable prefix and the first visual line
+        # that may have changed since the last render (None = full redraw).
+        self._prefix_src = ""
+        self._prefix_parsed: List[List[StyledSegment]] = []
+        self._prefix_wrapped: List[List[StyledSegment]] = []
+        self._prefix_width = -1
+        self._dirty_from_line: Optional[int] = None
         self._do_parse_and_wrap(text)
 
-    def update(self, text: str):
-        """Update with new markdown text. Re-parses and re-wraps."""
+    def take_dirty_from_line(self) -> Optional[int]:
+        """Return (and clear) the first changed visual line since last render.
+
+        ``None`` means the caller must do a full redraw.
+        """
+        dirty = self._dirty_from_line
+        self._dirty_from_line = None
+        return dirty
+
+    def update(self, text: str, append: bool = False):
+        """Update with new markdown text.
+
+        When ``append`` is true and ``text`` simply extends the previous raw
+        text, only the tail after the last stable boundary is re-parsed.
+        """
+        old_text = self._raw_text
+        eff = self._effective_wrap_width()
+
+        if append and eff > 0 and text.startswith(old_text) and old_text != text:
+            boundary = _last_stable_blank(old_text)
+            if boundary > 0 and boundary < len(text):
+                self._raw_text = text
+                self._update_incremental(text, boundary, eff)
+                self.mark_changed()
+                return
+
         self._raw_text = text
         self._last_wrap_width = -1  # Force re-wrap
         self._do_parse_and_wrap(text)
+        self._dirty_from_line = None
         self.mark_changed()
+
+    def _update_incremental(self, text: str, boundary: int, eff: int):
+        suffix = text[boundary:]
+        suffix_parsed = self._md.parse(suffix, strip_trailing=True)
+        # If the appended tail renders to nothing (e.g. it only opened a code
+        # fence), the stable prefix's trailing blank becomes document-trailing
+        # and a full parse would strip it. Rare: just fall back.
+        if not any(suffix_parsed):
+            self._do_parse_and_wrap(text)
+            self._dirty_from_line = None
+            return
+
+        prefix = text[:boundary]
+        if prefix != self._prefix_src or eff != self._prefix_width:
+            self._prefix_parsed = self._md.parse(prefix, strip_trailing=False)
+            self._prefix_wrapped = self._wrap_all(self._prefix_parsed, eff)
+            self._prefix_src = prefix
+            self._prefix_width = eff
+
+        combined = self._prefix_parsed + suffix_parsed
+        # Mirror the full-document trailing-blank strip.
+        while combined and not combined[-1]:
+            combined.pop()
+        if len(combined) < len(self._prefix_parsed):
+            # The strip reached into the cached prefix; reparse fully.
+            self._do_parse_and_wrap(text)
+            self._dirty_from_line = None
+            return
+
+        suffix_final = combined[len(self._prefix_parsed):]
+        self._parsed_lines = combined
+        self._wrapped_lines = self._prefix_wrapped + self._wrap_all(suffix_final, eff)
+        self._last_wrap_width = eff
+
+        dirty = len(self._prefix_wrapped)
+        if self._dirty_from_line is None:
+            self._dirty_from_line = dirty
+        else:
+            self._dirty_from_line = min(self._dirty_from_line, dirty)
 
     def _effective_wrap_width(self) -> int:
         """Width available for content after left padding."""
@@ -709,6 +820,11 @@ class MarkdownComponent(Component):
             self._last_wrap_width = eff
         else:
             self._wrapped_lines = self._parsed_lines
+        # A full parse invalidates any incremental prefix cache.
+        self._prefix_src = ""
+        self._prefix_parsed = []
+        self._prefix_wrapped = []
+        self._prefix_width = -1
 
     def set_layout(self, x: int, y: int, width: int, height: int):
         old_width = self.width
@@ -908,9 +1024,19 @@ class MarkdownComponent(Component):
         default_fg = self.fg if self.fg is not None else theme.DEFAULT
         default_bg = self.bg if self.bg is not None else theme.get_bg()
 
-        for y, line in enumerate(lines):
-            if y >= self.height:
-                break
+        # Restrict to the buffer's clip band (set by Box for tail rastering) so
+        # we don't walk lines that cannot be seen.
+        first_y = 0
+        last_y = min(len(lines), self.height)
+        clip = getattr(buffer, "clip_rect", None)
+        if clip is not None:
+            clip_top = clip[1]
+            clip_bottom = clip[1] + clip[3]
+            first_y = max(first_y, clip_top - self.y)
+            last_y = min(last_y, clip_bottom - self.y)
+
+        for y in range(first_y, last_y):
+            line = lines[y]
 
             # Special case: HR sentinel
             if len(line) == 1 and line[0].text == "hr":

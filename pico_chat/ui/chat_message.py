@@ -358,11 +358,13 @@ class Message:
         
         return "\n".join(lines)
     
-    def reformat(self, max_width: int) -> str:
+    def reformat(self, max_width: int, append: bool = False) -> str:
         """Reformat the message with a new maximum width.
 
         Args:
             max_width: New maximum width for line wrapping
+            append: True when the text was only extended (streaming); enables
+                the incremental parse/render fast path.
 
         Returns:
             The newly formatted text (plain-text fallback for markdown)
@@ -372,7 +374,7 @@ class Message:
 
         if self._is_markdown():
             # MarkdownComponent handles wrapping internally via set_layout / width
-            self.component.update(self.base_text)
+            self.component.update(self.base_text, append=append)
             self.box.mark_changed()
             return self.base_text
         else:
@@ -403,7 +405,7 @@ class Message:
         if not self.base_text:
             text = text.lstrip()
         self.base_text += text
-        self.reformat(self.max_width)
+        self.reformat(self.max_width, append=True)
     
     def rebuild_tool_display(self):
         """Rebuild tool message display text based on current metadata and show_output state."""

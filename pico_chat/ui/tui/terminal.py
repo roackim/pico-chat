@@ -159,7 +159,9 @@ class Terminal:
             return data.decode('utf-8', errors='replace')
 
     def get_input(self) -> Optional[KeyEvent | MouseEvent | PasteEvent]:
-        # Non-blocking read
+        # Non-blocking read. Note: stdin/stdout usually share the same tty open
+        # file description, so O_NONBLOCK must be restored before anything else
+        # writes to stdout (a persistent flag breaks cleanup/suspend).
         flags = fcntl.fcntl(self.fd, fcntl.F_GETFL)
         fcntl.fcntl(self.fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
         try:

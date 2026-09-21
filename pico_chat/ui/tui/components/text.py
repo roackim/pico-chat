@@ -29,8 +29,17 @@ class TextComponent(Component):
         start_line = 0
         if self.auto_scroll_bottom and len(lines) > self.height:
             start_line = len(lines) - self.height
-        
-        for i in range(start_line, min(len(lines), start_line + self.height)):
+
+        end_line = min(len(lines), start_line + self.height)
+        # Restrict to the buffer's clip band (set by Box for tail rastering).
+        clip = getattr(buffer, "clip_rect", None)
+        if clip is not None:
+            clip_top = clip[1] - self.y
+            clip_bottom = clip[1] + clip[3] - self.y
+            start_line = max(start_line, clip_top)
+            end_line = min(end_line, clip_bottom)
+
+        for i in range(start_line, end_line):
             line_index = i - start_line
             buffer.write_str(self.x, self.y + line_index, lines[i], fg=self.fg, bg=self.bg, max_width=self.width)
 

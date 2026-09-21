@@ -55,6 +55,7 @@ class SubBufferWrapper:
         self.y_offset = y_offset
         self.width = subbuffer.width
         self.height = subbuffer.height
+        self.clip_rect = None
         self._cells_proxy = SubBufferCellsProxy(subbuffer.cells, x_offset, y_offset)
 
     @property
@@ -71,9 +72,13 @@ class SubBufferWrapper:
         self.subbuffer.fill(x - self.x_offset, y - self.y_offset, width, height, char, fg, bg)
 
     def set_clip(self, x, y, w, h):
+        # Keep the clip in absolute coordinates (so children can compare against
+        # their own x/y) while the subbuffer gets local coordinates.
+        self.clip_rect = (x, y, w, h)
         self.subbuffer.set_clip(x - self.x_offset, y - self.y_offset, w, h)
 
     def clear_clip(self):
+        self.clip_rect = None
         self.subbuffer.clear_clip()
 
 
@@ -116,6 +121,8 @@ class Box(Component):
         
         # SubBuffer for efficient rendering
         self.subbuffer: Optional[SubBuffer] = None
+        self._sub_valid = False  # True once the SubBuffer holds a full frame
+        self._grew_from: Optional[int] = None  # pre-growth height of the SubBuffer
         self._last_size = (0, 0)  # Track size changes
 
         # Optional in-place editor (replaces child rendering while active)
@@ -239,9 +246,20 @@ class Box(Component):
         if size_changed:
             if self.subbuffer is None:
                 self.subbuffer = SubBuffer(width, height)
-            elif width != self.subbuffer.width or height != self.subbuffer.height:
-                # Size changed - recreate SubBuffer (grow not applicable here)
+                self._sub_valid = False
+            elif width != self.subbuffer.width:
+                # Width change rewraps content: full rebuild.
                 self.subbuffer = SubBuffer(width, height)
+                self._sub_valid = False
+            elif height < self.subbuffer.height:
+                self.subbuffer.shrink(height)
+            elif height > self.subbuffer.height:
+                # Append-only growth keeps the already-rasterized prefix, but
+                # remember the pre-growth height: if the dirty tail starts below
+                # it (e.g. a shrink+grow), the re-added rows lack a gutter and
+                # need a full redraw.
+                self._grew_from = self.subbuffer.height
+                self.subbuffer.grow(height)
             self.mark_changed()
             self._last_size = (width, height)
         
@@ -323,9 +341,22 @@ class Box(Component):
             self.mark_changed()
         
         # Phase 1: Render to SubBuffer if changed
-        if self.subbuffer.has_changed:
-            self._render_to_subbuffer()
+        if self.subbuffer.has_changed or not self._sub_valid:
+            dirty_from = None
+            if self._sub_valid:
+                target = self.inline_editor if self.inline_editor is not None else self.child
+                taker = getattr(target, "take_dirty_from_line", None)
+                if callable(taker):
+                    dirty_from = taker()
+                # Growth from a lower height means the tail may start above the
+                # re-added rows; a full redraw is required then.
+                if (dirty_from is not None and self._grew_from is not None
+                        and dirty_from > self._grew_from):
+                    dirty_from = None
+            self._render_to_subbuffer(dirty_from)
             self.subbuffer.has_changed = False
+            self._sub_valid = True
+            self._grew_from = None
         
         # Phase 2: Blit SubBuffer to main buffer (always happens, position updates are free!)
         self.subbuffer.blit(buffer, clip_rect=getattr(buffer, 'clip_rect', None))
@@ -344,8 +375,15 @@ class Box(Component):
         if hasattr(cursor_target, 'render_cursor'):
             cursor_target.render_cursor(buffer)
     
-    def _render_to_subbuffer(self):
-        """Render box content to its SubBuffer using local coordinates (0,0)."""
+    def _render_to_subbuffer(self, dirty_from: Optional[int] = None):
+        """Render box content to its SubBuffer using local coordinates (0,0).
+
+        ``dirty_from`` is the first content row that changed (append-only tail
+        raster); other modes ignore it and redraw fully.
+        """
+        # A previous incremental render may have left a clip on the shared
+        # SubBuffer; never draw the frame's clear/gutter under it.
+        self.subbuffer.clear_clip()
         # Get values from parent_msg if available, otherwise use direct attributes
         if self.parent_msg:
             title = self.parent_msg.title
@@ -360,7 +398,7 @@ class Box(Component):
         
         # Thread mode: borderless chat-thread rendering with a role gutter
         if self.thread_mode:
-            self._render_thread_to_subbuffer()
+            self._render_thread_to_subbuffer(dirty_from)
             return
 
         # Compact mode: render without borders when unfocused
@@ -574,12 +612,16 @@ class Box(Component):
         temp_buffer = self._create_subbuffer_wrapper()
         self.child.render(temp_buffer)
 
-    def _render_thread_to_subbuffer(self):
+    def _render_thread_to_subbuffer(self, dirty_from: Optional[int] = None):
         """Render in thread mode: borderless content with a role gutter.
 
         The gutter (e.g. ▸ for assistant, ❯ for user) is drawn in the first
         column, colored by the message's frame color. Content flows to the
         right. When focused, actions render on the last row.
+
+        When ``dirty_from`` is set, only rows from that content line down are
+        cleared and re-rasterized (append-only streaming); the unchanged prefix
+        is kept from the previous frame.
         """
         bg = self.bg
         fg = self.gutter_color or self.fg
@@ -591,29 +633,49 @@ class Box(Component):
             gutter, dynamic_color = self.parent_msg.dynamic_gutter()
             fg = dynamic_color or fg
 
-        self.subbuffer.clear()
+        # Collapsed messages and non-thread modes always redraw fully.
+        collapsed = self.parent_msg is not None and getattr(self.parent_msg, "collapsed", False)
+        incremental = (
+            dirty_from is not None
+            and dirty_from > 0
+            and not collapsed
+            and dirty_from < self.height
+        )
+
+        if incremental:
+            start = dirty_from
+            self.subbuffer.clear_region(0, start, self.width, self.height - start)
+        else:
+            start = 0
+            self.subbuffer.clear()
 
         # Fill background
         if bg:
-            for iy in range(self.height):
+            for iy in range(start, self.height):
                 for ix in range(self.width):
                     self.subbuffer.set(ix, iy, " ", bg=bg)
 
         # Draw the role gutter in the first column. User/pico messages use a
         # full-height prefix bar (every row); status gutters stay on row 0.
         if gutter and self.width > 0:
-            rows = range(self.height) if self.full_height_gutter else (0,)
+            if self.full_height_gutter:
+                rows = range(start, self.height)
+            else:
+                rows = (0,) if start == 0 else ()
             for row in rows:
                 self.subbuffer.set(0, row, gutter, fg=fg, bg=bg)
 
         # Collapsed messages (e.g. thinking folded by default) render a single
         # summary line instead of the full content.
-        if self.parent_msg is not None and getattr(self.parent_msg, "collapsed", False):
+        if collapsed:
             self._render_collapsed_line()
             return
 
-        # Render child content (no border offset).
+        # Render child content (no border offset). For incremental raster, clip
+        # to the dirty band so the child skips unchanged lines.
         temp_buffer = self._create_subbuffer_wrapper()
+        if incremental:
+            temp_buffer.set_clip(self.x, self.y + start, self.width, self.height - start)
         self.child.render(temp_buffer)
 
         # Actions on a dedicated row below the content when focused. This row

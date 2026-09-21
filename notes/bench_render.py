@@ -1,0 +1,160 @@
+"""Benchmark the chat render/scroll path on a real conversation (convo.json).
+
+Scenarios (each per raster size, width x height in terminal cells):
+  steady    - no content change; boxes reuse cached SubBuffers (blit + serialize)
+  rerender  - every box's SubBuffer invalidated each frame (streaming repaint)
+  scroll    - one wheel notch into the history, then a full frame
+  hittest   - one click hit-test (line-map lookup), then a full frame
+
+Reported per scenario (median):
+  component ms - ChatHistoryPanel.render() into the Buffer
+  serialize ms - Buffer.render() -> ANSI string (bytes written to the pty)
+  ansi bytes   - size of that string
+
+Usage:
+  python notes/bench_render.py [--sizes 80x24,120x40,200x50,300x70] [--iters 200]
+                               [--save notes/bench_baseline.json]
+                               [--load notes/bench_baseline.json]
+"""
+
+import argparse
+import json
+import os
+import statistics
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from pico_chat.ui.chat_history_panel import ChatHistoryPanel
+from pico_chat.ui.tui.buffer import Buffer
+from pico_chat.ui.tui.events import MouseEvent
+from pico_chat.ui.tui.msg_types import PicoMsg, UserMsg
+
+CONVO = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "convo.json")
+
+SCENARIOS = ("steady", "rerender", "scroll", "hittest")
+
+
+def build_panel(width, height, repeat=1):
+    panel = ChatHistoryPanel(max_width=width)
+    history = json.load(open(CONVO, encoding="utf-8"))["history"] * max(1, repeat)
+    for entry in history:
+        role = entry.get("role")
+        content = entry.get("content") or ""
+        if role == "user":
+            msg = panel.add_message(content, msg_type=UserMsg())
+        elif role == "assistant":
+            msg = panel.add_message(content, msg_type=PicoMsg())
+        else:
+            continue
+        msg.finalize()
+    panel.set_layout(0, 0, width, height)
+    return panel
+
+
+def _invalidate(panel):
+    for msg in panel.messages:
+        box = msg.box
+        if box.subbuffer is not None:
+            box.subbuffer.mark_changed()
+
+
+def bench(width, height, iterations, scenario, repeat=1):
+    panel = build_panel(width, height, repeat)
+    buf = Buffer(width, height)
+    panel.set_layout(0, 0, width, height)
+
+    def one_frame():
+        t0 = time.perf_counter()
+        panel.render(buf)
+        t1 = time.perf_counter()
+        out = buf.render()
+        t2 = time.perf_counter()
+        return t1 - t0, t2 - t1, len(out)
+
+    for _ in range(5):
+        one_frame()
+
+    frames = []
+    out_len = 0
+    for i in range(iterations):
+        if scenario == "rerender":
+            _invalidate(panel)
+        elif scenario == "scroll":
+            button = 64 if i % 2 == 0 else 65
+            panel.handle_input(MouseEvent(width // 2, height // 2, button, True, False, 1))
+        elif scenario == "hittest":
+            panel._cached_hit_test(panel.y + (i % max(1, height)))
+        comp, ser, out_len = one_frame()
+        frames.append((comp, ser))
+
+    comp = statistics.median(f[0] for f in frames) * 1000
+    ser = statistics.median(f[1] for f in frames) * 1000
+    return comp, ser, out_len
+
+
+def parse_sizes(text):
+    sizes = []
+    for part in text.split(","):
+        w, _, h = part.partition("x")
+        sizes.append((int(w), int(h)))
+    return sizes
+
+
+def run(sizes, iterations, repeat=1):
+    results = {"repeat": repeat}
+    for (w, h) in sizes:
+        key = f"{w}x{h}"
+        results[key] = {}
+        for scenario in SCENARIOS:
+            comp, ser, out_len = bench(w, h, iterations, scenario, repeat)
+            results[key][scenario] = {
+                "component_ms": round(comp, 3),
+                "serialize_ms": round(ser, 3),
+                "total_ms": round(comp + ser, 3),
+                "ansi_bytes": out_len,
+            }
+    return results
+
+
+def print_table(results, baseline=None):
+    print(f"(convo.json repeated x{results.get('repeat', 1)})")
+    for key, scenarios in results.items():
+        if key == "repeat":
+            continue
+        print(f"\n== raster {key} ==")
+        header = f"{'scenario':<10} {'component ms':>12} {'serialize ms':>13} {'total ms':>9} {'ANSI bytes':>11}"
+        if baseline and key in baseline:
+            header += f" {'total Δ':>10}"
+        print(header)
+        for scenario, r in scenarios.items():
+            line = f"{scenario:<10} {r['component_ms']:>12.3f} {r['serialize_ms']:>13.3f} {r['total_ms']:>9.3f} {r['ansi_bytes']:>11}"
+            if baseline and key in baseline and scenario in baseline[key]:
+                base = baseline[key][scenario]["total_ms"]
+                pct = (r["total_ms"] - base) / base * 100 if base else 0.0
+                line += f" {pct:>+9.1f}%"
+            print(line)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--sizes", default="80x24,120x40,200x50,300x70")
+    ap.add_argument("--iters", type=int, default=200)
+    ap.add_argument("--repeat", type=int, default=1)
+    ap.add_argument("--save", default=None)
+    ap.add_argument("--load", default=None)
+    args = ap.parse_args()
+
+    sizes = parse_sizes(args.sizes)
+    results = run(sizes, args.iters, args.repeat)
+    baseline = json.load(open(args.load, encoding="utf-8")) if args.load else None
+    print_table(results, baseline)
+    if args.save:
+        with open(args.save, "w", encoding="utf-8") as fh:
+            json.dump(results, fh, indent=2)
+        print(f"\nsaved: {args.save}")
+
+
+if __name__ == "__main__":
+    main()
