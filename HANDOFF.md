@@ -1,210 +1,264 @@
 # Pico-Chat — Session Handoff / Resume Doc
 
-**Purpose:** read this first to resume work after the previous conversation is
-gone. It records where the repo is, what was already done, the agreed
-simplification plan, open questions, and the exact next step.
+**Purpose:** read this first to resume work. It records the repo state, the
+agreed simplification plan, what is already implemented, decisions, gotchas,
+and the exact next step.
 
-**Branch:** `cleanup`  •  **Working tree:** clean except this file and
-`SIMPLIFICATION.md` (both untracked)  •  **Date written:** 2026-09-17
-
-**Canonical plan:** `SIMPLIFICATION.md` (untracked — commit it). This file
-summarizes it and adds session state.
+- **Branch:** `cleanup`
+- **Working tree:** dirty — R2 + R4 + R5 are implemented and **not committed**
+  (the user commits manually)
+- **Last updated:** 2026-09-21
+- **Canonical plan:** `SIMPLIFICATION.md` (R1–R11 + decisions)
 
 ---
 
 ## 1. TL;DR
 
-Two bodies of work:
+The simplification plan is well underway. Delivered so far:
 
-1. **Committed refactor** (Sections B & C of `refactor.todo`) + a `/model`
-   correctness fix. All done, all tests green.
-2. **In-progress simplification plan** (this doc + `SIMPLIFICATION.md`):
-   move all configuration into files, delete the settings/form/tab UI, collapse
-   the endpoint model, unify the streaming event protocol. **Agreed in
-   principle; not started.** Blocked on the user answering P1–P6 (section 6).
+1. **R4** — config loader: `pico.toml` (intent) + `state.toml` (disposable) +
+   `roles/<name>.toml`; validation with reported errors; `/reload`.
+2. **R2** — one `Endpoint` type; deleted the
+   `LLMServerConfig` / `llm_server.py` / `server_service.py` split.
+3. **File-based config editing** — `/config`, `/edit`, `/roles edit`,
+   `/server edit` shell out to `$VISUAL`/`$EDITOR` (TUI suspends/resumes).
+4. **Roles folder** — one file per role, with a commented example; the old
+   `roles.toml` was migrated into `roles/*.toml`.
+5. **Config templates** — missing `pico.toml` / roles example are created with
+   fully commented documented templates.
+6. **R9 guard test** — no `harness/` → `ui/` imports
+   (`test/test_core_ui_boundary.py`).
+7. **R5** — deleted the authoring UI: settings tab/screen/pages/panel, role
+   editor, `/settings` + `/permissions` commands, `openrouter_settings`, and
+   the whole form stack. See §6.
 
-**Next action:** get P1–P6 answers, then start **R4 (config loader +
-validation + project overrides + `/reload`)**.
+**Suite: 511 passing** (down from 652: ~141 tests removed with the form stack).
+`compileall` and `vulture --min-confidence 80` clean. 53 test files.
+
+**Next action:** **R1** (one event protocol) or **R6** (remove tabs). R5 already
+removed the settings tab, so R6 only has the debug panel + conversation tabs
+left. See §6.
 
 ---
 
-## 2. How to run things
+## 2. Environment & commands
+
+Pixi env, Python 3.14. Run tests with the env python directly:
 
 ```bash
-# tests (632 passing)
-.pixi/envs/default/bin/python -m pytest test/ -q
-# or: pixi run tests
-
-# dead-code check (currently clean at 80 confidence)
-.pixi/envs/default/bin/python -m vulture pico_chat --min-confidence 80
-
-# compile check
+.pixi/envs/default/bin/python -m pytest test/ -q          # 511 passing
 .pixi/envs/default/bin/python -m compileall -q pico_chat
+.pixi/envs/default/bin/python -m vulture pico_chat --min-confidence 80
 ```
 
-Environment is pixi (`pixi.lock`, `.pixi/envs/default`), Python 3.14.
+There is no lint/typecheck configured beyond the above.
 
 ---
 
-## 3. Repo state after the committed refactor
+## 3. Configuration model (R4)
 
-Relevant commits on `cleanup`:
+All user-level; **no project-local overrides** (decided P1). Override the
+directory with `PICO_CONFIG_DIR`.
+
+| Path | Role |
+|---|---|
+| `~/.config/pico-chat/pico.toml` | Hand-edited intent (servers, ui, context, subagents, debug, styles). |
+| `~/.config/pico-chat/state.toml` | Machine-written, disposable: `last_server`, `active_model`, `[last_model]`, `[model_catalog]`. Safe to delete. |
+| `~/.config/pico-chat/roles/<name>.toml` | One role per file. Body is the role, file name is the name. |
+
+**Loader** (`pico_chat/pico_cfg.py`):
+- Validates unknown sections/keys and types into `config.load_errors`; invalid
+  values keep defaults, valid ones still apply. `reload_config()` re-reads.
+- Flat attribute surface kept (`pico_cfg.config.<attr>`), so call sites did
+  not move. Nested sections map to flat attrs via `_UI_SPEC`, `_CONTEXT_SPEC`,
+  `_SUBAGENTS_SPEC`, `_DEBUG_SPEC`.
+- `save_server` → `pico.toml`. `save_active_model` / `save_model_selection` /
+  `save_model_catalog` → `state.toml`.
+- `remove_server`, `set_active_server`, `ensure_config_file` live here.
+- `DEFAULT_PICO_TOML` and `DEFAULT_ROLE_TOML` are the commented templates.
+- `test/test_config_commands.py` covers the command-level config flows.
+- `test/test_config_loader.py` covers validation/fallback.
+
+**Roles** (`pico_chat/harness/roles.py`):
+- `_ROLES_DIR` (module-level, from `pico_cfg.get_roles_dir()`).
+- Files whose stem starts with `_` or `.` are ignored (`_example.toml`).
+- `disabled = true` hides a role; used as a tombstone when a built-in is
+  deleted. A file overrides a built-in of the same name.
+- Built-ins: `default`, `reviewer`, `researcher`; plus `scaffolder()` used by
+  subagents. `list_roles` / `load_role` / `save_role` / `rename_role` /
+  `delete_role` / `duplicate_role`.
+- The old `~/.config/pico-chat/roles.toml` is **no longer read**; its roles
+  were migrated into `roles/*.toml`. The file is left on disk.
+
+**Apply changes with `/reload`** (or `/config`, which reloads on editor exit).
+
+---
+
+## 4. Endpoint model (R2)
+
+`pico_chat/harness/endpoint.py`:
+
+- `Endpoint` — **one concrete type** holding connection config *and* live
+  transport (httpx client, caches, selected model, connection state).
+  No ABC/subclasses. Differences handled by internal branches:
+  - `llamacpp` — `/models[0]`, context via `/props`, single model (cannot honor
+    a per-request model; `supports_model_selection` is False).
+  - `ollama` — native `/api/tags`, `/api/show`, native `/api/chat` (retains
+    usage counters).
+  - `openrouter` — enabled-models allowlist, per-model provider routing.
+  - `openai` — configured model + known context window table.
+- `Endpoint.from_dict(name, data)` reads a `[servers.<name>]` table and resolves
+  `api_key_env`. `to_dict()` strips secrets.
+- `ModelInfo`, `ConnectionDiagnosis`, `.local`/proxy helpers also live here.
+- Factories: `get_active_endpoint()`, `get_endpoint(name)`, `default_endpoint()`.
+- `Harness.endpoint` is an `Endpoint` (`self.server` no longer exists).
+  `Harness.switch_server(endpoint)` / `switch_model(model)`.
+
+**Deleted:** `harness/llm_server.py`, `harness/llm_server_config.py`,
+`harness/server_service.py`.
+
+Model selection is **live discovery**; `state.toml`'s `model_catalog` is only a
+completion/offline cache.
+
+---
+
+## 5. Commands & editing
+
+Registered in `ui/commands/registry.py` (20 commands):
 
 ```
-bdce55f fixup! Fixed model server issue
-6385214 Fixed model server issue
-549083d Section B and C
-bc7007a Phase A and ~B of refactor / cleanup
+/help /clear /compact /reload /config /edit
+/server list|use|edit|info|remove|diagnose
+/model list|<id>|<server>:<id>
+/roles list|show|use|edit|duplicate|rename|delete
+/openrouter balance /conversation /tab
+/debug /tools /status /pwd /cd /stop /resume /exit
 ```
 
-### Section C — unified domain model
-- **New `pico_chat/harness/permissions.py`** is the single "may I run this?"
-  decision point. Deleted `security.py`, `tool_permissions.py`,
-  `permission_gate.py` (merged into it).
-- `Role` (`harness/roles.py`) is the single source of truth. Removed
-  `Role.from_permission_profile` / `to_permission_profile`.
-- Deleted `ui/profile_editor_model.py`, `test_profile_editor_model.py`, and the
-  `permission-profiles.toml` store.
-- `/permissions` and the settings tab now share
-  `ui/settings_pages.build_roles_fields`.
-
-### Section B — unified tool registry
-- **Deleted `harness/tool_wrappers.py`.** `harness/tools.py` now has a `@tool`
-  decorator registry (`ToolDefinition` / `ToolContext` / `RegisteredTool`).
-  `run` is registered under key `run_command` with LLM name `run`.
-- Public factories kept for tests: `RunTool`, `SearchWebTool`, `SearchWikiTool`,
-  `SubagentTool`, `WaitForSubagentsTool`.
-- Input modules (`coordinate_mapper`, `cursor_renderer`, `scroll_manager`,
-  `input_handlers`) audited and confirmed live.
-
-### `/model` fixes
-- Status bar (`ui/app.py`) shows `_cached_model_name` (the model actually sent).
-- `/model <model>` (`ui/commands/models.py`) refreshes discovery live and
-  refuses to switch to a server that does not list the model.
-- `get_server_config_by_name` applies the per-server model selection
-  (`harness/llm_server_config.py`).
-- Stale catalogs pruned (server removal, `all_models`, `resolve_model_servers`,
-  OpenRouter `set_enabled_models` invalidation) in `harness/server_service.py`.
-- OpenRouter settings page now actually persists and rebuilds the live server
-  (`ui/openrouter_settings.py`; the save callback was previously discarded).
-- Single-model endpoints (llama.cpp) reconcile requested vs served model
-  (`harness/llm_server.py`, `supports_model_selection`).
-- Regression tests: `test/test_model_selection.py` (6 tests).
-
-### `refactor.todo` status
-- Sections A and B: done.
-- Section C: done except "retire the command allowlist" (deferred by decision —
-  keeps current allowlist behavior). Section D's typed-permission-result item is
-  done.
-- Section G has a checked sub-item for the `/model` fixes; the larger
-  server/model redesign is open but is **superseded by this simplification plan**.
+- **Editor**: `ui/external_editor.py` resolves `$VISUAL` → `$EDITOR` →
+  nano/vim/vi, and `open_editor(ui, path)` suspends the TUI
+  (`Terminal.suspend`/`resume` in `ui/tui/terminal.py`) then restores it.
+- `/config` opens `pico.toml` and reloads; `/edit [file]` opens any file;
+  `/server edit` opens `pico.toml`; `/roles edit [name]` opens
+  `roles/<name>.toml` (materializing the current policy if absent) or
+  `_example.toml` with no name.
+- `/server` and `/model` no longer use forms or `ServerService`.
 
 ---
 
-## 4. Codebase shape (why simplification is the ask)
+## 6. What remains
 
-LOC by area (25.5k total):
+Ordered roughly by the plan; each phase should end with fewer files.
 
-| Area | LOC | Share |
-|---|---:|---:|
-| `ui/tui/` core + components + input | 11,425 | 44.7% |
-| `harness/` | 7,274 | 28.5% |
-| `ui/` app | 4,702 | 18.4% |
-| `ui/commands/` | 1,650 | 6.5% |
-| root | 488 | 1.9% |
-
-Largest files: `ui/app.py` 1511, `harness/tools.py` 1477,
-`ui/tui/components/form.py` 1330, `ui/chat_history_panel.py` 1272,
-`harness/harness.py` 1264, `harness/llm_server.py` 1195,
-`ui/tui/components/markdown.py` 942, `harness/server_service.py` 809,
-`harness/permissions.py` 807.
-
-The product essence: stream from an endpoint, run approved tools, render a
-transcript. Everything else is a setting or a plugin.
-
----
-
-## 5. Agreed simplification plan (R1–R11)
-
-Full detail in `SIMPLIFICATION.md`. Summary:
-
-- **R1** One event protocol: `Token`, `Reasoning`, `ToolCall`, `ToolResult`,
-  `PermissionRequest`, `Usage`, `Error`, `Done`. Harness yields; UI renders.
-- **R2** One `Endpoint` type (collapse `LLMServerConfig` + `get_server_config*`
-  + `ServerService` + `LLMServer` ABC/4 subclasses).
-- **R3** Commands as data: `(name, description, params, handler)` registry.
-- **R4** Config: user `~/.config/pico-chat/pico.toml` + `roles.toml`, both
-  overridable by project-local `pico.toml`/`roles.toml` (walk up from cwd).
-  `/reload` only (explicit, no watcher). Validate and report errors. Separate
-  intent (hand-edited) from disposable state (`state.toml`).
-- **R5** Delete authoring UI: `form.py`, `form_popup.py`, `settings_panel.py`,
-  `settings_screen.py`, `settings_pages.py`, `openrouter_settings.py`,
-  `role_editor_form.py`, `role_editor_model.py`, `config_overlay`, settings tab.
-  Keep interactive only for permission approval + destructive confirmation.
-- **R6** Remove tabs entirely. One conversation per process. Collapses
-  `_tabs`, `ConversationState`, `_active_runtime`, `_initial_agent`.
-- **R7** Remove conversation autosave/persistence for now; keep `/export`.
-- **R8** Delete features outright (no plugin layer).
-- **R9** No `core` → `ui` imports (guard test). This is the seam for the user's
-  future middle-ground TUI.
-- **R10** Quick-change regression accepted; future built-in nano-style editor is
-  nice-to-have.
-- **R11** Roles stay named; `/role use` remains.
-
-**Deferred:** replacing the bespoke TUI toolkit (user has their own
-middle-ground idea); deriving tool schemas from signatures; built-in editor.
+- **R1 — one event protocol.** Replace `harness/chunks.py` +
+  `_process_generation` dispatch + thinking/usage plumbing with one event
+  union: `Token`, `Reasoning`, `ToolCall`, `ToolResult`, `PermissionRequest`,
+  `Usage`, `Error`, `Done`. Harness yields; UI renders.
+- **R6 — remove tabs.** One conversation per process. Collapses `_tabs`,
+  `ConversationState`, `_active_runtime`, `_initial_agent`, and "which agent is
+  active" bugs. The settings tab is already gone (R5). Touches `ui/app.py`,
+  `ui/conversation_runtime.py`, `ui/commands/tabs.py`,
+  `ui/tui/components/tab_view.py`, `tab_bar.py`. The debug panel can stay as an
+  overlay/toggle or go with the tab bar.
+- **R3 — commands as data.** One registry of
+  `(name, description, params, handler)`; classes only where a subcommand tree
+  plus state is real.
+- **R7** — remove conversation autosave (`pico_chat/conversation_autosave.py`);
+  keep `/export`.
+- **R8** — delete features outright (no plugin layer). Per P4: **keep
+  compaction + subagents**; **delete search tools (`search_web`/`search_wiki`),
+  containerization, token estimation**. Note the examples in `DEFAULT_ROLE_TOML`
+  still mention `search_web`/`search_wiki`/`use_container` — update them when
+  those are removed.
+- **Deferred:** replacing the bespoke TUI toolkit (keep it for now), deriving
+  tool schemas from signatures, built-in nano-style editor.
 
 ---
 
-## 6. OPEN QUESTIONS — need user answers before coding
+## 7. Decisions (resolved 2026-09-21)
 
-| # | Question | Recommendation |
-|---|----------|----------------|
-| P1 | **Project-local config trust.** A cloned repo's config can auto-allow `run` or point at a malicious endpoint. | **TOFU** keyed by config hash in `state.toml`; re-prompt when changed. |
-| P2 | **Exact config schema** (`pico.toml`, `roles.toml`, `state.toml`). | See sketch in `SIMPLIFICATION.md`. |
-| P3 | **Surviving commands.** | `/help /clear /reload /config /edit /model /server /role /export /quit` (+ maybe `/tools`). |
-| P4 | **Headless features to keep vs delete.** | Keep: roles, discovery+selection, context file tree, debug-to-file. **My rec:** keep compaction + subagents; delete search tools, containerization, token estimation. |
-| P5 | **Editor.** | `/edit [file]` opens `$VISUAL`/`$EDITOR`; built-in editor later. |
-| P6 | **Migration** from current `config.toml`/`roles.toml`. | Start fresh + document (early project). |
-
-Also confirm:
-- **P1 security interaction:** project `roles.toml` can redefine `default`; trust
-  model must cover roles and permissions, not just servers.
-- **P4** is the only place the user's "remove UI complexity, not necessarily
-  features" distinction matters.
+| # | Decision |
+|---|----------|
+| P1 | **No project-local config.** User-level `pico.toml` + `roles/` only. No trust model. |
+| P2 | `pico.toml`: `[ui]`, `[servers.<name>]`, `[context]`, `[subagents]`, `[debug]`, `[markdown_styles]`, `[syntax_highlight]`; one role body per `roles/<name>.toml`; tiny `state.toml`. |
+| P2b | `state.toml` = `last_server`, `active_model`, `last_model`, `model_catalog`. Disposable. |
+| P3 | Command surface deferred to a dedicated command refactor; editing via `$EDITOR`. |
+| P4 | Keep **compaction** + **subagents**. Delete **search tools**, **containerization**, **token estimation**. |
+| P5 | `$EDITOR`/`$VISUAL`; built-in editor later. |
+| P6 | Start fresh + document; no back-compat keys. |
 
 ---
 
-## 7. Recommended sequencing (once P1–P6 settled)
+## 8. Gotchas
 
-1. **R4** config schema + loader + validation + project overrides + `/reload`.
-2. **R2** `Endpoint`; delete the server/service/llm-config split.
-3. **R1** event union; harness yields, UI consumes.
-4. **R3** command registry as data; prune command classes.
-5. **R5/R6** delete forms/settings/tabs; single-conversation app.
-6. Revisit deferred items.
-
-Rationale: by the time R5/R6 run, `ui` is already a thin event consumer, so the
-UI trim is mostly deletion. Keep R9 absolute throughout.
+- **R5 removed all authoring forms.** The remaining interactive UI is the text
+  `Popup` and the `[a]`/`[x]` permission prompt in chat history. There is
+  currently **no destructive-confirmation modal**: `show_confirmation` had no
+  callers and was deleted with `FormPopup`. `/roles delete`, `/server remove`,
+  etc. act immediately — add a small standalone confirm modal if that changes.
+- `pico_chat/ui/app.py` is still large (~1400 lines) and owns tabs and the
+  debug panel. R6 will shrink it.
+- Tests isolate config by monkeypatching **module functions**, not instance
+  paths: `pico_cfg.get_config_path`, `get_state_path`, `get_roles_dir`, and
+  `roles._ROLES_DIR`. Use the same pattern.
+- `Harness` attribute is `endpoint` (not `server`); test fixtures use
+  `harness.endpoint = FakeServer()` and `patch(...harness.get_active_endpoint)`.
+- `endpoint.py` is under the R9 guard (`test/test_core_ui_boundary.py` scans
+  `harness/`), so it must not import `ui`.
+- The R9 guard allows `main.py` (composition root) to import both.
+- `pico_cfg.config` is a global loaded at import; `/reload` mutates it in place.
+- When editing tests, remember the form stack is gone: `TextField`,
+  `FormPopup`, `FormContainer`, `ProfileList`, `ConfigOverlay`, `RoleEditorForm`
+  and friends no longer exist. Use `Button`/`Label` as focusable/leaf stand-ins.
 
 ---
 
-## 8. Working preferences observed from the user
+## 9. Commit checklist (the user commits; nothing is staged by the assistant)
+
+Working tree contains the **session's** R2+R4+R5 work plus **pre-existing
+unrelated churn**. Review before committing:
+
+**Must include (new files, currently untracked):**
+- `pico_chat/harness/endpoint.py`
+- `pico_chat/ui/external_editor.py`
+- `test/test_config_commands.py`
+- `test/test_config_loader.py` / `test/test_core_ui_boundary.py` (already added)
+
+**Session deletions:** `harness/llm_server.py`, `harness/llm_server_config.py`,
+`harness/server_service.py`; `ui/settings_pages.py`, `ui/openrouter_settings.py`,
+`ui/role_editor_form.py`, `ui/role_editor_model.py`,
+`ui/commands/settings.py`, `ui/commands/permissions.py`,
+`ui/tui/settings_screen.py`, and the form stack
+(`ui/tui/components/{form,form_popup,form_schema,field_models,config_overlay,settings_panel}.py`);
+tests `test_settings_tab.py`, `test_forms.py`, `test_form_schema.py`,
+`test_field_models.py`, `test_tui_form_actions.py`.
+
+**Pre-existing churn, not from this session (decide separately):**
+- `.todo`/`.TODO` files moved into `todos/` (staged renames).
+- `PROFILE_FORM_REFACTOR.md` deleted (staged).
+- Untracked `xorshift/`, `old_HANDOFF.md`, `old_old_HANDOFF.md` — likely
+  scratch/history; probably not wanted in the commit.
+
+---
+
+## 10. Working preferences (observed)
 
 - Wants aggressive simplification toward the essence.
-- Prefers explicit behavior (`/reload`, no magic/watchers).
-- Configs over UI; content to edit files, with `$EDITOR` (built-in editor later).
-- Keeps a custom TUI aesthetic; will pursue a middle-ground TUI overhaul
-  separately — do **not** delete the TUI toolkit as part of R5/R6.
-- Answers are terse; expect corrections and re-framings.
-- Do not commit unless asked (the previous commits were the user's).
+- Explicit over implicit (`/reload`, no watchers/magic).
+- Config files over UI; edit with `$EDITOR` (built-in editor later).
+- Keeps the custom TUI aesthetic; a middle-ground TUI overhaul is planned
+  separately — **do not delete the TUI toolkit** as part of R5/R6.
+- Terse answers; expect corrections and re-framings.
+- **Do not commit unless asked.** The assistant leaves committing to the user.
 
 ---
 
-## 9. First thing to do on resume
+## 11. First thing to do on resume
 
 1. Read `SIMPLIFICATION.md`.
-2. Ask the user for **P1–P4** answers (P5/P6 have safe recommendations).
-3. Begin **R4**: design `pico.toml`/`roles.toml`/`state.toml` schema, a
-   validating loader with project-local merge, and the `/reload` mechanism.
-4. Add a guard test for R9 (no `core` → `ui` imports) and keep the suite green.
+2. `git status` / `git diff` — review the uncommitted R2+R4+R5 work; commit only
+   if the user asks.
+3. Pick the next phase with the user: **R1** (event union) or **R6** (remove
+   tabs). R5 already removed the settings tab, so R6 only has the debug panel
+   and conversation tabs left.
+4. Keep the suite green (511) and the R9 guard passing after every change.

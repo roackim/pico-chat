@@ -58,7 +58,7 @@ export OPENROUTER_API_KEY=sk-or-...
 /model anthropic/claude-3.5-sonnet
 ```
 
-Server configurations are saved to `~/.config/pico-chat/config.toml` and persist between sessions. Selecting a model with `/model` automatically switches to the server that serves it.
+Server definitions are saved to `~/.config/pico-chat/pico.toml` and persist between sessions. Selecting a model with `/model` automatically switches to the server that serves it.
 
 ---
 
@@ -67,11 +67,14 @@ Server configurations are saved to `~/.config/pico-chat/config.toml` and persist
 | Command | Description |
 |---------|-------------|
 | `/help` | List all available commands |
+| `/config` | Edit `pico.toml` in `$EDITOR` and reload |
+| `/edit [file]` | Open a file in `$EDITOR` |
+| `/reload` | Reload `pico.toml` and `roles/` from disk |
 | `/status` | Show server, model, context usage, and memory |
-| `/server` | Manage server configurations (see below) |
+| `/server` | Manage servers (list/use/edit/info/remove/diagnose) |
 | `/model` | Discover or select a model (switches to its server) |
 | `/tools` | Show available agent tools and their permission levels |
-| `/permissions` | Show full permission configuration |
+| `/roles` | Select and inspect roles (`roles/<name>.toml`) |
 | `/compact` | Summarize conversation history to free context space |
 | `/clear` | Clear the conversation history |
 | `/stop` | Stop the current generation |
@@ -82,22 +85,35 @@ Server configurations are saved to `~/.config/pico-chat/config.toml` and persist
 
 ### Server Management
 
+Servers are defined in `pico.toml`; edit them with `/config` (or `/server edit`)
+and the config is reloaded when the editor exits.
+
 ```
-/server add openrouter <model-id> [name] [provider]
-/server add llamacpp <url> [name]
-/server add ollama <url> [name]
 /server list
+/server use <name>
+/server edit          # opens pico.toml in $EDITOR
+/server info <name>
 /server remove <name>
+/server diagnose <name>
 /model list
 /model <model>
+/model <server>:<model>
 ```
 
-Examples:
+Examples (`pico.toml`):
+```toml
+[servers.local]
+type = "llamacpp"
+base_url = "http://localhost:8080/v1"
+
+[servers.ds]
+type = "openrouter"
+api_key_env = "OPENROUTER_API_KEY"
+enabled_models = ["deepseek/deepseek-v4-flash"]
 ```
-/server add openrouter deepseek/deepseek-v4-flash
-/server add llamacpp http://localhost:8080 local
-/server add ollama http://localhost:11434 ollama
-/server list
+Then:
+```
+/server use local
 /model list
 /model llama3.1:8b
 ```
@@ -147,7 +163,7 @@ cmd: pytest tests/
 
 You can approve or deny with mouse click or keyboard.
 
-Use `/tools` to see the current permission level for each tool, and `/permissions` for the full breakdown including per-command allow/ask/deny lists.
+Use `/tools` to see the current permission level for each tool. The full policy — per-tool settings and per-command allow/ask/deny lists — lives in the active role file (`roles/<name>.toml`); edit it with `/roles edit <name>`.
 
 ### Sandboxing
 
@@ -173,4 +189,50 @@ Use `/status` at any time to see the full picture.
 
 ## Configuration File
 
-Settings are stored at `~/.config/pico-chat/config.toml`. It is managed automatically by the `/server` commands, but you can edit it manually if needed. The file includes server definitions and UI/behavior settings.
+Hand-edited configuration lives in `~/.config/pico-chat/`:
+
+- `pico.toml` — server definitions and UI/behavior settings.
+- `roles/<name>.toml` — one file per conversation role (tools, permissions,
+  prompts). The file name is the role name; `_example.toml` is a commented
+  starting point.
+- `state.toml` — disposable runtime state (last server/model, discovery
+  catalog). Safe to delete.
+
+Missing files are created from fully commented templates: `pico.toml`
+documents every option and includes example `llamacpp`, `ollama`, `openrouter`
+and `openai` server blocks, and `roles/_example.toml` documents a role. Edit
+either with `/config` and `/roles edit <name>`. Configuration is read at startup
+and only re-applied when you run `/reload` or restart. The loader validates the files
+and reports unknown keys, wrong types, and unparsable TOML; invalid entries
+fall back to defaults while the rest of the file still applies.
+
+```toml
+# pico.toml
+[ui]
+theme = "terminal"
+
+[context]
+format = "tree"
+max_files = 500
+
+[subagents]
+max_depth = 1
+
+[servers.local]
+type = "llamacpp"
+base_url = "http://localhost:8080/v1"
+```
+
+```toml
+# roles/architect.toml
+description = "Design and review with minimal edits"
+prompt = "Focus on architecture; prefer small, reversible changes."
+
+[tools.read]
+enabled = true
+permission = "allow"
+
+[tools.write]
+enabled = true
+permission = "ask"
+```

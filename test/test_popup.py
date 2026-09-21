@@ -5,7 +5,7 @@ from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.terminal import MouseEvent
 from pico_chat.ui.tui.navigation import ModalHost
 from pico_chat.ui.tui.focus import FocusScope
-from pico_chat.ui.tui.components.form import TextField
+from pico_chat.ui.tui.components.button import Button
 
 
 class FakeCompositor:
@@ -82,7 +82,7 @@ class TestPopup:
         screen.on_leave()
 
     def test_popup_suspends_and_restores_background_focus(self):
-        background = TextField("Background")
+        background = Button("Background")
         scope = FocusScope([background])
         scope.enter()
         popup = Popup(FocusCompositor(scope))

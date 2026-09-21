@@ -52,6 +52,86 @@ class ClearCommand(Command):
             ui.refresh_status_bar()
 
 
+class ReloadCommand(Command):
+    """Reload hand-edited configuration from disk (explicit, no watcher)."""
+
+    def __init__(self):
+        super().__init__("reload", "Reload pico.toml and the roles directory from disk")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        from pico_chat import pico_cfg
+
+        errors = pico_cfg.reload_config()
+
+        try:
+            from pico_chat.ui.tui.colors import set_theme
+
+            set_theme(pico_cfg.config.ui_theme)
+        except Exception:  # pragma: no cover - theme application is best effort
+            logger.warning("Failed to apply theme after reload", exc_info=True)
+
+        if errors:
+            ui.chat_history_panel.add_message(
+                "Config reloaded with errors:\n" + "\n".join(errors),
+                msg_type=SysMsgError(),
+            )
+        else:
+            ui.chat_history_panel.add_message("Config reloaded.", msg_type=SysMsg())
+
+        if hasattr(ui, "refresh_status_bar"):
+            ui.refresh_status_bar()
+
+
+class ConfigCommand(Command):
+    """Open ``pico.toml`` in the user's editor, then reload it."""
+
+    def __init__(self):
+        super().__init__("config", "Edit pico.toml in $EDITOR and reload it")
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        from pico_chat import pico_cfg
+        from pico_chat.ui.external_editor import open_editor, resolve_editor
+
+        if not resolve_editor():
+            ui.chat_history_panel.add_message(
+                "No editor found. Set $VISUAL or $EDITOR.",
+                msg_type=SysMsgError(), title="config")
+            return
+        path = pico_cfg.config.ensure_config_file()
+        open_editor(ui, path)
+        errors = pico_cfg.reload_config()
+        if errors:
+            ui.chat_history_panel.add_message(
+                "Config reloaded with errors:\n" + "\n".join(errors),
+                msg_type=SysMsgError(), title="config")
+        else:
+            ui.chat_history_panel.add_message("Config reloaded.", msg_type=SysMsg(), title="config")
+        if hasattr(ui, "refresh_status_bar"):
+            ui.refresh_status_bar()
+
+
+class EditCommand(Command):
+    """Open an arbitrary file in the user's editor."""
+
+    def __init__(self):
+        super().__init__("edit", "Open a file in $EDITOR",
+                         params=[Param("FILE", path=True)])
+
+    async def execute(self, ui: ChatUIProtocol, args: List[str]):
+        from pathlib import Path
+
+        from pico_chat import pico_cfg
+        from pico_chat.ui.external_editor import open_editor, resolve_editor
+
+        if not resolve_editor():
+            ui.chat_history_panel.add_message(
+                "No editor found. Set $VISUAL or $EDITOR.",
+                msg_type=SysMsgError(), title="edit")
+            return
+        path = Path(args[0]).expanduser() if args else pico_cfg.config.ensure_config_file()
+        open_editor(ui, path)
+
+
 class CompactCommand(Command):
     def __init__(self):
         super().__init__("compact", "Compact context with an LLM summary marker")
@@ -213,6 +293,7 @@ class CdCommand(Command):
 
 
 __all__ = [
-    "HelpCommand", "ClearCommand", "CompactCommand", "ExitCommand",
+    "HelpCommand", "ClearCommand", "ReloadCommand", "ConfigCommand", "EditCommand",
+    "CompactCommand", "ExitCommand",
     "StopCommand", "ResumeCommand", "StatusCommand", "PwdCommand", "CdCommand",
 ]

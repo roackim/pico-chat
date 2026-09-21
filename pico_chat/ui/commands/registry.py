@@ -1,10 +1,10 @@
 """Command registry: the single assembly point for all slash commands.
 
 Each command lives in a module named after its domain (``core``, ``server``,
-``models``, ``roles``, ``debug``, ``permissions``, ``settings``,
-``conversation``, ``tabs``, ``tools``, ``openrouter``). Those modules depend
-only on :mod:`pico_chat.ui.commands.base`; this module is the only place that
-knows about all of them, which keeps the import graph acyclic.
+``models``, ``roles``, ``debug``, ``conversation``, ``tabs``, ``tools``,
+``openrouter``). Those modules depend only on
+:mod:`pico_chat.ui.commands.base`; this module is the only place that knows
+about all of them, which keeps the import graph acyclic.
 """
 
 from __future__ import annotations
@@ -21,9 +21,12 @@ from .core import (
     CdCommand,
     ClearCommand,
     CompactCommand,
+    ConfigCommand,
+    EditCommand,
     ExitCommand,
     HelpCommand,
     PwdCommand,
+    ReloadCommand,
     ResumeCommand,
     StatusCommand,
     StopCommand,
@@ -37,16 +40,15 @@ from .debug import (
 )
 from .models import ModelCommand, ModelListCommand, ModelUseCommand
 from .openrouter import OpenRouterBalanceCommand, OpenRouterCommand
-from .permissions import PermissionsCommand
 from .roles import RolesCommand
 from .server import (
-    ServerAddCommand,
     ServerCommand,
+    ServerEditCommand,
     ServerInfoCommand,
     ServerListCommand,
     ServerRemoveCommand,
+    ServerUseCommand,
 )
-from .settings import SettingsCommand
 from .tabs import (
     TabCloseCommand,
     TabCommand,
@@ -60,6 +62,9 @@ from .tools import ToolsCommand
 COMMANDS: Dict[str, Command] = {
     "help":         HelpCommand(lambda: COMMANDS),
     "clear":        ClearCommand(),
+    "reload":       ReloadCommand(),
+    "config":       ConfigCommand(),
+    "edit":         EditCommand(),
     "compact":      CompactCommand(),
     "exit":         ExitCommand(),
     "stop":         StopCommand(),
@@ -69,8 +74,6 @@ COMMANDS: Dict[str, Command] = {
     "model":        ModelCommand(),
     "tools":        ToolsCommand(),
     "debug":        DebugCommand(),
-    "permissions":  PermissionsCommand(),
-    "settings":     SettingsCommand(),
     "roles":        RolesCommand(),
     "openrouter":   OpenRouterCommand(),
     "cd":           CdCommand(),
@@ -121,12 +124,13 @@ __all__ = [
     "get_command_list",
     "get_subcommand_list",
     # Re-exported for tests and hosts that import concrete commands.
-    "HelpCommand", "ClearCommand", "CompactCommand", "ExitCommand",
+    "HelpCommand", "ClearCommand", "ReloadCommand", "ConfigCommand", "EditCommand",
+    "CompactCommand", "ExitCommand",
     "StopCommand", "ResumeCommand", "StatusCommand", "PwdCommand", "CdCommand",
-    "ServerCommand", "ServerAddCommand", "ServerListCommand",
+    "ServerCommand", "ServerListCommand", "ServerUseCommand", "ServerEditCommand",
     "ServerRemoveCommand", "ServerInfoCommand",
     "ModelCommand", "ModelListCommand", "ModelUseCommand",
-    "RolesCommand", "PermissionsCommand", "SettingsCommand",
+    "RolesCommand",
     "ToolsCommand", "OpenRouterCommand", "OpenRouterBalanceCommand",
     "DebugCommand", "DebugPanelCommand", "DebugGetContextCommand",
     "DebugLogCommand", "DebugSystemPromptCommand",

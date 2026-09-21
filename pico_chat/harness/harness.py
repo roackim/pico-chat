@@ -12,8 +12,7 @@ from pico_chat.harness.debug import get_debug_stream
 from pico_chat.harness.context_builder import build_harness_context
 from pico_chat.harness.system_prompt import get_system_message
 from pico_chat.harness import chunks
-from pico_chat.harness.llm_server import create_server, LLMServer
-from pico_chat.harness.llm_server_config import get_server_config
+from pico_chat.harness.endpoint import Endpoint, get_active_endpoint, get_endpoint
 from pico_chat.harness.permissions import PermissionGate
 from pico_chat.harness.thinking_parser import ThinkingTagParser, MetricsState, THINKING_TAGS
 from pico_chat.harness.usage import TokenUsage, usage_from_response
@@ -81,20 +80,19 @@ class Harness:
         self.tool_schemas = [tool.get_schema() for tool in self.tools_map.values()] if self.tools_map else None
         self.debug_stream.log("TOOL_SCHEMAS", self.tool_schemas)
 
-        # Select LLM server: subagents use subagent_server if configured
+        # Select LLM endpoint: subagents use subagent_server if configured
         from pico_chat import pico_cfg
-        from pico_chat.harness.llm_server_config import get_server_config_by_name
         # Resolve the endpoint at construction time. A module-level config
         # snapshot would make newly opened tabs use stale server settings.
-        chosen_config = get_server_config()
+        chosen_endpoint = get_active_endpoint()
         if depth > 0 and pico_cfg.config.subagent_server:
-            sub_cfg = get_server_config_by_name(pico_cfg.config.subagent_server)
-            if sub_cfg:
-                chosen_config = sub_cfg
+            sub_endpoint = get_endpoint(pico_cfg.config.subagent_server)
+            if sub_endpoint:
+                chosen_endpoint = sub_endpoint
 
-        self.server: LLMServer = create_server(chosen_config)
+        self.endpoint: Endpoint = chosen_endpoint
         self._last_usage: Optional[TokenUsage] = None
-        self.debug_stream.log("INIT", f"Server initialized: {chosen_config.name} ({chosen_config.type}) at {chosen_config.base_url}")
+        self.debug_stream.log("INIT", f"Server initialized: {chosen_endpoint.name} ({chosen_endpoint.type}) at {chosen_endpoint.base_url}")
 
         # Steering / pause state
         # Updated live on every Thinking chunk so the UI can snapshot it.
@@ -171,25 +169,18 @@ class Harness:
         # No git-repo warning: the file tree is built regardless of git status.
         return []
 
-    def switch_server(self, new_config):
-        """Switch to a different LLM server at runtime.
-        
-        Args:
-            new_config: LLMServerConfig instance
-        """
-        from pico_chat.harness.llm_server_config import LLMServerConfig
-        
-        # Create new server instance
-        self.server = create_server(new_config)
+    def switch_server(self, new_endpoint: Endpoint) -> None:
+        """Switch to a different LLM endpoint at runtime."""
+        self.endpoint = new_endpoint
         self._last_usage = None
-        self.debug_stream.log("SWITCH", f"Server switched to: {new_config.name} ({new_config.type}) at {new_config.base_url}")
-        logger.info(f"Switched to server: {new_config.name} ({new_config.type})")
+        self.debug_stream.log("SWITCH", f"Server switched to: {new_endpoint.name} ({new_endpoint.type}) at {new_endpoint.base_url}")
+        logger.info("Switched to server: %s (%s)", new_endpoint.name, new_endpoint.type)
 
     def switch_model(self, model_name: str) -> None:
         """Select another model on the current endpoint."""
-        self.server.set_model(model_name)
+        self.endpoint.set_model(model_name)
         self._last_usage = None
-        logger.info("Switched to model %s on endpoint %s", model_name, self.server.config.name)
+        logger.info("Switched to model %s on endpoint %s", model_name, self.endpoint.name)
 
     def _is_compaction_message(self, msg: Dict[str, Any]) -> bool:
         """Return True if message is a compaction marker message."""
@@ -396,7 +387,7 @@ class Harness:
         # prompt is only sent alongside the first user message, so it is not
         # counted until there is history to send.
         if not effective_history:
-            max_tokens = self.server._cached_context_window or 32768
+            max_tokens = self.endpoint._cached_context_window or 32768
             return 0, max_tokens, 0.0
         
         # Check if the first message is a compaction marker
@@ -427,7 +418,7 @@ class Harness:
         current_tokens += system_estimate
         
         # Get max context from server's cached value (will be queried on first use)
-        max_tokens = self.server._cached_context_window or 32768
+        max_tokens = self.endpoint._cached_context_window or 32768
         
         percentage = (current_tokens / max_tokens) * 100 if max_tokens > 0 else 0
         return current_tokens, max_tokens, percentage
@@ -454,8 +445,8 @@ class Harness:
                 "message": "History is already compacted.",
             }
 
-        model_name = await self.server.get_model_name()
-        context_window = await self.server.get_context_window()
+        model_name = await self.endpoint.get_model_name()
+        context_window = await self.endpoint.get_context_window()
         context_window_str = f"{context_window // 1024}k" if isinstance(context_window, int) else str(context_window)
 
         system_msg = get_system_message(
@@ -485,7 +476,7 @@ class Harness:
         }
 
         summary_text = ""
-        async for response in self.server.create_completion(
+        async for response in self.endpoint.create_completion(
             messages=[system_msg, summarize_user],
             tools=None,
             stream=False,
@@ -524,14 +515,14 @@ class Harness:
 
     async def check_connection(self) -> bool:
         """Check if the LLM server is reachable."""
-        return await self.server.check_connection()
+        return await self.endpoint.check_connection()
 
     async def get_model_name(self) -> str:
         """
         Get the active model name from the server.
         Returns cached value if already queried.
         """
-        return await self.server.get_model_name()
+        return await self.endpoint.get_model_name()
 
     async def _build_messages(self, user_input: str) -> List[Dict[str, Any]]:
         """Build message list with system prompt and conversation history."""
@@ -540,8 +531,8 @@ class Harness:
         self._last_user_message_id = user_msg_id
         
         # Get model context information from server
-        model_name = await self.server.get_model_name()
-        context_window = await self.server.get_context_window()
+        model_name = await self.endpoint.get_model_name()
+        context_window = await self.endpoint.get_context_window()
         
         # Format context window for display
         if isinstance(context_window, int):
@@ -575,8 +566,8 @@ class Harness:
         Useful for debugging and inspecting what the model sees.
         """
         # Get model context information from server
-        model_name = await self.server.get_model_name()
-        context_window = await self.server.get_context_window()
+        model_name = await self.endpoint.get_model_name()
+        context_window = await self.endpoint.get_context_window()
         
         # Format context window for display
         if isinstance(context_window, int):
@@ -603,8 +594,8 @@ class Harness:
         Includes the active role's name and prompt, so switching roles is
         reflected here.
         """
-        model_name = await self.server.get_model_name()
-        context_window = await self.server.get_context_window()
+        model_name = await self.endpoint.get_model_name()
+        context_window = await self.endpoint.get_context_window()
         if isinstance(context_window, int):
             context_window_str = f"{context_window // 1024}k"
         else:
@@ -676,7 +667,7 @@ class Harness:
 
         chunk_count = 0
         empty_chunks = 0
-        async for chunk in self.server.create_completion(messages, tools=self.tool_schemas, stream=True):
+        async for chunk in self.endpoint.create_completion(messages, tools=self.tool_schemas, stream=True):
             chunk_count += 1
 
             usage = usage_from_response(chunk)
@@ -1037,9 +1028,9 @@ class Harness:
         """
         status = {
             "online": False,
-            "server_name": self.server.config.name,
-            "server_type": self.server.config.type,
-            "base_url": self.server.config.base_url,
+            "server_name": self.endpoint.name,
+            "server_type": self.endpoint.type,
+            "base_url": self.endpoint.base_url,
             "model": "unknown",
             "context_window": "unknown",
             "context_used": 0,
@@ -1048,17 +1039,17 @@ class Harness:
         }
         
         # Check connection
-        status["online"] = await self.server.check_connection()
+        status["online"] = await self.endpoint.check_connection()
         
         if status["online"]:
             # Query model info
             try:
-                status["model"] = await self.server.get_model_name()
+                status["model"] = await self.endpoint.get_model_name()
             except Exception as e:
                 logger.warning(f"Failed to query model name: {e}")
             
             try:
-                ctx = await self.server.get_context_window()
+                ctx = await self.endpoint.get_context_window()
                 status["context_window"] = f"{ctx // 1024}k" if isinstance(ctx, int) else str(ctx)
             except Exception as e:
                 logger.warning(f"Failed to query context window: {e}")

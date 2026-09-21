@@ -12,11 +12,10 @@ from pico_chat.ui.tui.compositor import Compositor
 from pico_chat.ui.tui.events import KeyEvent, MouseEvent, TickEvent
 from pico_chat.ui.tui.components.box import SPINNER_FRAMES
 from pico_chat.ui.tui.components import (
-    TextComponent, Box, InputComponent, ComponentField, Label,
+    Box, InputComponent,
 )
 from pico_chat.ui.tui.components.debug_panel import DebugLogPanel
 from pico_chat.ui.tui.components.popup import Popup, PopupScreen
-from pico_chat.ui.tui.components.form_popup import FormPopup
 from pico_chat.ui.tui.components.tab_bar import TabBar
 from pico_chat.ui.tui.components.tab_view import TabView
 from pico_chat.ui.tui.components.bars import StatusBar
@@ -27,9 +26,6 @@ from pico_chat.ui.tui.layout_utils import strip_ansi
 from pico_chat.ui.tui.focus import FocusScope
 from pico_chat.ui.tui.navigation import Navigator, ModalHost
 from pico_chat.ui.tui.chat_screen import ChatScreen
-from pico_chat.ui.tui.settings_screen import SettingsScreen
-from pico_chat.ui.tui.components.settings_panel import SettingsPanel, SettingsPage
-from pico_chat.ui.settings_pages import settings_pages
 
         # Setup logging to debug panel
 import logging
@@ -100,10 +96,10 @@ class chatTUI(ChatActionHandlers):
         self._agent_factory = self._runtime_agent_factory()
         # Pre-warm .local hostname resolution for the initial agent so the
         # first message doesn't stall on DNS/mDNS lookup.
-        server = getattr(agent, "server", None)
-        if server is not None:
-            from pico_chat.harness.llm_server import prewarm_local_resolution
-            prewarm_local_resolution(server._original_base_url)
+        endpoint = getattr(agent, "endpoint", None)
+        if endpoint is not None:
+            from pico_chat.harness.endpoint import prewarm_local_resolution
+            prewarm_local_resolution(endpoint._original_base_url)
         self.compositor = None
         self.navigator = None
         self.modal_host = None
@@ -140,16 +136,7 @@ class chatTUI(ChatActionHandlers):
         self.debug_panel = DebugLogPanel(max_lines=1000, frame_color=theme.ERROR, content_color=theme.MUTED, left_pad=1, right_pad=0)
         self.debug_box = self.debug_panel
         self.show_debug = False
-        self.show_settings = False
-        self._settings_panel: Optional[SettingsPanel] = None
         self.popup = Popup()
-        self.form_popup = FormPopup()
-        self.confirmation_popup = FormPopup(
-            frame_color=theme.ERROR,
-            focus_color=theme.ERROR,
-            padding=1,
-            min_height=3,
-        )
         self.log_handler = setup_tui_logging(self.debug_panel)
         self.editing_prefill_for_resume = False
         self.tab_bar = TabBar(id="tabs")
@@ -199,19 +186,18 @@ class chatTUI(ChatActionHandlers):
         """Refresh local status fields without performing network I/O."""
         runtime = self._active_runtime()
         agent = runtime.agent if runtime and getattr(runtime, "agent", None) else self._initial_agent
-        server = getattr(agent, "server", None)
-        if server is None:
+        endpoint = getattr(agent, "endpoint", None)
+        if endpoint is None:
             return
 
-        config = server.config
-        # Prefer the model the server actually resolved (the one sent in the
-        # next request) over a requested selection that the endpoint may have
+        # Prefer the model the endpoint actually resolved (the one sent in the
+        # next request) over a requested selection the endpoint may have
         # ignored. ``_cached_model_name`` is set by ``set_model`` and by the
         # connection probe, so this cannot show a model the request won't use.
         model = (
-            getattr(server, "_cached_model_name", None)
-            or getattr(server, "selected_model", None)
-            or config.model
+            getattr(endpoint, "_cached_model_name", None)
+            or getattr(endpoint, "selected_model", None)
+            or endpoint.model
             or "?"
         )
         # Strip a leading path and common file suffix from a model id
@@ -229,14 +215,14 @@ class chatTUI(ChatActionHandlers):
 
         # Show an animated spinner while .local hostname resolution or model
         # name discovery is pending.
-        from pico_chat.harness.llm_server import is_local_resolution_pending
-        if is_local_resolution_pending(server._original_base_url) or getattr(server, "_model_name_pending", False):
+        from pico_chat.harness.endpoint import is_local_resolution_pending
+        if is_local_resolution_pending(endpoint._original_base_url) or getattr(endpoint, "_model_name_pending", False):
             frame = SPINNER_FRAMES[self._status_spinner_frame % len(SPINNER_FRAMES)]
             model = f"{frame} {model}"
 
         # Color the server/model field by connection state:
         #   checking -> orange, error -> red, ok -> green.
-        conn = getattr(server, "_connection_state", "unknown")
+        conn = getattr(endpoint, "_connection_state", "unknown")
         if conn == "checking":
             server_color = theme.WARNING
         elif conn == "error":
@@ -248,9 +234,9 @@ class chatTUI(ChatActionHandlers):
 
         usage = getattr(agent, "_last_usage", None)
         context_used = getattr(usage, "prompt_tokens", None)
-        context_max = getattr(server, "_cached_context_window", None)
+        context_max = getattr(endpoint, "_cached_context_window", None)
         if context_max is None:
-            context_max = config.max_context or 32768
+            context_max = endpoint.max_context or 32768
         if context_used is None:
             try:
                 context_used, estimated_max, _ = agent.estimate_context_usage()
@@ -259,11 +245,11 @@ class chatTUI(ChatActionHandlers):
                 context_used = 0
 
         self.status_bar.set_values({
-            "endpoint_model": f"{config.name}:{model}",
+            "endpoint_model": f"{endpoint.name}:{model}",
             "context": f"ctx {self._format_status_tokens(context_used)}/{self._format_status_tokens(context_max)}",
             "role": f"role {role}",
             "state": state,
-            "endpoint": config.name,
+            "endpoint": endpoint.name,
             "model": model,
             "workspace": getattr(agent, "workspace", ""),
         })
@@ -820,13 +806,11 @@ class chatTUI(ChatActionHandlers):
 
     def _show_chat_workspace(self):
         self.show_debug = False
-        self.show_settings = False
         self.input_component.hide_completions()
         self._install_chat_screen()
 
     def _open_debug_tab(self):
         self.input_component.hide_completions()
-        self.show_settings = False
         debug_index = self._debug_tab_index()
         if debug_index is None:
             debug_index = len(self._tabs)
@@ -843,75 +827,6 @@ class chatTUI(ChatActionHandlers):
         if debug_index is None:
             return
         self.tab_view.close(debug_index)
-
-    # ── settings tab ────────────────────────────────────────────
-
-    def _settings_tab_index(self) -> Optional[int]:
-        """Return the settings tab's position in the workspace tab list."""
-        for index, tab in enumerate(self._tabs):
-            if tab.kind == "settings":
-                return index
-        return None
-
-    def _build_settings_panel(self) -> SettingsPanel:
-        """Construct the master-detail settings panel with its pages."""
-        def notify(message: str, msg_type=SysMsg()):
-            self.chat_history_panel.add_message(message, msg_type=msg_type)
-
-        runtime = self._active_runtime()
-        agent = getattr(runtime, "agent", None) if runtime is not None else self.agent
-        if agent is None and runtime is not None:
-            agent = runtime.ensure_agent()
-        pages = settings_pages(
-            runtime=runtime,
-            agent=agent,
-            notify=notify,
-            on_role_change=self.refresh_status_bar,
-            history_panel=self.chat_history_panel,
-        )
-        return SettingsPanel(pages, content_indent=2)
-
-    def _open_settings_tab(self):
-        self.input_component.hide_completions()
-        settings_index = self._settings_tab_index()
-        if settings_index is None:
-            settings_index = len(self._tabs)
-            settings_state = ConversationState("settings", kind="settings")
-            self._tabs.append(settings_state)
-            self.tab_view.add("settings", "settings", settings_state, closeable=True)
-        if self._settings_panel is None:
-            self._settings_panel = self._build_settings_panel()
-        self.show_settings = True
-        self.tab_view.activate(settings_index)
-        self._install_settings_screen()
-
-    def _install_settings_screen(self):
-        """Install a SettingsScreen whose body is the settings panel."""
-        if self._settings_panel is None:
-            return
-        screen = SettingsScreen(
-            self.tab_bar,
-            self._settings_panel,
-            self._focus_scope,
-            self._tabs[self._active_tab_index] if self._tabs else None,
-            self.status_bar,
-        )
-        self.root = screen.root
-        if self.navigator is not None:
-            self.navigator.replace(screen)
-
-    def _close_settings_tab(self):
-        settings_index = self._settings_tab_index()
-        if settings_index is None:
-            return
-        self.tab_view.close(settings_index)
-
-    def toggle_settings_tab(self):
-        """Toggle the settings workspace tab."""
-        if self.show_settings:
-            self._close_settings_tab()
-            return
-        self._open_settings_tab()
 
     def show_popup(self, title: str, content: str, content_padding: int = 1):
         """Show a popup overlay with the given title and content."""
@@ -930,29 +845,6 @@ class chatTUI(ChatActionHandlers):
             self.popup_screen = None
             return
         self.popup.hide()
-
-    def show_form_popup(self, title: str, fields: list, on_submit, on_cancel=None, on_new_profile=None, field_spacing=1):
-        """Show a form popup overlay with interactive fields."""
-        self.form_popup.set_compositor(self.compositor)
-        if self.modal_host is not None:
-            self.form_popup.set_modal_host(self.modal_host)
-        self.form_popup.show(title, fields, on_submit, on_cancel, on_new_profile=on_new_profile, field_spacing=field_spacing)
-
-    def show_confirmation(self, title: str, on_confirm, on_cancel=None):
-        """Show a compact Enter/Esc confirmation modal over the current popup."""
-        self.confirmation_popup.set_compositor(self.compositor)
-        self.confirmation_popup.show(
-            title,
-            [ComponentField(Label(
-                "Enter to delete, Esc to cancel.",
-                wrap=True,
-            ))],
-            lambda _values: on_confirm(), on_cancel,
-            field_spacing=0,
-            submit_label="Delete",
-            focus_submit=True,
-        )
-
 
     def on_user_submit(self, text: str):
         """Handle user input submission."""
@@ -1132,7 +1024,7 @@ class chatTUI(ChatActionHandlers):
         if not self._tabs or index >= len(self._tabs):
             return
         tab = self._tabs[index]
-        if tab.kind in ("debug", "settings"):
+        if tab.kind == "debug":
             return
 
         self._active_tab_index = index
@@ -1147,10 +1039,7 @@ class chatTUI(ChatActionHandlers):
         if self._tabs[index].kind == "debug":
             self._open_debug_tab()
             return
-        if self._tabs[index].kind == "settings":
-            self._open_settings_tab()
-            return
-        if self.show_debug or self.show_settings:
+        if self.show_debug:
             self._show_chat_workspace()
         if index == self._active_tab_index:
             self.tab_view.activate(index)
@@ -1176,7 +1065,6 @@ class chatTUI(ChatActionHandlers):
         if index < 0 or index >= len(self._tabs):
             return
         closing_debug = self._tabs[index].kind == "debug"
-        closing_settings = self._tabs[index].kind == "settings"
         was_active = index == self._active_tab_index
         self._tabs.pop(index)
 
@@ -1184,9 +1072,7 @@ class chatTUI(ChatActionHandlers):
             self._active_tab_index -= 1
         elif was_active:
             new_index = min(index, len(self._tabs) - 1)
-            if closing_debug or closing_settings:
-                if closing_settings:
-                    self._settings_panel = None
+            if closing_debug:
                 self._show_chat_workspace()
             elif not self._tabs:
                 self._active_tab_index = 0
@@ -1215,7 +1101,7 @@ class chatTUI(ChatActionHandlers):
         # Save current tab first
         self._save_current_tab()
 
-        if self.show_debug or self.show_settings:
+        if self.show_debug:
             self._show_chat_workspace()
         
         # Generate name
@@ -1248,12 +1134,12 @@ class chatTUI(ChatActionHandlers):
         # stall on DNS/mDNS lookup, and discover the model name in the
         # background so the status bar shows it instead of "?".
         agent = tab_state.agent
-        server = getattr(agent, "server", None)
-        if server is not None:
-            from pico_chat.harness.llm_server import prewarm_local_resolution
-            prewarm_local_resolution(server._original_base_url)
+        endpoint = getattr(agent, "endpoint", None)
+        if endpoint is not None:
+            from pico_chat.harness.endpoint import prewarm_local_resolution
+            prewarm_local_resolution(endpoint._original_base_url)
             async def _prewarm_and_refresh():
-                await server.prewarm_model_name()
+                await endpoint.prewarm_model_name()
                 self.refresh_status_bar()
             asyncio.ensure_future(_prewarm_and_refresh())
         tab_state.active_user_msg = None
@@ -1300,13 +1186,13 @@ class chatTUI(ChatActionHandlers):
         # name discovery is pending. The input cursor blink is driven by the
         # input component's own handle_input(TickEvent) path.
         if isinstance(event, TickEvent):
-            from pico_chat.harness.llm_server import is_local_resolution_pending
+            from pico_chat.harness.endpoint import is_local_resolution_pending
             runtime = self._active_runtime()
             agent = runtime.agent if runtime and getattr(runtime, "agent", None) else self._initial_agent
-            server = getattr(agent, "server", None)
-            if server is not None and (
-                is_local_resolution_pending(server._original_base_url)
-                or getattr(server, "_model_name_pending", False)
+            endpoint = getattr(agent, "endpoint", None)
+            if endpoint is not None and (
+                is_local_resolution_pending(endpoint._original_base_url)
+                or getattr(endpoint, "_model_name_pending", False)
             ):
                 self._status_spinner_frame += 1
                 self.refresh_status_bar()
@@ -1315,14 +1201,6 @@ class chatTUI(ChatActionHandlers):
         # Handle keyboard navigation between input and history
         if isinstance(event, (str, KeyEvent)):
             key = event.key if isinstance(event, KeyEvent) else event
-
-            # Settings tab owns the keyboard while visible.
-            if self.show_settings and self._settings_panel is not None:
-                if key == "\x1b":  # ESC returns to the chat workspace
-                    self._close_settings_tab()
-                    return True
-                self._settings_panel.handle_input(event)
-                return True
 
             if self._last_focus_id == "input" and self.input_component.has_active_completion():
                 if key in ('\x1b', '\x1b[A', '\x1b[B', '\t', '\r', '\n'):
@@ -1364,11 +1242,6 @@ class chatTUI(ChatActionHandlers):
         
         # Handle mouse click focus changes
         if isinstance(event, MouseEvent):
-            # Settings tab consumes clicks within its panel.
-            if self.show_settings and self._settings_panel is not None:
-                if self._settings_panel.handle_input(event):
-                    return True
-
             # Ignore wheel scroll events for focus purposes — they shouldn't
             # change focus, only scroll the panel under the cursor.
             if event.pressed and event.button not in (64, 65):

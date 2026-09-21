@@ -1,9 +1,6 @@
 from pico_chat.ui.tui.buffer import Buffer
-from pico_chat.ui.tui.components.form import RadioListField, TextField
-from pico_chat.ui.tui.events import KeyEvent, normalize_key, TickEvent
-from pico_chat.ui.tui.components.form_popup import FormPopup
+from pico_chat.ui.tui.events import TickEvent
 from pico_chat.ui.tui.components.tab_bar import TabBar
-from pico_chat.ui.tui.components.config_overlay import ConfigOverlay
 from pico_chat.ui.tui.terminal import MouseEvent
 from pico_chat.ui.tui.colors import theme
 from pico_chat.ui.chat_history_panel import ChatHistoryPanel
@@ -47,17 +44,6 @@ def test_chat_history_restores_messages_through_panel_boundary():
 
     assert panel.messages == messages
     assert all(message.component.parent is panel for message in messages)
-
-
-def test_config_overlay_server_shortcuts_use_key_event_metadata():
-    overlay = ConfigOverlay()
-    overlay.set_servers([{"name": "test", "type": "local", "is_active": True}])
-    actions = []
-    overlay.on_remove_server = lambda name: actions.append(("remove", name))
-    overlay.on_use_server = lambda name: actions.append(("use", name))
-
-    assert overlay.handle_input(KeyEvent("r"))
-    assert overlay.handle_input(KeyEvent("u"))
 
 
 def test_cached_hit_test_rebuilds_after_cache_invalidation():
@@ -374,33 +360,6 @@ def test_returning_from_debug_updates_active_header_tab():
 
     assert ui.show_debug is False
     assert ui.tab_bar.active_index == 0
-
-
-def test_radio_option_click_selects_clicked_option():
-    compositor = FakeCompositor()
-    selected = []
-    field = RadioListField("Type", options=["local", "remote"])
-    popup = FormPopup(compositor=compositor)
-    popup.show("Test", [field], lambda values: selected.append(values))
-    popup._form_container.set_layout(popup.x + 1, popup.y + 1, popup.width - 2, popup.height - 2)
-    popup._form_container._compute_layout()
-    popup.render(Buffer(80, 24))
-
-    field_y = popup._box.y + 1 + popup._box.padding_y + popup._form_container._field_offsets[0]
-    click = MouseEvent(popup.x + 3, field_y + 2, 0, True)
-    assert popup.handle_input(click) is True
-    assert field.get_value() == 1
-
-
-def test_form_tab_and_shift_tab_move_focus_both_directions():
-    popup = FormPopup(compositor=FakeCompositor())
-    popup.show("Test", [TextField("Name"), RadioListField("Type", options=["local", "remote"])], lambda values: None)
-
-    assert popup._form_container.get_focused_field().label == "Name"
-    assert popup.handle_input(normalize_key("\t")) is True
-    assert popup._form_container.get_focused_field().label == "Type"
-    assert popup.handle_input(normalize_key("\x1b[Z")) is True
-    assert popup._form_container.get_focused_field().label == "Name"
 
 
 def test_clicking_input_box_bars_focuses_input():

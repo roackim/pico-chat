@@ -80,6 +80,40 @@ class RolesCommand(Command):
                 f"Renamed role: {args[1]} -> {args[2]}", msg_type=SysMsg())
             return
 
+        if action == "edit" and len(args) in {1, 2}:
+            from pico_chat import pico_cfg
+            from pico_chat.ui.external_editor import open_editor, resolve_editor
+
+            if not resolve_editor():
+                ui.chat_history_panel.add_message(
+                    "No editor found. Set $VISUAL or $EDITOR.", msg_type=SysMsgError())
+                return
+            directory = pico_cfg.ensure_roles_dir()
+            if len(args) == 1:
+                # No name: open the shipped example to copy from.
+                open_editor(ui, directory / pico_cfg.ROLE_EXAMPLE_FILENAME)
+                return
+            name = args[1]
+            try:
+                path = pico_cfg.get_role_path(roles._validate_name(name))
+            except ValueError as exc:
+                ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError())
+                return
+            if not path.exists():
+                # Materialize the current (built-in or default) policy so the
+                # file starts from the effective role, not a blank template.
+                try:
+                    roles.save_role(roles.load_role(name))
+                except KeyError:
+                    path.write_text(
+                        pico_cfg.DEFAULT_ROLE_TOML.replace("disabled = true\n", ""),
+                        encoding="utf-8",
+                    )
+            open_editor(ui, path)
+            ui.chat_history_panel.add_message(
+                f"Edited role '{name}'.", msg_type=SysMsg())
+            return
+
         if action in {"delete", "remove"} and len(args) == 2:
             try:
                 roles.delete_role(args[1])
@@ -90,7 +124,7 @@ class RolesCommand(Command):
             return
 
         ui.chat_history_panel.add_message(
-            "Usage: /roles [list|show NAME|use NAME|duplicate NAME [NEW_NAME]|rename OLD NEW|delete NAME]",
+            "Usage: /roles [list|show NAME|use NAME|edit|duplicate NAME [NEW_NAME]|rename OLD NEW|delete NAME]",
             msg_type=SysMsgError())
 
 

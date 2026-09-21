@@ -85,6 +85,29 @@ class Terminal:
         # Only clear screen if exiting normally (no exception)
         self.cleanup(clear_screen=(exc_type is None))
 
+    def suspend(self):
+        """Release the terminal to a child process (e.g. ``$EDITOR``).
+
+        Restores cooked mode and the cursor/mouse/paste state, but keeps
+        ``old_settings`` so :meth:`resume` (and later :meth:`cleanup`) still work.
+        """
+        if self.old_settings:
+            try:
+                termios.tcsetattr(self.fd, termios.TCSADRAIN, self.old_settings)
+            except Exception:
+                pass
+        sys.stdout.write(ANSI.SHOW_CURSOR + ANSI.DISABLE_MOUSE + ANSI.DISABLE_BRACKETED_PASTE + ANSI.RESET)
+        sys.stdout.flush()
+
+    def resume(self):
+        """Re-enter raw mode after a :meth:`suspend`."""
+        try:
+            tty.setraw(self.fd)
+        except Exception:
+            pass
+        sys.stdout.write(ANSI.HIDE_CURSOR + ANSI.ENABLE_MOUSE + ANSI.ENABLE_BRACKETED_PASTE)
+        sys.stdout.flush()
+
     def _handle_resize(self, _signum, _frame):
         self.resized = True
 

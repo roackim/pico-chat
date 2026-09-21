@@ -4,14 +4,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from pico_chat.harness.llm_server import (
-    LlamaCppServer,
+from pico_chat.harness.endpoint import (
+    Endpoint,
     _local_cache,
     _resolve_local_hostname,
     invalidate_local_hostname,
     prewarm_local_resolution,
 )
-from pico_chat.harness.llm_server_config import LLMServerConfig
 
 
 @pytest.fixture(autouse=True)
@@ -23,7 +22,7 @@ def clear_cache():
 
 
 def make_server(base_url: str):
-    config = LLMServerConfig(
+    return Endpoint(
         name="test",
         type="llamacpp",
         base_url=base_url,
@@ -34,29 +33,27 @@ def make_server(base_url: str):
         retry_attempts=1,
         retry_delay=0.0,
     )
-    # LlamaCppServer doesn't override check_connection, so it exercises the
-    # base class retry/invalidate logic.
-    return LlamaCppServer(config)
+
 
 
 # --- Resolver behavior ---
 
 
 def test_non_local_url_untouched():
-    with patch("pico_chat.harness.llm_server._getent_host") as getent:
+    with patch("pico_chat.harness.endpoint._getent_host") as getent:
         url = "http://openrouter.ai/api/v1"
         assert _resolve_local_hostname(url) == url
         getent.assert_not_called()
 
 
 def test_local_host_rewritten_with_ip():
-    with patch("pico_chat.harness.llm_server._getent_host", return_value="192.168.1.50"):
+    with patch("pico_chat.harness.endpoint._getent_host", return_value="192.168.1.50"):
         assert _resolve_local_hostname("http://llm-mini-server.local:8080") == "http://192.168.1.50:8080"
         assert _resolve_local_hostname("http://llm-mini-server.local:8080/v1") == "http://192.168.1.50:8080/v1"
 
 
 def test_resolution_is_cached():
-    with patch("pico_chat.harness.llm_server._getent_host") as getent:
+    with patch("pico_chat.harness.endpoint._getent_host") as getent:
         getent.return_value = "192.168.1.50"
         assert _resolve_local_hostname("http://srv.local/path") == "http://192.168.1.50/path"
         assert _resolve_local_hostname("http://srv.local/path") == "http://192.168.1.50/path"
@@ -66,7 +63,7 @@ def test_resolution_is_cached():
 
 def test_cache_persists_across_calls():
     # Resolution survives repeated lookups without re-running getent.
-    with patch("pico_chat.harness.llm_server._getent_host") as getent:
+    with patch("pico_chat.harness.endpoint._getent_host") as getent:
         getent.return_value = "192.168.1.50"
         for _ in range(5):
             assert _resolve_local_hostname("http://srv.local/x") == "http://192.168.1.50/x"
@@ -74,13 +71,13 @@ def test_cache_persists_across_calls():
 
 
 def test_getent_failure_returns_original():
-    with patch("pico_chat.harness.llm_server._getent_host", return_value=None):
+    with patch("pico_chat.harness.endpoint._getent_host", return_value=None):
         url = "http://srv.local:8080"
         assert _resolve_local_hostname(url) == url
 
 
 def test_invalidate_drops_cache():
-    with patch("pico_chat.harness.llm_server._getent_host") as getent:
+    with patch("pico_chat.harness.endpoint._getent_host") as getent:
         getent.return_value = "192.168.1.50"
         assert _resolve_local_hostname("http://srv.local") == "http://192.168.1.50"
         invalidate_local_hostname("http://srv.local")
@@ -94,7 +91,7 @@ def test_invalidate_drops_cache():
 
 
 def test_prewarm_resolves_in_background():
-    with patch("pico_chat.harness.llm_server._getent_host", return_value="192.168.1.50") as getent:
+    with patch("pico_chat.harness.endpoint._getent_host", return_value="192.168.1.50") as getent:
         prewarm_local_resolution("http://srv.local:8080")
         # The background thread should populate the cache.
         import time
@@ -106,14 +103,14 @@ def test_prewarm_resolves_in_background():
 
 
 def test_prewarm_skips_non_local():
-    with patch("pico_chat.harness.llm_server._getent_host") as getent:
+    with patch("pico_chat.harness.endpoint._getent_host") as getent:
         prewarm_local_resolution("http://openrouter.ai/api/v1")
         getent.assert_not_called()
 
 
 def test_prewarm_skips_if_already_cached():
     _local_cache["srv.local"] = "192.168.1.50"
-    with patch("pico_chat.harness.llm_server._getent_host") as getent:
+    with patch("pico_chat.harness.endpoint._getent_host") as getent:
         prewarm_local_resolution("http://srv.local:8080")
         getent.assert_not_called()
 
@@ -128,8 +125,8 @@ def test_connect_failure_retries_with_fresh_resolution():
     fresh = MagicMock()
     fresh.get = AsyncMock(return_value=MagicMock())
 
-    with patch("pico_chat.harness.llm_server._new_http_client", side_effect=[stale, fresh]), patch(
-        "pico_chat.harness.llm_server._getent_host",
+    with patch("pico_chat.harness.endpoint._new_http_client", side_effect=[stale, fresh]), patch(
+        "pico_chat.harness.endpoint._getent_host",
         side_effect=["192.168.1.50", "192.168.1.99"],  # fresh IP on re-resolve
     ):
         server = make_server("http://srv.local:8080")
@@ -137,7 +134,7 @@ def test_connect_failure_retries_with_fresh_resolution():
 
     assert ok is True
     # The server config was re-pointed at the freshly resolved address.
-    assert server.config.base_url == "http://192.168.1.99:8080"
+    assert server.base_url == "http://192.168.1.99:8080"
     stale.get.assert_called_once()
     fresh.get.assert_called_once()
 
@@ -146,8 +143,8 @@ def test_connect_failure_non_local_does_not_retry():
     down = MagicMock()
     down.get = AsyncMock(side_effect=ConnectionError("down"))
 
-    with patch("pico_chat.harness.llm_server._new_http_client", return_value=down), patch(
-        "pico_chat.harness.llm_server._getent_host"
+    with patch("pico_chat.harness.endpoint._new_http_client", return_value=down), patch(
+        "pico_chat.harness.endpoint._getent_host"
     ) as getent:
         server = make_server("http://localhost:8080")
         ok = _run(server.check_connection())

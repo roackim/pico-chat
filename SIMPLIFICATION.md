@@ -35,31 +35,47 @@ plumbing with one event union: `Token`, `Reasoning`, `ToolCall`, `ToolResult`,
 `PermissionRequest`, `Usage`, `Error`, `Done`. The harness yields events; the UI
 renders them. No `StreamPresenter` extraction needed.
 
-### R2 — One endpoint type
-`Endpoint` = `base_url` + `api_key` + optional discovery/routing. Collapse
-`LLMServerConfig` + `get_server_config*` + `ServerService` + the `LLMServer`
-ABC/four subclasses. Keep thin adapters only where genuinely different (Ollama
-native usage counters, OpenRouter provider routing). Deletes the
-`active_model`/`model_selection`/catalog sync.
+### R2 — One endpoint type *(done 2026-09-21)*
+`Endpoint` (in `harness/endpoint.py`) is one concrete type: connection config
+plus live transport. Collapsed `LLMServerConfig` + `get_server_config*` +
+`ServerService` + the `LLMServer` ABC/four subclasses. Server-family
+differences are internal branches (Ollama native usage counters, OpenRouter
+provider routing). `server_service.py`, `llm_server.py` and
+`llm_server_config.py` are deleted. Model selection is live discovery; the
+`state.toml` catalog is only a convenience cache/fallback.
+
+### R3 (partial) — file-based config editing
+Commands no longer build config with forms: `/config`, `/edit` and
+`/roles edit` open `$VISUAL`/`$EDITOR` (fallback nano/vim/vi) and reload. The
+TUI terminal suspends/resumes around the editor (`ui/tui/terminal.py`,
+`ui/external_editor.py`). `/server` is list/use/edit/info/remove/diagnose;
+`/model` discovers live. Full command-registry-as-data cleanup still pending.
 
 ### R3 — Commands as data
 One registry of `(name, description, params, handler)`. Classes only where a
 subcommand tree plus state is real.
 
-### R4 — Config: `pico.toml` + `roles.toml`, project-local overrides
-- User: `~/.config/pico-chat/pico.toml` and `~/.config/pico-chat/roles.toml`.
-- Project-local `pico.toml` / `roles.toml` override the user files, discovered
-  by walking up from the working directory.
-- `/reload` reloads explicitly (startup also loads). No file watcher, no
-  automatic project reload.
+### R4 — Config: `pico.toml` + `roles/<name>.toml` (user-level only)
+- User: `~/.config/pico-chat/pico.toml` and `~/.config/pico-chat/roles/<name>.toml`.
+  `PICO_CONFIG_DIR` overrides the directory.
+- **No project-local overrides** (decided 2026-09-21): avoids the trust
+  problem of a cloned repo changing permissions/endpoints. May return later
+  behind an explicit trust step.
+- `/reload` reloads explicitly (startup also loads). No file watcher.
 - Loader must **validate and report** errors (the current loader silently
-  swallows malformed files).
-- Separate intent (hand-edited) from state (machine cache). State is disposable.
+  swallows malformed files). Invalid entries keep their defaults; the rest of
+  the file still applies.
+- Separate intent (`pico.toml`, hand-edited) from state (`state.toml`,
+  machine-written, disposable).
 
-### R5 — Settings move to files; delete the authoring UI
+### R5 — Settings move to files; delete the authoring UI *(done 2026-09-21)*
 Delete: `form.py`, `form_popup.py`, `settings_panel.py`, `settings_screen.py`,
 `settings_pages.py`, `openrouter_settings.py`, `role_editor_form.py`,
 `role_editor_model.py`, `config_overlay`, the settings tab, profile editors.
+The `/settings` and `/permissions` commands were removed with it; the only
+interactive UI left is the text popup and the permission `[a]`/`[x]` prompt.
+`show_form_popup`/`show_confirmation` were removed from `app.py` and
+`commands/base.py` (the latter had no callers).
 Keep interactive **only** for permission approval and destructive confirmation.
 
 ### R6 — Remove tabs entirely
@@ -83,9 +99,9 @@ Editing a file plus `/reload` replaces the old forms. A future bare-bones
 in-terminal editor (nano-style) is a nice-to-have, not core; until then use
 `$EDITOR`.
 
-### R11 — Roles stay named; `/role use` remains
-`roles.toml` keeps multiple named roles; the active one is selected at runtime
-via `/role use`. (Re-explained O4.)
+### R11 — Roles stay named; `/roles use` remains
+`roles/<name>.toml` keeps one role per file; the active one is selected at runtime
+via `/roles use`. (Re-explained O4.)
 
 ---
 
@@ -98,16 +114,17 @@ via `/role use`. (Re-explained O4.)
 
 ---
 
-## Definition needed
+## Decisions (resolved 2026-09-21)
 
-| # | Item | Options / recommendation |
-|---|------|--------------------------|
-| P1 | **Project-local config trust.** A cloned repo's `pico.toml`/`roles.toml` can change permissions (auto-allow `run`) or point at a malicious endpoint. | **T1 (rec):** trust-on-first-use keyed by config hash in `state.toml`; prompt on new/changed file. T2: project config may not touch servers/permissions. T3: always confirm. |
-| P2 | **Exact schema** for `pico.toml`, `roles.toml`, `state.toml`. | See sketch below; confirm keys/sections. |
-| P3 | **Surviving command surface.** | `/help /clear /reload /config /edit /model /server /role /export /quit` (+ maybe `/tools`). Confirm. |
-| P4 | **Headless features to keep vs delete.** | Keep: roles, model/server discovery+selection, context file tree, debug-to-file. Decide: compaction, subagents, search tools, containerization, token estimation. |
-| P5 | **Editor.** | `/edit [file]` opens `$VISUAL`/`$EDITOR` (rec); built-in editor later. |
-| P6 | **Migration** from current `config.toml`/`roles.toml`. | M1 back-compat keys; M2 `/migrate-config`; **M3 (rec, early project):** rename + document. |
+| # | Decision |
+|---|----------|
+| P1 | **No project-local config.** User-level `pico.toml` + `roles/` only. No trust model needed now. |
+| P2 | Schema: `[ui]`, `[servers.<name>]`, `[context]`, `[subagents]`, `[debug]`, `[markdown_styles]`, `[syntax_highlight]` in `pico.toml`; one role body per file in `roles/<name>.toml`; tiny disposable `state.toml`. |
+| P2b | `state.toml` = `last_server`, `active_model`, `last_model`, `model_catalog`. Safe to delete. |
+| P3 | Command surface is deferred to a dedicated command refactor. Editing will spawn `$EDITOR` (e.g. `/roles edit architect`). |
+| P4 | Keep **compaction** and **subagents**. Delete **search tools**, **containerization**, **token estimation**. |
+| P5 | `/edit [file]` and friends open `$VISUAL`/`$EDITOR`; built-in editor later. |
+| P6 | Start fresh + document. No back-compat keys. |
 
 ### Config sketch (P2)
 
@@ -131,25 +148,34 @@ providers = ["Anthropic"]
 ```
 
 ```toml
-# roles.toml
-[roles.default]
+# roles/architect.toml  (body is the role; file name is the role name)
 description = "General coding assistant"
 prompt = ""
-tools = ["read", "write", "patch", "run", "search_web", "search_wiki"]
-read   = { inside = "allow", outside = "ask" }
-write  = { inside = "allow", outside = "deny" }
-patch  = { inside = "allow", outside = "deny" }
-run    = { others = "deny", chain = "ask", allow = ["ls", "cat"], container = true }
+
+[tools.read]
+enabled = true
+permission = "allow"
+[tools.read.settings]
+inside_repo = "allow"
+outside_repo = "ask"
+
+[tools.run_command]
+enabled = true
+permission = "ask"
+[tools.run_command.settings]
+others = "deny"
+chain_policy = "ask"
+allow = ["ls", "cat"]
 ```
 
 ```toml
 # state.toml  (machine-written, disposable)
 last_server = "local"
-last_model  = { local = "qwen..." }
+active_model = "qwen..."
+[last_model]
+local = "qwen..."
 [model_catalog]
 local = [{ id = "qwen...", context_window = 32768 }]
-[trusted_projects]
-"/path/to/repo" = "sha256:..."
 ```
 
 ---
@@ -165,11 +191,11 @@ item.
 
 ## Proposed sequencing
 
-1. **R4** config schema + loader + validation + project overrides + `/reload`.
-2. **R2** `Endpoint`; delete the server/service/llm-config split.
+1. **R4** config schema + loader + validation + `/reload`. *(done 2026-09-21)*
+2. **R2** `Endpoint`; delete the server/service/llm-config split. *(done 2026-09-21)*
 3. **R1** event union; harness yields, UI consumes.
 4. **R3** command registry as data; prune command classes.
-5. **R5/R6** delete forms/settings/tabs; single-conversation app.
+5. **R5** delete forms/settings; single-conversation app. *(R5 done 2026-09-21; R6 pending)*
 6. Revisit deferred items.
 
 Each phase ends with fewer files and fewer layers.

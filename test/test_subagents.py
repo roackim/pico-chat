@@ -18,6 +18,7 @@ import pytest
 from pico_chat.harness.tools import SubagentTool, WaitForSubagentsTool
 from pico_chat.harness.permissions import scaffolder
 import pico_chat.pico_cfg as pico_cfg_module
+from pico_chat.harness.endpoint import Endpoint
 
 
 # ---------------------------------------------------------------------------
@@ -336,7 +337,7 @@ class TestHarnessSubagentIntegration:
         """A Harness at depth > 0 should use the scaffolder role."""
         from pico_chat.harness.harness import Harness
 
-        with patch("pico_chat.harness.harness.create_server"):
+        with patch("pico_chat.harness.harness.get_active_endpoint", return_value=Endpoint(name="test", type="llamacpp")):
             h = Harness(workspace_path=str(tmp_path), depth=1)
 
         assert h.role.name == "scaffolder"
@@ -349,7 +350,7 @@ class TestHarnessSubagentIntegration:
         from pico_chat.harness.harness import Harness
         from pico_chat.harness.usage import TokenUsage
 
-        with patch("pico_chat.harness.harness.create_server"):
+        with patch("pico_chat.harness.harness.get_active_endpoint", return_value=Endpoint(name="test", type="llamacpp")):
             h = Harness(workspace_path=str(tmp_path), depth=0)
 
         h._last_usage = TokenUsage(prompt_tokens=12000, completion_tokens=500)
@@ -370,7 +371,7 @@ class TestHarnessSubagentIntegration:
         from pico_chat.harness.harness import Harness
         from pico_chat.harness.usage import TokenUsage
 
-        with patch("pico_chat.harness.harness.create_server"):
+        with patch("pico_chat.harness.harness.get_active_endpoint", return_value=Endpoint(name="test", type="llamacpp")):
             h = Harness(workspace_path=str(tmp_path), depth=0)
 
         h._last_usage = TokenUsage(prompt_tokens=12000, completion_tokens=500)
@@ -379,7 +380,7 @@ class TestHarnessSubagentIntegration:
         # final OpenAI/Ollama usage chunk). _last_usage must be updated, not
         # wiped to None first.
         usage_chunk = SimpleNamespace(choices=[], usage={"prompt_tokens": 13000, "completion_tokens": 600})
-        server = h.server
+        server = h.endpoint
 
         async def fake_completion(messages, tools=None, stream=True):
             yield usage_chunk
@@ -403,11 +404,11 @@ class TestHarnessSubagentIntegration:
         from pico_chat.harness.harness import Harness
         from pico_chat.harness.roles import Role
 
-        with patch("pico_chat.harness.harness.create_server"):
+        with patch("pico_chat.harness.harness.get_active_endpoint", return_value=Endpoint(name="test", type="llamacpp")):
             h = Harness(workspace_path=str(tmp_path), depth=0)
 
-        h.server.get_model_name = AsyncMock(return_value="test-model")
-        h.server.get_context_window = AsyncMock(return_value=32768)
+        h.endpoint.get_model_name = AsyncMock(return_value="test-model")
+        h.endpoint.get_context_window = AsyncMock(return_value=32768)
 
         h.set_role(Role("reviewer", prompt="You are a strict code reviewer."))
         prompt = asyncio.run(h.get_system_prompt())
@@ -420,10 +421,10 @@ class TestHarnessSubagentIntegration:
         prompt size (the system prompt is only sent with the first message)."""
         from pico_chat.harness.harness import Harness
 
-        with patch("pico_chat.harness.harness.create_server"):
+        with patch("pico_chat.harness.harness.get_active_endpoint", return_value=Endpoint(name="test", type="llamacpp")):
             h = Harness(workspace_path=str(tmp_path), depth=0)
 
-        h.server._cached_context_window = 32768
+        h.endpoint._cached_context_window = 32768
         used, maximum, percentage = h.estimate_context_usage()
 
         assert used == 0
@@ -436,10 +437,10 @@ class TestHarnessSubagentIntegration:
         from pico_chat.harness.harness import Harness
         from pico_chat.harness.roles import Role
 
-        with patch("pico_chat.harness.harness.create_server"):
+        with patch("pico_chat.harness.harness.get_active_endpoint", return_value=Endpoint(name="test", type="llamacpp")):
             h = Harness(workspace_path=str(tmp_path), depth=0)
 
-        h.server._cached_context_window = 32768
+        h.endpoint._cached_context_window = 32768
         h.history = [{"role": "user", "content": "hello"}]
         base_used, _, _ = h.estimate_context_usage()
 
@@ -454,7 +455,7 @@ class TestHarnessSubagentIntegration:
         from pico_chat.harness.roles import default_role
 
         parent_role = default_role()
-        with patch("pico_chat.harness.harness.create_server"):
+        with patch("pico_chat.harness.harness.get_active_endpoint", return_value=Endpoint(name="test", type="llamacpp")):
             h = Harness(workspace_path=str(tmp_path), depth=1, role=parent_role)
 
         assert h.role.name == "scaffolder"
@@ -463,7 +464,7 @@ class TestHarnessSubagentIntegration:
         """A Harness at depth 0 defaults to the permissive default role."""
         from pico_chat.harness.harness import Harness
 
-        with patch("pico_chat.harness.harness.create_server"):
+        with patch("pico_chat.harness.harness.get_active_endpoint", return_value=Endpoint(name="test", type="llamacpp")):
             h = Harness(workspace_path=str(tmp_path), depth=0)
 
         assert h.role.name == "default"
@@ -471,7 +472,7 @@ class TestHarnessSubagentIntegration:
     def test_abort_subagents_sets_event(self, tmp_path):
         from pico_chat.harness.harness import Harness
 
-        with patch("pico_chat.harness.harness.create_server"):
+        with patch("pico_chat.harness.harness.get_active_endpoint", return_value=Endpoint(name="test", type="llamacpp")):
             h = Harness(workspace_path=str(tmp_path), depth=0)
 
         assert not h._abort_subagents_event.is_set()
@@ -482,7 +483,7 @@ class TestHarnessSubagentIntegration:
         """Delegation must honor the main harness permission gate."""
         from pico_chat.harness.harness import Harness
 
-        with patch("pico_chat.harness.harness.create_server"):
+        with patch("pico_chat.harness.harness.get_active_endpoint", return_value=Endpoint(name="test", type="llamacpp")):
             h = Harness(workspace_path=str(tmp_path), depth=0)
 
         assert h._check_tool_permission("subagent", {}) == "ask"
@@ -492,7 +493,7 @@ class TestHarnessSubagentIntegration:
         """A depth>0 Harness should deny write requests via the scaffolder profile."""
         from pico_chat.harness.harness import Harness
 
-        with patch("pico_chat.harness.harness.create_server"):
+        with patch("pico_chat.harness.harness.get_active_endpoint", return_value=Endpoint(name="test", type="llamacpp")):
             h = Harness(workspace_path=str(tmp_path), depth=1)
 
         result = h._check_tool_permission("write", {"path": str(tmp_path / "file.txt")})
@@ -502,7 +503,7 @@ class TestHarnessSubagentIntegration:
         """A depth>0 Harness should deny all run requests via the scaffolder profile."""
         from pico_chat.harness.harness import Harness
 
-        with patch("pico_chat.harness.harness.create_server"):
+        with patch("pico_chat.harness.harness.get_active_endpoint", return_value=Endpoint(name="test", type="llamacpp")):
             h = Harness(workspace_path=str(tmp_path), depth=1)
 
         result = h._check_tool_permission("run", {"command": "ls"})
@@ -512,7 +513,7 @@ class TestHarnessSubagentIntegration:
         """A depth>0 Harness should allow reads inside the workspace."""
         from pico_chat.harness.harness import Harness
 
-        with patch("pico_chat.harness.harness.create_server"):
+        with patch("pico_chat.harness.harness.get_active_endpoint", return_value=Endpoint(name="test", type="llamacpp")):
             h = Harness(workspace_path=str(tmp_path), depth=1)
 
         inside_file = str(tmp_path / "README.md")

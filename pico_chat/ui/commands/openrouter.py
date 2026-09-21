@@ -2,11 +2,44 @@
 
 from __future__ import annotations
 
-from typing import List
+import os
+from typing import List, Tuple
 
 from pico_chat.ui.tui.msg_types import SysMsgError
 
 from .base import ChatUIProtocol, Command
+
+
+async def fetch_openrouter_balance() -> Tuple[bool, str, dict]:
+    """Return ``(ok, error_message, balance_dict)`` for the account."""
+    api_key = os.getenv("OPENROUTER_API_KEY", "")
+    if not api_key:
+        return False, (
+            "OpenRouter API key not found.\n"
+            "Set environment variable: export OPENROUTER_API_KEY=sk-or-..."
+        ), {}
+
+    import httpx
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "https://openrouter.ai/api/v1/credits",
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=10.0,
+            )
+        if response.status_code != 200:
+            return False, f"OpenRouter API error: HTTP {response.status_code}", {}
+        data = response.json().get("data", {})
+        total_credits = data.get("total_credits", 0.0)
+        total_usage = data.get("total_usage", 0.0)
+        return True, "", {
+            "total_credits": total_credits,
+            "total_usage": total_usage,
+            "remaining": total_credits - total_usage,
+        }
+    except Exception as e:
+        return False, f"Failed to fetch balance: {e}", {}
 
 
 class OpenRouterBalanceCommand(Command):
@@ -14,31 +47,28 @@ class OpenRouterBalanceCommand(Command):
         super().__init__("balance", "Show OpenRouter account credit balance")
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        from pico_chat.harness.server_service import ServerService
-
         # Balance is transient account information, so keep it in a modal
         # rather than adding a permanent chat-history message.
         ui.show_popup("OpenRouter balance", "Fetching balance...")
 
-        svc = ServerService()
-        ok, message, balance = await svc.get_openrouter_balance()
-
+        ok, message, balance = await fetch_openrouter_balance()
         if not ok:
             ui.show_popup("OpenRouter balance", message)
             return
 
-        if balance.remaining > 5:
+        remaining = balance["remaining"]
+        if remaining > 5:
             status = "healthy"
-        elif balance.remaining > 1:
+        elif remaining > 1:
             status = "low"
         else:
             status = "critical"
 
         content = (
             f"Status           : {status}\n"
-            f"Remaining        : ${balance.remaining:.4f}\n"
-            f"Total credits    : ${balance.total_credits:.4f}\n"
-            f"Total usage      : ${balance.total_usage:.4f}"
+            f"Remaining        : ${remaining:.4f}\n"
+            f"Total credits    : ${balance['total_credits']:.4f}\n"
+            f"Total usage      : ${balance['total_usage']:.4f}"
         )
         ui.show_popup("OpenRouter balance", content)
 

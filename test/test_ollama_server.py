@@ -5,8 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from pico_chat.harness.llm_server import OllamaServer
-from pico_chat.harness.llm_server_config import LLMServerConfig
+from pico_chat.harness.endpoint import Endpoint
 
 
 def make_client() -> MagicMock:
@@ -16,8 +15,8 @@ def make_client() -> MagicMock:
     return client
 
 
-def make_server(base_url: str = "http://localhost:11434/v1") -> OllamaServer:
-    config = LLMServerConfig(
+def make_server(base_url: str = "http://localhost:11434/v1") -> Endpoint:
+    return Endpoint(
         name="ollama-test",
         type="ollama",
         base_url=base_url,
@@ -26,7 +25,6 @@ def make_server(base_url: str = "http://localhost:11434/v1") -> OllamaServer:
         max_context=None,
         timeout=1.0,
     )
-    return OllamaServer(config)
 
 
 def test_native_base_url_strips_v1_suffix():
@@ -103,7 +101,7 @@ def test_query_context_window_parses_parameters():
 
 
 def test_native_response_adapts_content_and_usage():
-    chunk = OllamaServer._native_response({
+    chunk = Endpoint._native_response({
         "message": {"role": "assistant", "content": "hello"},
         "done": True,
         "prompt_eval_count": 100,
@@ -115,7 +113,7 @@ def test_native_response_adapts_content_and_usage():
 
 
 def test_native_response_adapts_reasoning_and_tool_calls():
-    chunk = OllamaServer._native_response({
+    chunk = Endpoint._native_response({
         "message": {
             "role": "assistant",
             "content": "call",

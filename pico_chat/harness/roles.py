@@ -246,64 +246,84 @@ def _role_from_dict(name: str, data: dict[str, Any]) -> Role:
     )
 
 
-_ROLE_PATH = Path("~/.config/pico-chat/roles.toml").expanduser()
+def _default_roles_dir() -> Path:
+    from pico_chat import pico_cfg
+
+    return pico_cfg.get_roles_dir()
+
+
+# One role per file: ``<config>/roles/<name>.toml``. The file body is the role
+# itself (``description``/``prompt``/``[tools.<tool>]``), and the stem is the
+# role name. Files whose stem starts with ``_`` or ``.`` are ignored, which is
+# where the shipped example lives.
+_ROLES_DIR = _default_roles_dir()
+
+
+def _role_file(name: str) -> Path:
+    return _ROLES_DIR / f"{name}.toml"
+
+
+def _validate_name(name: str) -> str:
+    name = name.strip()
+    if not name or name.startswith(".") or any(c in name for c in "[]\\/"):
+        raise ValueError("Role name must be non-empty and cannot contain '[', '\\', '/' or start with '.'")
+    return name
+
+
+def _iter_role_files():
+    if not _ROLES_DIR.exists():
+        return []
+    return sorted(
+        path for path in _ROLES_DIR.glob("*.toml")
+        if not path.stem.startswith(("_", "."))
+    )
+
+
+def _read_role_file(path: Path) -> dict[str, Any]:
+    try:
+        return toml.load(path)
+    except (toml.TomlDecodeError, OSError) as exc:
+        raise ValueError(f"Invalid role file {path.name}: {exc}") from exc
 
 
 def save_role(role: Role) -> None:
-    name = role.name.strip()
-    if not name or any(char in name for char in "[]\\"):
-        raise ValueError("Role name must be non-empty and cannot contain '[' or '\\'")
-    data = toml.load(_ROLE_PATH) if _ROLE_PATH.exists() else {}
-    deleted_roles = set(data.get("deleted_roles", []))
-    deleted_roles.discard(name)
-    if deleted_roles:
-        data["deleted_roles"] = sorted(deleted_roles)
-    else:
-        data.pop("deleted_roles", None)
-    data.setdefault("roles", {})[name] = _role_to_dict(role)
-    _ROLE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _ROLE_PATH.write_text(toml.dumps(data), encoding="utf-8")
+    name = _validate_name(role.name)
+    _ROLES_DIR.mkdir(parents=True, exist_ok=True)
+    _role_file(name).write_text(toml.dumps(_role_to_dict(role)), encoding="utf-8")
 
 
 def rename_role(old_name: str, new_name: str) -> None:
     """Rename a saved role; built-in roles must be copied first."""
-    new_name = new_name.strip()
-    if not new_name or any(char in new_name for char in "[]\\"):
-        raise ValueError("Role name must be non-empty and cannot contain '[' or '\\'")
+    new_name = _validate_name(new_name)
     if old_name in builtin_roles():
         raise ValueError(f"Built-in role cannot be renamed: {old_name}")
-    if not _ROLE_PATH.exists():
+    source = _role_file(old_name)
+    if not source.exists():
         raise KeyError(f"Role not found: {old_name}")
-    data = toml.load(_ROLE_PATH)
-    saved = data.get("roles", {})
-    if old_name not in saved:
-        raise KeyError(f"Role not found: {old_name}")
-    if new_name in builtin_roles() or new_name in saved:
+    if new_name in builtin_roles() or _role_file(new_name).exists():
         raise ValueError(f"Role already exists: {new_name}")
-    saved[new_name] = saved.pop(old_name)
-    _ROLE_PATH.write_text(toml.dumps(data), encoding="utf-8")
+    source.rename(_role_file(new_name))
 
 
 def delete_role(name: str) -> None:
-    """Delete a role, retaining a tombstone for deleted built-ins."""
-    data = toml.load(_ROLE_PATH) if _ROLE_PATH.exists() else {}
+    """Delete a role file; a deleted built-in is hidden by a tombstone file."""
     if name not in list_roles():
         raise KeyError(f"Role not found: {name}")
     if len(list_roles()) <= 1:
         raise ValueError("At least one role must remain")
-    saved = data.get("roles", {})
-    saved.pop(name, None)
+    path = _role_file(name)
     if name in builtin_roles():
-        deleted_roles = set(data.get("deleted_roles", []))
-        deleted_roles.add(name)
-        data["deleted_roles"] = sorted(deleted_roles)
-    _ROLE_PATH.write_text(toml.dumps(data), encoding="utf-8")
+        # Hide the built-in rather than resurrecting it by deleting the file.
+        _ROLES_DIR.mkdir(parents=True, exist_ok=True)
+        path.write_text("disabled = true\n", encoding="utf-8")
+    elif path.exists():
+        path.unlink()
 
 
 def duplicate_role(name: str, new_name: str | None = None) -> Role:
     """Copy a built-in or saved role into a new saved role."""
     source = load_role(name)
-    target_name = (new_name or f"{name}-copy").strip()
+    target_name = _validate_name(new_name or f"{name}-copy")
     existing = set(list_roles())
     if target_name in existing:
         suffix = 2
@@ -318,12 +338,13 @@ def duplicate_role(name: str, new_name: str | None = None) -> Role:
 
 
 def load_role(name: str) -> Role:
+    path = _role_file(name)
+    if path.exists():
+        data = _read_role_file(path)
+        if data.get("disabled"):
+            raise KeyError(f"Role not found: {name}")
+        return _role_from_dict(name, data)
     builtins = builtin_roles()
-    data = toml.load(_ROLE_PATH).get("roles", {}) if _ROLE_PATH.exists() else {}
-    if name in set(data.get("deleted_roles", [])):
-        raise KeyError(f"Role not found: {name}")
-    if name in data:
-        return _role_from_dict(name, data[name])
     if name in builtins:
         return builtins[name]
     raise KeyError(f"Role not found: {name}")
@@ -331,8 +352,10 @@ def load_role(name: str) -> Role:
 
 def list_roles() -> list[str]:
     names = set(builtin_roles())
-    if _ROLE_PATH.exists():
-        data = toml.load(_ROLE_PATH)
-        names.update(data.get("roles", {}).keys())
-        names.difference_update(data.get("deleted_roles", []))
+    for path in _iter_role_files():
+        data = _read_role_file(path)
+        if data.get("disabled"):
+            names.discard(path.stem)
+        else:
+            names.add(path.stem)
     return sorted(names)

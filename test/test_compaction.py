@@ -62,6 +62,6 @@ def test_compact_history_summary_call_has_single_system_message_first(harness_st
 
     asyncio.run(harness.compact_history())
 
-    roles = [m["role"] for m in harness.server.last_messages]
+    roles = [m["role"] for m in harness.endpoint.last_messages]
     assert roles[0] == "system"
     assert roles.count("system") == 1

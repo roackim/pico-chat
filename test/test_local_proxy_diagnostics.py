@@ -3,16 +3,16 @@
 import httpx
 import pytest
 
-from pico_chat.harness.llm_server import (
+from pico_chat.harness.endpoint import (
     ConnectionDiagnosis,
+    Endpoint,
     _is_local_target,
     _new_http_client,
 )
-from pico_chat.harness.llm_server_config import LLMServerConfig
 
 
 def make_config(base_url: str):
-    return LLMServerConfig(
+    return Endpoint(
         name="t", type="llamacpp", base_url=base_url, api_key="EMPTY",
         model=None, max_context=None, timeout=1.0,
     )

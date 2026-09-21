@@ -1,5 +1,7 @@
 """Tests for conversation roles and their permission integration."""
 
+import pytest
+
 from pico_chat.harness.permissions import PermissionGate
 from pico_chat.harness.roles import (
     Role,
@@ -13,47 +15,6 @@ from pico_chat.harness.roles import (
     save_role,
 )
 import pico_chat.harness.roles as roles_module
-from pico_chat.ui.role_editor_model import RoleEditorModel
-from pico_chat.ui.commands.permissions import PermissionsCommand
-
-
-class _RoleEditorAgent:
-    def __init__(self):
-        self.role = Role("default")
-
-    def set_role(self, role):
-        self.role = role
-
-
-class _RoleEditorRuntime:
-    def __init__(self):
-        self.agent = _RoleEditorAgent()
-
-    def switch_role(self, role):
-        self.agent.set_role(role)
-        return role
-
-
-class _RoleEditorUI:
-    def __init__(self):
-        self.runtime = _RoleEditorRuntime()
-        self.chat_history_panel = type("Panel", (), {"add_message": lambda *_args, **_kwargs: None})()
-        self.fields = None
-
-    def _active_runtime(self):
-        return self.runtime
-
-    @property
-    def agent(self):
-        return self.runtime.agent
-
-    def show_form_popup(self, _title, fields, _on_submit, **_kwargs):
-        self.fields = fields
-
-
-class _RoleEditorUIWithoutRuntime(_RoleEditorUI):
-    def _active_runtime(self):
-        return None
 
 
 def test_reviewer_role_combines_tools_permissions_and_prompt():
@@ -64,26 +25,6 @@ def test_reviewer_role_combines_tools_permissions_and_prompt():
     }
     assert reviewer.prompt
     assert reviewer.policy_for("write").settings["inside_repo"] == "deny"
-
-
-def test_permissions_role_selection_applies_to_active_conversation():
-    ui = _RoleEditorUI()
-
-    import asyncio
-    asyncio.run(PermissionsCommand().execute(ui, []))
-    ui.fields[0]._on_select("reviewer")
-
-    assert ui.runtime.agent.role.name == "reviewer"
-
-
-def test_permissions_role_selection_applies_before_first_conversation_tab():
-    ui = _RoleEditorUIWithoutRuntime()
-
-    import asyncio
-    asyncio.run(PermissionsCommand().execute(ui, []))
-    ui.fields[0]._on_select("reviewer")
-
-    assert ui.agent.role.name == "reviewer"
 
 
 def test_disabled_tool_is_denied_before_permission_prompt():
@@ -102,7 +43,7 @@ def test_disabled_tool_is_denied_before_permission_prompt():
 
 
 def test_saved_role_round_trip(tmp_path, monkeypatch):
-    monkeypatch.setattr(roles_module, "_ROLE_PATH", tmp_path / "roles.toml")
+    monkeypatch.setattr(roles_module, "_ROLES_DIR", tmp_path / "roles")
     role = Role(
         name="custom",
         description="A focused role",
@@ -119,7 +60,7 @@ def test_saved_role_round_trip(tmp_path, monkeypatch):
 
 
 def test_role_lifecycle_keeps_builtin_rename_protection(tmp_path, monkeypatch):
-    monkeypatch.setattr(roles_module, "_ROLE_PATH", tmp_path / "roles.toml")
+    monkeypatch.setattr(roles_module, "_ROLES_DIR", tmp_path / "roles")
 
     copy = duplicate_role("reviewer", "reviewer-custom")
     assert copy.name == "reviewer-custom"
@@ -141,7 +82,7 @@ def test_role_lifecycle_keeps_builtin_rename_protection(tmp_path, monkeypatch):
 
 
 def test_role_lifecycle_keeps_one_role(tmp_path, monkeypatch):
-    monkeypatch.setattr(roles_module, "_ROLE_PATH", tmp_path / "roles.toml")
+    monkeypatch.setattr(roles_module, "_ROLES_DIR", tmp_path / "roles")
 
     delete_role("reviewer")
     delete_role("researcher")
@@ -153,13 +94,41 @@ def test_role_lifecycle_keeps_one_role(tmp_path, monkeypatch):
         raise AssertionError("last role was deleted")
 
 
-def test_editing_builtin_role_saves_in_place(tmp_path, monkeypatch):
-    monkeypatch.setattr(roles_module, "_ROLE_PATH", tmp_path / "roles.toml")
-    editor = RoleEditorModel("reviewer")
-    edited = editor.draft
-    edited.description = "Custom review policy"
+def test_role_folder_is_one_file_per_role(tmp_path, monkeypatch):
+    monkeypatch.setattr(roles_module, "_ROLES_DIR", tmp_path / "roles")
 
-    updated = editor.update(edited)
+    save_role(Role("alpha", description="A", prompt="p", tools={}))
 
-    assert updated.name == "reviewer"
+    assert (tmp_path / "roles" / "alpha.toml").exists()
+    assert "alpha" in list_roles()
+    assert load_role("alpha").description == "A"
+
+
+def test_example_file_is_ignored(tmp_path, monkeypatch):
+    monkeypatch.setattr(roles_module, "_ROLES_DIR", tmp_path / "roles")
+    (tmp_path / "roles").mkdir()
+    (tmp_path / "roles" / "_example.toml").write_text("disabled = true\n")
+
+    assert "_example" not in list_roles()
+    with pytest.raises(KeyError):
+        load_role("_example")
+
+
+def test_disabled_file_hides_builtin(tmp_path, monkeypatch):
+    monkeypatch.setattr(roles_module, "_ROLES_DIR", tmp_path / "roles")
+    (tmp_path / "roles").mkdir()
+    (tmp_path / "roles" / "reviewer.toml").write_text("disabled = true\n")
+
+    assert "reviewer" not in list_roles()
+    with pytest.raises(KeyError):
+        load_role("reviewer")
+
+
+def test_role_file_overrides_builtin(tmp_path, monkeypatch):
+    monkeypatch.setattr(roles_module, "_ROLES_DIR", tmp_path / "roles")
+    (tmp_path / "roles").mkdir()
+    (tmp_path / "roles" / "reviewer.toml").write_text(
+        'description = "Custom review policy"\nprompt = ""\n', encoding="utf-8")
+
     assert load_role("reviewer").description == "Custom review policy"
+

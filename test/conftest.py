@@ -132,7 +132,7 @@ def harness_stub_compaction():
     harness.history = []
     harness.workspace = "."
     harness.project_context = "Project Root: .\nFiles:"
-    harness.server = FakeServer()
+    harness.endpoint = FakeServer()
     return harness
 
 
