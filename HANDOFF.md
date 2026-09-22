@@ -1,6 +1,6 @@
 # Pico-Chat — Handoff
 
-**Branch:** `cleanup` · **Suite:** 505 passing · **Last updated:** 2026-09-22
+**Branch:** `cleanup` · **Suite:** 522 passing · **Last updated:** 2026-09-22
 **HEAD:** `43d0ca7 Input completion unification` (C4.2/C4.3 + C5)
 **Tree:** C4.1/C6.2 work uncommitted (new `message_view.py`); scratch untracked
 (`old_HANDOFF.md`, `plans/cleanup_round2.md`, `test.json`). The user commits
@@ -18,7 +18,7 @@ Canonical plans: `SIMPLIFICATION.md` (R1–R11), `plans/message_ui_rework.md`,
 ## 1. Commands
 
 ```bash
-.pixi/envs/default/bin/python -m pytest test/ -q            # 505 passing
+.pixi/envs/default/bin/python -m pytest test/ -q            # 522 passing
 .pixi/envs/default/bin/python -m compileall -q pico_chat
 .pixi/envs/default/bin/python -m vulture pico_chat --min-confidence 80
 .pixi/envs/default/bin/python -m pytest test/test_core_ui_boundary.py -q        # R9 guard
@@ -56,9 +56,10 @@ No lint/typecheck beyond these. Keep the suite green and both guards passing.
 - **Commands:** `ui/commands/registry.py` is the single assembly point. Leaf
   commands are plain `async def` handlers + a `Command(name, description,
   handler=…, params=…)` entry; only real subcommand trees stay as `Command`
-  subclasses (`ServerCommand`, `ModelCommand`, `DebugCommand`,
-  `OpenRouterCommand`, `ConversationCommand`). `help`'s handler is `registry._help`
-  (it needs the whole registry); domain modules import **only** `base`.
+  subclasses (`ServerCommand`, `DebugCommand`, `OpenRouterCommand`). `help`'s
+  handler is `registry._help` (it needs the whole registry); domain modules import
+  **only** `base`. `/import` and `/export` are top-level leaf commands;
+  `/model` is a leaf (no args → picker, `<model>` → select).
 - **Message selection + action line:** selected message gets `▌`; an `ActionBar`
   above the input shows actions (right-aligned, muted) or input-prefix hints.
   Actions are only COPY/OUTPUT/ALLOW/DENY.
@@ -120,6 +121,22 @@ No lint/typecheck beyond these. Keep the suite green and both guards passing.
   primitives. Barrels pruned: `components/__init__` exports only
   `Component, TextComponent, Box, MessageView, InputComponent`; `tui/__init__` is
   a docstring; `input/__init__` exports only `InputComponent`. Suite 515 → 505.
+- **Command interface rework:** `/conversation import|export` replaced by
+  top-level `/import` / `/export`; `/model list` removed and `ModelCommand`
+  collapsed into a leaf `/model` (no args → picker, `<model>` → select). The
+  picker is now a centered, searchable overlay (`ui/tui/components/search_modal.py`,
+  `SearchModal` over `SelectionMenu`): anchored directly above the input like
+  the `/` and `@` menus (same `InputComponent` positioning primitive,
+  full-width), accent frame, model id primary with muted aligned
+  server/context and a trailing `active` tag on the current model, query shown
+  in the title (`Models: qwe `), type-to-filter. It opens instantly
+  from the cached catalog and refreshes discovery in the background (bounded by
+  `_DISCOVERY_TIMEOUT`), so an unreachable server no longer stalls it.
+  The `/` suggestion popup carries per-command descriptions (muted, aligned)
+  via `SelectionMenu.item_descriptions`, with the same mechanism wired for
+  subcommands. The popup is styled like the `@` file picker (full-width, USER
+  frame) and fills its rectangle so it overwrites the action bar behind it.
+  Suite 505 → 522.
 - Earlier UI polish (unchanged): `▌` prefix bar, inter-message `ui_msg_v_margin`,
   centralized `Box` padding, right-aligned action line, fuzzy-menu styling,
   Ctrl+C quits on first press, `/model` modal picker, `ui_max_input_height`.
@@ -159,6 +176,14 @@ built-in mini editor.
   `endpoint_local._getent_host`, not `endpoint._getent_host`.
 - Input completion is one module (`input/completion.py`); the provider classes
   live there. `ContextCompletion` is imported from `.completion` in tests.
+- `SelectionMenu.render` must clear its whole rectangle (bg fill) before drawing
+  — overlay cells aren't auto-blanked, so without it the action bar shows
+  through. The `/` and `@` menus set `fill_width` + `frame_color=theme.USER`.
+- Command surface is `/import` + `/export` (top-level) and a leaf `/model`
+  (no args → picker). The `/` popup descriptions come from
+  `get_command_descriptions()` passed to `InputComponent.setup_commands`;
+  `SelectionMenu.item_descriptions` renders them muted/aligned. Subcommand
+  descriptions use `get_subcommand_descriptions`.
 - Transcript text selection lives in `ui/message_selection.py`
   (`panel.selection`), not on `ChatHistoryPanel`. Content geometry comes from
   `Box.thread_content_width` / the laid-out child — don't recompute gutter+padding

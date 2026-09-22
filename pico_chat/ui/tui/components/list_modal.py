@@ -27,7 +27,7 @@ class ListModal(Component):
                  formatter: Optional[Callable[[Any], str]] = None,
                  frame_color: RGB = None,
                  content_color: RGB = None,
-                 max_width_ratio: float = 0.7,
+                 max_width_ratio: float = 0.85,
                  max_height_ratio: float = 0.7):
         super().__init__(id)
         self.frame_color = frame_color if frame_color is not None else theme.DEFAULT

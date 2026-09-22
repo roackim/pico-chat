@@ -62,8 +62,8 @@ or a conversation import that applies a saved role).
 
 ## Conversation import/export
 
-`/conversation export <file>` writes `{"role": ..., "history": [...]}`.
-`/conversation import <file>`:
+`/export <file>` writes `{"role": ..., "history": [...]}`.
+`/import <file>`:
 - Fuzzy-autocompletes `.json` files in the current directory.
 - Restores the saved role; if the role no longer exists, it defaults to
   `default` and posts a warning message in the chat.
@@ -545,13 +545,12 @@ The command system lives in the `pico_chat/ui/commands/` package (replacing the 
 
 ### Registered Commands
 
-`help`, `clear`, `compact`, `exit`, `stop`, `resume`, `prefill`, `status`, `server`, `model`, `tools`, `debug`, `permissions`, `openrouter`, `cd`, `pwd`
+`help`, `clear`, `reload`, `config`, `edit`, `export`, `import`, `compact`, `exit`, `stop`, `status`, `server`, `model`, `tools`, `debug`, `roles`, `openrouter`, `cd`, `pwd`
 
 ### Server & model selection
 
 - `/server` — add, list, info, diagnose, remove. The `use`/switch subcommand was **removed**; switching is implicit via model selection.
-- `/model <model>` — the single selection entry point. Refreshes discovery live, resolves a model across all servers (`ServerService.resolve_model_servers`), switches the harness to the serving server, and selects it. An explicit `server:model` form (model id may contain colons, e.g. Ollama quantized tags) is verified against that server before switching. Fuzzy completion is driven by `Param.completions` reading the cached `model_catalog`.
-- `/model list` — live discovery across every reachable server, annotated `[server]`.
+- `/model` — opens a searchable picker; `/model <model>` selects directly (the single selection entry point). Refreshes discovery live, resolves a model across all servers, switches the harness to the serving server, and selects it. An explicit `server:model` form (model id may contain colons, e.g. Ollama quantized tags) is verified against that server before switching. Fuzzy completion is driven by `Param.completions` reading the cached catalog. The picker (`SearchModal`) shows the cached catalog instantly, refreshes in the background, tags the current model with a muted `active`, shows the model id with muted aligned server/context, and supports type-to-filter.
 
 ### Structure
 

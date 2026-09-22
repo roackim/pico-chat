@@ -7,16 +7,20 @@ offline fallback, never the source of truth.
 
 from __future__ import annotations
 
+import asyncio
+from collections import Counter
 from typing import List, Optional, Tuple
 
 from pico_chat import pico_cfg
-from pico_chat.ui.tui.colors import theme
 from pico_chat.ui.tui.msg_types import SysMsg, SysMsgError
 
-from .base import ChatUIProtocol, Command, Param
+from .base import ChatUIProtocol
+
+# Cap on live discovery so an unreachable server cannot stall the picker.
+_DISCOVERY_TIMEOUT = 8.0
 
 
-def _known_model_ids() -> List[str]:
+def known_model_ids() -> List[str]:
     """Model ids for fuzzy completion, from the cache and server defaults."""
     ids = set()
     for models in pico_cfg.config.models_by_server.values():
@@ -56,53 +60,150 @@ def _current_selection(ui: ChatUIProtocol) -> Tuple[Optional[str], Optional[str]
     return getattr(endpoint, "name", None), getattr(endpoint, "selected_model", None)
 
 
-def _model_row(server: str, model: "ModelInfo", active: bool) -> str:
-    """One row for the model list / picker."""
-    marker = "*" if active else " "
-    context = f"  ({model.context_window:,} tokens)" if model.context_window else ""
-    return f"{marker} {model.id}{context}  [{server}]"
+def _format_context(tokens: Optional[int]) -> str:
+    """Compact context-window label (e.g. ``32k``, ``1.3M``)."""
+    if not tokens:
+        return ""
+    if tokens >= 1_000_000:
+        return f"{tokens / 1_000_000:.1f}M"
+    if tokens >= 1024:
+        if tokens % 1024 == 0:
+            return f"{tokens // 1024}k"
+        return f"{tokens / 1000:.0f}k"
+    return str(tokens)
 
 
-async def _open_picker(ui: ChatUIProtocol) -> None:
-    """Discover models and present the modal list selector."""
-    pairs = await _discover_all()
+def _cached_pairs() -> List[Tuple[str, "ModelInfo"]]:
+    """``(server, model)`` pairs from the cached catalog (no network)."""
+    from pico_chat.harness.endpoint import ModelInfo
+
+    pairs: List[Tuple[str, ModelInfo]] = []
+    for name in list(pico_cfg.config.servers):
+        for raw in pico_cfg.config.models_by_server.get(name, []):
+            try:
+                pairs.append((name, ModelInfo.from_dict(raw)))
+            except Exception:
+                continue
+    return pairs
+
+
+def _build_rows(pairs, active_name: Optional[str], selected: Optional[str]):
+    """Aligned picker rows.
+
+    Returns ``(items, descriptions, item -> (server, model_id))``. The primary
+    text is the model id; the muted description is the aligned
+    ``server  context`` pair, with a trailing ``active`` tag on the current
+    model.
+    """
+    server_w = max((len(server) for server, _ in pairs), default=0)
+    ctx_w = max((len(_format_context(m.context_window)) for _, m in pairs), default=0)
+    counts = Counter(model.id for _, model in pairs)
+
+    items: List[str] = []
+    descriptions: dict = {}
+    index: dict = {}
+    for server, model in pairs:
+        # Disambiguate the rare case of one model id on several servers.
+        item = model.id if counts[model.id] == 1 else f"{model.id} [{server}]"
+        active = server == active_name and model.id == selected
+        description = (
+            f"{server:<{server_w}}  {_format_context(model.context_window):>{ctx_w}}"
+        )
+        if active:
+            description += "  active"
+        items.append(item)
+        descriptions[item] = description
+        index[item] = (server, model.id)
+    return items, descriptions, index
+
+
+def _select_pair(ui: ChatUIProtocol, server: str, model: str) -> None:
+    try:
+        _activate(ui, server, model)
+        ui.chat_history_panel.add_message(
+            f"Selected {model} on {server}.", msg_type=SysMsg(), title="model")
+    except Exception as exc:
+        ui.chat_history_panel.add_message(
+            f"Could not select model: {exc}", msg_type=SysMsgError(), title="model")
+
+
+def _list_models_text(ui: ChatUIProtocol, pairs) -> None:
+    """Headless fallback when no compositor/picker is available."""
     if not pairs:
         ui.chat_history_panel.add_message(
             "No models discovered.\n\n"
-            "Configure a server with '/config servers', then check it is "
-            "reachable with '/server diagnose <name>'.",
+            "Configure a server with '/config', then check it is reachable "
+            "with '/server diagnose <name>'.",
             msg_type=SysMsg(), title="model")
         return
+    active_name, selected = _current_selection(ui)
+    ordered = sorted(pairs, key=lambda p: (p[0], p[1].id))
+    items, descriptions, _ = _build_rows(ordered, active_name, selected)
+    lines = [f"{item}  {descriptions.get(item, '')}" for item in items]
+    lines += ["", "Use '/model <model>' to select."]
+    ui.chat_history_panel.add_message("\n".join(lines), msg_type=SysMsg(), title="model")
 
-    show_modal = getattr(ui, "show_list_modal", None)
-    if show_modal is None:
-        await model_list(ui, [])
+
+async def _open_picker(ui: ChatUIProtocol) -> None:
+    """Open the searchable model picker.
+
+    The cached catalog is shown immediately; live discovery runs in the
+    background and refreshes the open picker (so an unreachable server never
+    blocks the UI).
+    """
+    state: dict = {"index": {}}
+
+    def _show(pairs, modal=None):
+        active_name, selected = _current_selection(ui)
+        ordered = sorted(pairs, key=lambda p: (p[0], p[1].id))
+        items, descriptions, index = _build_rows(ordered, active_name, selected)
+        state["index"] = index
+        initial = next(
+            (i for i, (server, model) in enumerate(ordered)
+             if server == active_name and model.id == selected),
+            0,
+        )
+
+        def _accept(item):
+            pair = state["index"].get(item)
+            if pair:
+                _select_pair(ui, pair[0], pair[1])
+
+        if modal is not None:
+            modal.refresh(items, descriptions=descriptions, initial_index=initial)
+            return modal
+        show = getattr(ui, "show_search_modal", None)
+        if show is None:
+            return None
+        return show("Models", items, descriptions=descriptions,
+                    on_accept=_accept, initial_index=initial)
+
+    cached = _cached_pairs()
+    modal = _show(cached) if cached else None
+
+    if modal is None and not cached:
+        # Nothing cached yet — discover once, briefly, so the first open is
+        # not empty (and does not hang on an unreachable server).
+        try:
+            pairs = await asyncio.wait_for(_discover_all(), _DISCOVERY_TIMEOUT)
+        except Exception:
+            pairs = []
+        if pairs:
+            modal = _show(pairs)
+
+    if modal is None:
+        _list_models_text(ui, cached)
         return
 
-    active_name, selected = _current_selection(ui)
-    pairs = sorted(pairs, key=lambda pair: (pair[0], pair[1].id))
-    initial_index = next(
-        (i for i, (server, model) in enumerate(pairs)
-         if server == active_name and model.id == selected),
-        0,
-    )
-
-    def _format(pair) -> str:
-        server, model = pair
-        return _model_row(server, model, server == active_name and model.id == selected)
-
-    def _accept(pair) -> None:
-        server, model = pair
+    async def _refresh():
         try:
-            _activate(ui, server, model.id)
-            ui.chat_history_panel.add_message(
-                f"Selected {model.id} on {server}.", msg_type=SysMsg(), title="model")
-        except Exception as exc:
-            ui.chat_history_panel.add_message(
-                f"Could not select model: {exc}", msg_type=SysMsgError(), title="model")
+            pairs = await asyncio.wait_for(_discover_all(), _DISCOVERY_TIMEOUT)
+        except Exception:
+            return
+        if pairs and getattr(modal, "is_visible", False):
+            _show(pairs, modal)
 
-    show_modal("Select a model", pairs, formatter=_format, on_accept=_accept,
-               initial_index=initial_index)
+    asyncio.ensure_future(_refresh())
 
 
 def _split_server_model(raw: str) -> Tuple[Optional[str], str]:
@@ -131,8 +232,6 @@ def _activate(ui: ChatUIProtocol, server: str, model: str) -> None:
     ui.agent.switch_model(model)
     prewarm_local_resolution(endpoint._original_base_url)
 
-    import asyncio
-
     async def _prewarm():
         await endpoint.prewarm_model_name()
         if hasattr(ui, "refresh_status_bar"):
@@ -143,30 +242,9 @@ def _activate(ui: ChatUIProtocol, server: str, model: str) -> None:
         ui.refresh_status_bar()
 
 
-async def model_list(ui: ChatUIProtocol, args: List[str]):
-    pairs = await _discover_all()
-    if not pairs:
-        ui.chat_history_panel.add_message(
-            "No models discovered.\n\n"
-            "Configure a server with '/config', then check it is reachable "
-            "with '/server diagnose <name>'.",
-            msg_type=SysMsg(), title="model")
-        return
-
-    active_endpoint = getattr(ui.agent, "endpoint", None)
-    active_name = getattr(active_endpoint, "name", None)
-    selected = getattr(active_endpoint, "selected_model", None)
-
-    lines = [f"{str(theme.DEFAULT)}Models:{theme.reset()}"]
-    for server, model in sorted(pairs, key=lambda p: (p[0], p[1].id)):
-        active = server == active_name and model.id == selected
-        lines.append(_model_row(server, model, active))
-    ui.chat_history_panel.add_message("\n".join(lines), msg_type=SysMsg(), title="model")
-
-
 async def model_use(ui: ChatUIProtocol, args: List[str]):
     if not args:
-        ui.chat_history_panel.add_message("Usage: /model <model>", msg_type=SysMsgError())
+        await _open_picker(ui)
         return
 
     raw = " ".join(args).strip()
@@ -181,13 +259,16 @@ async def model_use(ui: ChatUIProtocol, args: List[str]):
             return
         servers = [server_hint]
     else:
-        pairs = await _discover_all()
+        try:
+            pairs = await asyncio.wait_for(_discover_all(), _DISCOVERY_TIMEOUT)
+        except Exception:
+            pairs = _cached_pairs()
         servers = [server for server, info in pairs if info.id == model]
 
     if not servers:
         ui.chat_history_panel.add_message(
             f"Model '{model}' not found on any configured server.\n\n"
-            "Run '/model list' to see discovered models.",
+            "Run '/model' to pick from the discovered models.",
             msg_type=SysMsgError(), title="model")
         return
 
@@ -214,25 +295,9 @@ async def model_use(ui: ChatUIProtocol, args: List[str]):
             f"Could not select model: {exc}", msg_type=SysMsgError(), title="model")
 
 
-class ModelCommand(Command):
-    def __init__(self):
-        super().__init__("model", "Discover and select models", subcommands={
-            "list": Command("list", "List models across all servers", handler=model_list),
-            "use": Command("use", "Select a model, switching to the server that serves it",
-                           handler=model_use,
-                           params=[Param("MODEL", completions=_known_model_ids, required=True)]),
-        })
-
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        if not args:
-            await _open_picker(ui)
-            return
-        subcommand = self.subcommands.get(args[0].lower())
-        if subcommand is None:
-            # Bare `/model <model>` — treat the first arg as a model id.
-            await self.subcommands["use"].execute(ui, args)
-            return
-        await subcommand.execute(ui, args[1:])
+async def model_command(ui: ChatUIProtocol, args: List[str]):
+    """``/model`` opens the picker; ``/model <model>`` selects directly."""
+    await model_use(ui, args)
 
 
-__all__ = ["ModelCommand", "model_list", "model_use"]
+__all__ = ["known_model_ids", "model_command", "model_use"]

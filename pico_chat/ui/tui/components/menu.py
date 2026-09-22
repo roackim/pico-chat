@@ -35,6 +35,15 @@ class SelectionMenu(Component):
         self.max_height = max_height
         self.is_visible = False
         self.display_prefix = ""  # Prefix to show (e.g., "/" for commands)
+        # Optional name -> one-line description; drawn muted to the right of the
+        # item, aligned into a column.
+        self.item_descriptions: dict[str, str] = {}
+        # Optional title shown in the top border, and status text (e.g. the
+        # current search query) shown in the bottom border.
+        self.title = ""
+        self.status_text = ""
+        # Minimum popup width (0 = shrink to content).
+        self.min_width = 0
         # When True, use the full available width instead of shrinking to the
         # longest item (used by the @ file picker for long paths).
         self.fill_width = False
@@ -67,14 +76,18 @@ class SelectionMenu(Component):
         if hasattr(self.compositor, "request_render"):
             self.compositor.request_render()
     
-    def update(self, all_items: List[str], search_term: str = "", display_prefix: str = ""):
+    def update(self, all_items: List[str], search_term: str = "",
+               display_prefix: str = "", descriptions: Optional[dict] = None):
         """Update menu with new items and optional search filter.
-        
+
         Args:
             all_items: Complete list of items to choose from (raw, without prefixes)
             search_term: Optional search term to fuzzy filter items
             display_prefix: Prefix to show when rendering (e.g., "/" for commands)
+            descriptions: Optional item -> one-line description mapping
         """
+        if descriptions is not None:
+            self.item_descriptions = dict(descriptions)
         self.display_prefix = display_prefix
         if not search_term:
             self.items = all_items
@@ -93,11 +106,14 @@ class SelectionMenu(Component):
         # Auto-register with compositor
         self._update_compositor_registration()
 
-    def set_items(self, items: List[str], display_prefix: str = ""):
+    def set_items(self, items: List[str], display_prefix: str = "",
+                  descriptions: Optional[dict] = None):
         """Replace items with an already-filtered/ranked list.
 
         Unlike :meth:`update`, no fuzzy filtering is applied.
         """
+        if descriptions is not None:
+            self.item_descriptions = dict(descriptions)
         self.display_prefix = display_prefix
         self.items = list(items)
         self.is_visible = len(self.items) > 0
@@ -122,19 +138,40 @@ class SelectionMenu(Component):
         return None
     
 
+    def measure_width(self, available: int) -> int:
+        """Width the popup box will occupy, given the available columns."""
+        if self.fill_width:
+            inner = max(15, self.width or available)
+        else:
+            name_col = max(
+                (len(self.display_prefix) + len(item) for item in self.items),
+                default=0,
+            )
+            desc_col = max(
+                (len(self.item_descriptions.get(item, "")) for item in self.items),
+                default=0,
+            )
+            raw_len = name_col + (2 + desc_col if desc_col > 0 else 0)
+            inner = max(15, self.min_width,
+                        raw_len + self.left_pad + self.right_pad + 2)
+        return min(inner, self.width or available, available)
+
     def render(self, buffer: Buffer):
         """Render the menu at its current position."""
         if not self.is_visible or not self.items:
             return
 
-        if self.fill_width:
-            # Use the available width rather than shrinking to the longest
-            # item, so long paths have room to breathe.
-            menu_width = max(15, min(self.width, buffer.width - self.x))
-        else:
-            max_raw_len = max(len(self.display_prefix) + len(item) for item in self.items)
-            menu_width = max(15, max_raw_len + self.left_pad + self.right_pad + 2)
-            menu_width = min(menu_width, self.width, buffer.width - self.x)
+        menu_width = self.measure_width(buffer.width - self.x)
+
+        name_col = max(
+            (len(self.display_prefix) + len(item) for item in self.items),
+            default=0,
+        )
+        desc_col = max(
+            (len(self.item_descriptions.get(item, "")) for item in self.items),
+            default=0,
+        )
+        has_desc = desc_col > 0
 
         # Visible rows from the height, capped by max_height.
         max_visible = max(1, min(self.max_height - 2, max(0, self.height - 2)))
@@ -148,11 +185,24 @@ class SelectionMenu(Component):
 
         menu_height = visible_count + 2  # +2 for top and bottom borders
 
+        # Clear the popup rectangle first so it overwrites whatever is behind
+        # it (e.g. the action bar) instead of letting it show through the gaps.
+        for yy in range(menu_height):
+            for xx in range(menu_width):
+                buffer.set(self.x + xx, self.y + yy, " ", bg=self.bg)
+
         # Draw the box with background
         buffer.set(self.x, self.y, "┌", fg=self.frame_color, bg=self.bg)
         for i in range(1, menu_width - 1):
             buffer.set(self.x + i, self.y, "─", fg=self.frame_color, bg=self.bg)
         buffer.set(self.x + menu_width - 1, self.y, "┐", fg=self.frame_color, bg=self.bg)
+
+        # Optional title, inline in the top border.
+        if self.title:
+            title_str = f" {self.title[:max(0, menu_width - 4)]} "
+            buffer.write_str(self.x + 2, self.y, title_str,
+                             fg=self.frame_color, bg=self.bg,
+                             max_width=max(0, menu_width - 3))
 
         inner_width = menu_width - 2  # Minus borders
         content_area = max(0, inner_width - self.left_pad - self.right_pad)
@@ -167,16 +217,24 @@ class SelectionMenu(Component):
 
             is_selected = (idx == self.selected_index)
             display_text = f"{self.display_prefix}{item}"
-            padded_text = display_text.ljust(content_area)[:content_area]
 
             for p in range(self.left_pad):
                 buffer.set(self.x + 1 + p, curr_y, " ", bg=self.bg)
 
             content_x = self.x + 1 + self.left_pad
             selected_fg = self.highlight_color or self.frame_color
-            buffer.write_str(content_x, curr_y, padded_text,
+            name_text = display_text.ljust(name_col)[:content_area]
+            buffer.write_str(content_x, curr_y, name_text,
                              fg=selected_fg if is_selected else self.content_color,
-                             bg=self.bg, bold=is_selected)
+                             bg=self.bg, bold=is_selected, max_width=content_area)
+
+            if has_desc:
+                desc = self.item_descriptions.get(item, "")
+                desc_area = content_area - name_col - 2
+                if desc and desc_area > 0:
+                    buffer.write_str(content_x + name_col + 2, curr_y, desc,
+                                     fg=theme.MUTED, bg=self.bg, max_width=desc_area)
+
             for p in range(self.right_pad):
                 buffer.set(self.x + 1 + self.left_pad + content_area + p, curr_y, " ",
                            bg=self.bg)
@@ -190,12 +248,20 @@ class SelectionMenu(Component):
         buffer.set(self.x + menu_width - 1, self.y + menu_height - 1, "┘", fg=self.frame_color, bg=self.bg)
 
         # Scroll indicator: "n/m" when there are more items than fit.
+        counter = ""
         if len(self.items) > visible_count:
             counter = f" {self.selected_index + 1}/{len(self.items)} "
             cx = self.x + menu_width - 1 - len(counter)
             if cx > self.x:
                 buffer.write_str(cx, self.y + menu_height - 1, counter,
                                  fg=theme.MUTED, bg=self.bg)
+
+        # Status text (e.g. the current search query) at the bottom-left.
+        if self.status_text:
+            avail = menu_width - 2 - len(counter)
+            if avail > 0:
+                buffer.write_str(self.x + 1, self.y + menu_height - 1, self.status_text,
+                                 fg=theme.MUTED, bg=self.bg, max_width=avail)
 
 
     def action_up(self):

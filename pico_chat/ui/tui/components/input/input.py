@@ -55,8 +55,10 @@ class InputComponent(Component):
         # Completion system (lazy-initialized)
         self.command_completion: Optional[CommandCompletion] = None
         self.command_list: List[str] = []
+        self.command_descriptions: Dict[str, str] = {}
         self.subcommand_completion: Optional[SubcommandCompletion] = None
         self.subcommand_callback: Optional[Callable[[str], List[str]]] = None
+        self.subcommand_descriptions_callback: Optional[Callable[[str], Dict[str, str]]] = None
         self.context_completion: Optional[ContextCompletion] = None
         self.context_items_callback: Optional[Callable[[], List[str]]] = None
         self.argument_completion: Optional[ArgumentCompletion] = None
@@ -98,13 +100,16 @@ class InputComponent(Component):
         """Set cursor position (for backward compatibility)."""
         self.buffer.cursor_pos = value
     
-    def setup_commands(self, commands: List[str]):
-        """Initialize command completion system."""
+    def setup_commands(self, commands: List[str], descriptions: Optional[Dict[str, str]] = None):
+        """Initialize command completion (optionally with one-line descriptions)."""
         self.command_list = commands
+        self.command_descriptions = dict(descriptions or {})
     
-    def setup_subcommands(self, get_subcommands_callback: Callable[[str], List[str]]):
+    def setup_subcommands(self, get_subcommands_callback: Callable[[str], List[str]],
+                          get_descriptions_callback: Optional[Callable[[str], Dict[str, str]]] = None):
         """Initialize subcommand completion system."""
         self.subcommand_callback = get_subcommands_callback
+        self.subcommand_descriptions_callback = get_descriptions_callback
     
     def setup_context(self, get_items_callback: Callable[[], List[str]]):
         """Initialize context (./file) completion system."""
@@ -123,7 +128,8 @@ class InputComponent(Component):
                 frame_color=self.content_color,
                 content_color=self.content_color
             )
-            self.command_completion = CommandCompletion(menu, self.command_list)
+            self.command_completion = CommandCompletion(
+                menu, self.command_list, self.command_descriptions)
     
     def _ensure_subcommand_menu(self):
         """Lazy-create subcommand menu and completion system on first use."""
@@ -134,7 +140,9 @@ class InputComponent(Component):
                 frame_color=self.content_color,
                 content_color=self.content_color
             )
-            self.subcommand_completion = SubcommandCompletion(menu, self.subcommand_callback)
+            self.subcommand_completion = SubcommandCompletion(
+                menu, self.subcommand_callback,
+                self.subcommand_descriptions_callback)
     
     def _ensure_context_menu(self):
         """Lazy-create context menu and completion system on first use."""
@@ -254,7 +262,14 @@ class InputComponent(Component):
             menu_height = min(menu_height, space_below)
         
         menu.set_layout(menu_x, menu_y, menu_width, menu_height)
-    
+
+    def place_menu_above_input(self, menu) -> None:
+        """Anchor a floating menu directly above the input box.
+
+        Reuses the completion-menu positioning so standalone pickers (e.g.
+        ``/model``) sit exactly where the ``/`` and ``@`` menus do.
+        """
+        self._position_menu_at(menu, 0)
 
     def set_layout(self, x: int, y: int, width: int, height: int):
         """Update layout and notify coordinate mapper of width change."""

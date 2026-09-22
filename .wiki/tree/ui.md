@@ -86,7 +86,7 @@ replaces the legacy single `commands.py`:
 - `commands/builtins.py` — the canonical `COMMANDS` registry dict and top-level commands (help, clear, compact, exit, stop, resume, status, server, model, tools, debug, permissions, etc.)
 - `commands/base.py` — `Param` and `Command` base classes plus completion helpers
 - `commands/server.py` — `ServerAddCommand`, `ServerListCommand`, `ServerInfoCommand`, `ServerRemoveCommand`, `ServerDiagnoseCommand`
-- `commands/models.py` — `ModelCommand` (`/model <model>` + `/model list`)
+- `commands/models.py` — `known_model_ids`, `model_command` (`/model` leaf: picker or `<model>` selection)
 
 Base contracts:
 - `Param` dataclass: `name`, `completions` (static list or callable), `path` (filesystem scan), `required`
@@ -98,8 +98,7 @@ Base contracts:
 
 **Server/model management:**
 - `/server` — add, list, info, diagnose, remove. The `use`/switch subcommand was **removed**; switching is done implicitly by selecting a model.
-- `/model <model>` — the single model-selection entry point. Refreshes discovery live (it does not trust the cached catalog), verifies the model is actually served by the chosen server, switches the harness to it, and selects it. Accepts an explicit `server:model` form (the model id may itself contain colons, e.g. Ollama quantized tags); if that server does not list the model, the command refuses instead of switching. Model completions are fuzzy-filtered from the cached `model_catalog`.
-- `/model list` — discovers models live from every reachable server (via `discover_all_models`), annotated `[server]`.
+- `/model` — opens the searchable picker; `/model <model>` selects directly. Refreshes discovery live (it does not trust the cached catalog), verifies the model is actually served by the chosen server, switches the harness to it, and selects it. Accepts an explicit `server:model` form (the model id may itself contain colons, e.g. Ollama quantized tags); if that server does not list the model, the command refuses instead of switching. Model completions are fuzzy-filtered from the cached catalog. The picker (`SearchModal`) shows cached models instantly, refreshes in the background, tags the current model with a muted `active`, and supports type-to-filter.
 
 The input layer's `ArgumentCompletion` reads `Param.completions` to drive
 fuzzy argument completion for `/model <model>`. See [notes/ui.md](../notes/ui.md) for how to add a new command.

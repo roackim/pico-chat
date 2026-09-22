@@ -20,7 +20,10 @@ from pico_chat.ui.tui.components.debug_popup import DebugPopup
 from pico_chat.ui.tui.components.bars import StatusBar
 from pico_chat.ui.chat_history_panel import ChatHistoryPanel
 from pico_chat.ui.chat_message import Message
-from pico_chat.ui.commands import handle_command, get_command_list, get_subcommand_list
+from pico_chat.ui.commands import (
+    handle_command, get_command_list, get_command_descriptions,
+    get_subcommand_list, get_subcommand_descriptions,
+)
 from pico_chat.ui.generation_presenter import process_generation
 from pico_chat.ui.status_presenter import refresh_status_bar
 from pico_chat.ui.shell_command import handle_shell_command
@@ -115,8 +118,8 @@ class chatTUI(ChatActionHandlers):
         self.input_component = InputComponent(" ", id="entry", frame_color=theme.USER)
         self.input_component.config = pico_cfg.config
         self.input_component.on_submit = self.on_user_submit
-        self.input_component.setup_commands(get_command_list())
-        self.input_component.setup_subcommands(get_subcommand_list)
+        self.input_component.setup_commands(get_command_list(), get_command_descriptions())
+        self.input_component.setup_subcommands(get_subcommand_list, get_subcommand_descriptions)
         get_context_items = lambda: agent.list_files_and_folders() if hasattr(agent, "list_files_and_folders") else []
         self.input_component.setup_context(get_context_items)
         from pico_chat.ui.commands import COMMANDS
@@ -427,22 +430,25 @@ class chatTUI(ChatActionHandlers):
                                         content_padding=content_padding)
         self.modal_host.present_screen(self.popup_screen)
 
+    def show_search_modal(self, title, items, descriptions=None, on_accept=None,
+                          on_cancel=None, initial_index=0):
+        """Present a centered, type-to-filter selection overlay.
 
-    def show_list_modal(self, title, items, formatter=None, on_accept=None,
-                        on_cancel=None, initial_index=None):
-        """Present a modal list selector; Enter calls ``on_accept(item)``."""
-        from pico_chat.ui.tui.components.list_modal import ListModal, ListModalScreen
+        Returns the modal (so callers can ``refresh`` it) or None when there is
+        no compositor (headless).
+        """
+        from pico_chat.ui.tui.components.search_modal import SearchModal
 
-        modal = ListModal(compositor=self.compositor, title=title, formatter=formatter)
-        if self.modal_host is None:
-            # Headless/test fallback: no ModalHost, show the overlay directly.
-            modal.set_compositor(self.compositor)
-            modal.show(items, title=title, on_accept=on_accept, on_cancel=on_cancel,
-                       initial_index=initial_index)
-            return
-        screen = ListModalScreen(modal, items, title=title, on_accept=on_accept,
-                                 on_cancel=on_cancel, initial_index=initial_index)
-        self.modal_host.present_screen(screen)
+        if self.compositor is None:
+            return None
+        modal = SearchModal(compositor=self.compositor, title=title)
+        # Anchor above the input, full-width, like the / and @ menus.
+        modal.auto_center = False
+        modal.fill_width = True
+        modal.anchor = lambda: self.input_component.place_menu_above_input(modal)
+        modal.open(items, descriptions=descriptions, on_accept=on_accept,
+                   on_cancel=on_cancel, initial_index=initial_index)
+        return modal
 
     def on_user_submit(self, text: str):
         """Handle user input submission."""

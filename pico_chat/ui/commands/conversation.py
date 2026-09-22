@@ -6,7 +6,7 @@ import json
 import os
 from typing import Any, Dict, List
 
-from .base import ChatUIProtocol, Command, Param
+from .base import ChatUIProtocol
 from pico_chat.ui.tui.msg_types import (
     PicoMsg,
     SysMsg,
@@ -32,7 +32,7 @@ def json_file_completions() -> List[str]:
 async def conversation_export(ui: ChatUIProtocol, args: List[str]):
     if not args:
         ui.chat_history_panel.add_message(
-            "Usage: /conversation export <filename>", msg_type=SysMsgError())
+            "Usage: /export <filename>", msg_type=SysMsgError())
         return
 
     filename = args[0]
@@ -61,7 +61,7 @@ async def conversation_export(ui: ChatUIProtocol, args: List[str]):
 async def conversation_import(ui: ChatUIProtocol, args: List[str]):
     if not args:
         ui.chat_history_panel.add_message(
-            "Usage: /conversation import <filename>", msg_type=SysMsgError())
+            "Usage: /import <filename>", msg_type=SysMsgError())
         return
 
     filename = args[0]
@@ -209,41 +209,6 @@ def _rebuild_ui_from_history(ui: ChatUIProtocol, history: List[Dict[str, Any]]):
                     msg_type=SysMsg())
 
 
-class ConversationCommand(Command):
-    def __init__(self):
-        super().__init__(
-            "conversation",
-            "Conversation management (export/import)",
-            subcommands={
-                "export": Command("export", "Export conversation history to a JSON file",
-                                  handler=conversation_export,
-                                  params=[Param("FILENAME", required=True)]),
-                "import": Command("import", "Import conversation history from a JSON file",
-                                  handler=conversation_import,
-                                  params=[Param("FILENAME", required=True,
-                                                completions=json_file_completions)]),
-            },
-        )
-
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        if not args:
-            help_text = "Usage: /conversation <subcommand>\n\nSubcommands:\n"
-            for name, command in sorted(self.subcommands.items()):
-                help_text += f"  {name.ljust(10)} - {command.description}\n"
-            ui.chat_history_panel.add_message(help_text.rstrip(), msg_type=SysMsgError())
-            return
-
-        subcommand = args[0].lower()
-        if subcommand in self.subcommands:
-            await self.subcommands[subcommand].execute(ui, args[1:])
-            return
-        ui.chat_history_panel.add_message(
-            f"Unknown subcommand: {subcommand}\n"
-            f"Available: {', '.join(sorted(self.subcommands.keys()))}",
-            msg_type=SysMsgError(),
-        )
-
-
 __all__ = [
-    "ConversationCommand", "conversation_export", "conversation_import",
+    "conversation_export", "conversation_import", "json_file_completions",
 ]

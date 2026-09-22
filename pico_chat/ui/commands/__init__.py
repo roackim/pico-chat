@@ -9,7 +9,9 @@ public import path.
 from .base import ChatUIProtocol, Command, Param
 from .registry import (
     COMMANDS,
+    get_command_descriptions,
     get_command_list,
+    get_subcommand_descriptions,
     get_subcommand_list,
     handle_command,
 )
@@ -19,7 +21,9 @@ __all__ = [
     "ChatUIProtocol",
     "Command",
     "Param",
+    "get_command_descriptions",
     "get_command_list",
+    "get_subcommand_descriptions",
     "get_subcommand_list",
     "handle_command",
 ]

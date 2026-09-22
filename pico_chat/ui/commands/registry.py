@@ -6,8 +6,7 @@ modules depend only on :mod:`pico_chat.ui.commands.base`; this module is the
 only place that knows about all of them, which keeps the import graph acyclic.
 
 Most commands are plain handler functions with metadata. ``Command`` classes
-are reserved for commands that own a subcommand tree (server/model/debug/
-openrouter/conversation).
+are reserved for commands that own a subcommand tree (server/debug/openrouter).
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ from __future__ import annotations
 from typing import Dict, List
 
 from .base import ChatUIProtocol, Command, Param, config_section_completions
-from .conversation import ConversationCommand
+from .conversation import conversation_export, conversation_import, json_file_completions
 from .core import (
     cmd_activity,
     cmd_cd,
@@ -31,7 +30,7 @@ from .core import (
     cmd_stop,
 )
 from .debug import DebugCommand
-from .models import ModelCommand
+from .models import known_model_ids, model_command
 from .openrouter import OpenRouterCommand
 from .roles import cmd_roles
 from .server import ServerCommand
@@ -53,6 +52,13 @@ COMMANDS: Dict[str, Command] = {
                             params=[Param("SECTION", completions=config_section_completions)]),
     "edit":         Command("edit", "Open a file in $EDITOR", handler=cmd_edit,
                             params=[Param("FILE", path=True)]),
+    "export":       Command("export", "Export conversation history to a JSON file",
+                            handler=conversation_export,
+                            params=[Param("FILENAME", required=True)]),
+    "import":       Command("import", "Import conversation history from a JSON file",
+                            handler=conversation_import,
+                            params=[Param("FILENAME", required=True,
+                                          completions=json_file_completions)]),
     "compact":      Command("compact", "Compact context with an LLM summary marker",
                             handler=cmd_compact),
     "exit":         Command("exit", "Close the application", handler=cmd_exit),
@@ -61,7 +67,9 @@ COMMANDS: Dict[str, Command] = {
     "activity":     Command("activity", "Toggle the activity overlay (shell/status output)",
                             handler=cmd_activity),
     "server":       ServerCommand(),
-    "model":        ModelCommand(),
+    "model":        Command("model", "Change the active model (opens a picker)",
+                            handler=model_command,
+                            params=[Param("MODEL", completions=known_model_ids)]),
     "tools":        Command("tools", "Show available tools and their permissions",
                             handler=cmd_tools),
     "debug":        DebugCommand(),
@@ -70,7 +78,6 @@ COMMANDS: Dict[str, Command] = {
     "cd":           Command("cd", "Change workspace directory and rebuild context",
                             handler=cmd_cd, params=[Param("DIR", path=True)]),
     "pwd":          Command("pwd", "Show current workspace directory", handler=cmd_pwd),
-    "conversation": ConversationCommand(),
 }
 
 
@@ -97,6 +104,11 @@ def get_command_list() -> List[str]:
     return list(COMMANDS.keys())
 
 
+def get_command_descriptions() -> Dict[str, str]:
+    """Map top-level command name -> one-line description."""
+    return {name: cmd.description for name, cmd in COMMANDS.items()}
+
+
 def get_subcommand_list(command: str) -> List[str]:
     """Get list of subcommands for a given command."""
     if command in COMMANDS:
@@ -106,6 +118,15 @@ def get_subcommand_list(command: str) -> List[str]:
     return []
 
 
+def get_subcommand_descriptions(command: str) -> Dict[str, str]:
+    """Map subcommand name -> one-line description for ``command``."""
+    if command in COMMANDS:
+        cmd = COMMANDS[command]
+        if cmd.has_subcommands():
+            return {name: sub.description for name, sub in cmd.subcommands.items()}
+    return {}
+
+
 __all__ = [
     "COMMANDS",
     "Command",
@@ -113,5 +134,7 @@ __all__ = [
     "ChatUIProtocol",
     "handle_command",
     "get_command_list",
+    "get_command_descriptions",
     "get_subcommand_list",
+    "get_subcommand_descriptions",
 ]

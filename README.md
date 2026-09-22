@@ -38,14 +38,14 @@ On first launch, pico starts with no server configured. Add one using the `/serv
 **Local llama.cpp server:**
 ```
 /server add llamacpp http://localhost:8080 my-local
-/model list
+/model
 /model <model>
 ```
 
 **Ollama (local models):**
 ```
 /server add ollama http://localhost:11434 my-ollama
-/model list
+/model
 /model llama3.1:8b
 ```
 
@@ -72,10 +72,12 @@ Server definitions are saved to `~/.config/pico-chat/servers.toml` and persist b
 | `/reload` | Reload config files and `roles/` from disk |
 | `/status` | Show server, model, context usage, and memory |
 | `/server` | Manage servers (list/use/edit/info/remove/diagnose) |
-| `/model` | Open a modal model picker (also `/model list`, `/model <id>`) |
+| `/model` | Open the searchable model picker (type to filter), or select directly with `/model <id>` |
 | `/tools` | Show available agent tools and their permission levels |
 | `/roles` | Select and inspect roles (`roles/<name>.toml`) |
 | `/compact` | Summarize conversation history to free context space |
+| `/import <file>` | Import conversation history from a JSON file |
+| `/export <file>` | Export conversation history to a JSON file |
 | `/clear` | Clear the conversation history |
 | `/stop` | Stop the current generation |
 | `/activity` | Toggle the activity overlay (shell/status output) |
@@ -96,7 +98,7 @@ Servers are defined in `servers.toml`; edit them with `/config servers` (or
 /server info <name>
 /server remove <name>
 /server diagnose <name>
-/model list
+/model
 /model <model>
 /model <server>:<model>
 ```
@@ -115,7 +117,7 @@ enabled_models = ["deepseek/deepseek-v4-flash"]
 Then:
 ```
 /server use local
-/model list
+/model
 /model llama3.1:8b
 ```
 

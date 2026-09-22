@@ -81,9 +81,10 @@ class Completer:
             self.menu.action_down()
 
     def _show(self, items: List[str], search_term: str,
-              display_prefix: str = "") -> None:
+              display_prefix: str = "", descriptions: Optional[dict] = None) -> None:
         """Push candidates to the menu and sync the active flag."""
-        self.menu.update(items, search_term, display_prefix=display_prefix)
+        self.menu.update(items, search_term, display_prefix=display_prefix,
+                         descriptions=descriptions)
         self.is_active = self.menu.is_visible
 
     # -- interface -----------------------------------------------------
@@ -114,9 +115,15 @@ class Completer:
 class CommandCompletion(Completer):
     """Manages /command completion with auto-show menu."""
 
-    def __init__(self, menu, commands: List[str]):
+    def __init__(self, menu, commands: List[str],
+                 descriptions: Optional[dict] = None):
         super().__init__(menu)
         self.commands = commands
+        self.descriptions = dict(descriptions or {})
+        # Style like the @ file picker: full-width, accent frame, normal text.
+        self.menu.set_fill_width(True)
+        self.menu.frame_color = theme.USER
+        self.menu.content_color = theme.DEFAULT
 
     def should_trigger(self, text: str) -> bool:
         """Check if command completion should be active."""
@@ -161,7 +168,8 @@ class CommandCompletion(Completer):
             self.hide()
             return
 
-        self._show(self.commands, search_term, display_prefix="/")
+        self._show(self.commands, search_term, display_prefix="/",
+                   descriptions=self.descriptions)
 
     def accept_selection(self, text: str, cursor_pos: int) -> Optional[tuple[str, int]]:
         """Accept current selection, return (completed_text, cursor_pos)."""
@@ -187,9 +195,14 @@ class CommandCompletion(Completer):
 class SubcommandCompletion(Completer):
     """Manages /command subcommand completion with auto-show menu."""
 
-    def __init__(self, menu, get_subcommands_callback: Callable[[str], List[str]]):
+    def __init__(self, menu, get_subcommands_callback: Callable[[str], List[str]],
+                 get_descriptions_callback: Optional[Callable[[str], dict]] = None):
         super().__init__(menu)
         self.get_subcommands = get_subcommands_callback
+        self.get_descriptions = get_descriptions_callback
+        self.menu.set_fill_width(True)
+        self.menu.frame_color = theme.USER
+        self.menu.content_color = theme.DEFAULT
         # Track which command we're completing for, so suppression memory is
         # cleared when the parent command changes.
         self.current_parent_command: Optional[str] = None
@@ -257,7 +270,8 @@ class SubcommandCompletion(Completer):
             self.hide()
             return
 
-        self._show(subcommands, subcommand_trimmed)
+        descriptions = self.get_descriptions(command) if self.get_descriptions else None
+        self._show(subcommands, subcommand_trimmed, descriptions=descriptions)
 
     def accept_selection(self, text: str, cursor_pos: int) -> Optional[tuple[str, int]]:
         """Accept current selection, return (completed_text, cursor_pos)."""

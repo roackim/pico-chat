@@ -76,6 +76,27 @@ def test_action_bar_align_right_flushes_to_right_edge():
     assert row.startswith(" ")  # left side is blank
 
 
+def test_menu_renders_muted_aligned_descriptions():
+    menu = _menu(width=70, height=5)
+    menu.set_items(["/model", "/import"], descriptions={
+        "/model": "pick a model",
+        "/import": "load a file",
+    })
+    buffer = Buffer(70, 5)
+
+    menu.render(buffer)
+
+    row = "".join(cell.char for cell in buffer.cells[1])
+    assert "/model" in row
+    assert "pick a model" in row
+    # Descriptions are aligned into a column and drawn in the muted color.
+    desc_col = row.index("pick a model")
+    assert buffer.cells[1][desc_col].fg == theme.MUTED
+    # The name column is padded so both descriptions start at the same x.
+    import_row = "".join(cell.char for cell in buffer.cells[2])
+    assert import_row.index("load a file") == desc_col
+
+
 def test_menu_scrolls_to_keep_selection_visible():
     menu = _menu(height=5)
     items = [f"file{i:02d}.py" for i in range(30)]
@@ -88,3 +109,22 @@ def test_menu_scrolls_to_keep_selection_visible():
     rendered = "".join(cell.char for row in buffer.cells for cell in row)
     assert "file20.py" in rendered
     assert menu.items[menu.selected_index] == "file20.py"
+
+
+def test_menu_clears_its_background():
+    """The popup must overwrite whatever is behind it (e.g. the action bar)."""
+    menu = SelectionMenu()
+    menu.set_layout(0, 0, 40, 4)
+    menu.set_items(["a"])
+
+    buffer = Buffer(40, 4)
+    for y in range(4):
+        buffer.write_str(0, y, "X" * 40)  # sentinel background
+
+    menu.render(buffer)
+
+    # No sentinel survived inside the popup rectangle (15 columns here).
+    for y in range(3):
+        row = "".join(cell.char for cell in buffer.cells[y])
+        assert "X" not in row[:15], row
+    assert buffer.cells[1][2].char == "a"
