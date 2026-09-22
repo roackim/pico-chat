@@ -13,18 +13,23 @@ precise timing.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
-import re
-import subprocess
-import time
 from dataclasses import dataclass
-from types import SimpleNamespace
 from typing import Any, AsyncGenerator, Dict, Literal, Optional
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlsplit
 
 import httpx
+
+from pico_chat.harness.endpoint_local import (
+    _local_cache,
+    _resolve_local_hostname,
+    _resolve_local_hostname_async,
+    _resolve_local_hostname_await,
+    invalidate_local_hostname,
+    is_local_resolution_pending,
+    prewarm_local_resolution,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -123,81 +128,6 @@ def _new_http_client(endpoint: "Endpoint") -> httpx.AsyncClient:
     return httpx.AsyncClient(**kwargs)
 
 
-# --- OpenAI-compatible response adaptation --------------------------------
-
-
-def _adapt_tool_calls(raw_calls: Any) -> list:
-    """Adapt raw tool-call dicts to the ``{index,id,function:{name,arguments}}`` shape."""
-    if not raw_calls:
-        return []
-    adapted = []
-    for index, call in enumerate(raw_calls):
-        function = call.get("function") or {}
-        arguments = function.get("arguments")
-        # Some providers send arguments as a JSON object already.
-        if isinstance(arguments, dict):
-            arguments = json.dumps(arguments)
-        adapted.append(SimpleNamespace(
-            index=index,
-            id=call.get("id"),
-            function=SimpleNamespace(
-                name=function.get("name"),
-                arguments=arguments or "",
-            ),
-        ))
-    return adapted
-
-
-def _adapt_stream_chunk(data: Dict[str, Any]) -> Any:
-    """Adapt one streaming ``chat.completions`` SSE object to SDK chunk shape."""
-    choice = None
-    raw_choices = data.get("choices") or []
-    if raw_choices:
-        rc = raw_choices[0]
-        delta = rc.get("delta") or {}
-        choice = SimpleNamespace(
-            index=rc.get("index", 0),
-            delta=SimpleNamespace(
-                content=delta.get("content"),
-                reasoning_content=delta.get("reasoning_content"),
-                refusal=delta.get("refusal"),
-                tool_calls=_adapt_tool_calls(delta.get("tool_calls")),
-            ),
-            finish_reason=rc.get("finish_reason"),
-        )
-    return SimpleNamespace(
-        id=data.get("id"),
-        choices=[] if choice is None else [choice],
-        usage=data.get("usage"),
-    )
-
-
-def _adapt_message(message: Dict[str, Any]) -> SimpleNamespace:
-    """Adapt a non-streaming ``choices[0].message`` to SDK message shape."""
-    return SimpleNamespace(
-        role=message.get("role"),
-        content=message.get("content"),
-        refusal=message.get("refusal"),
-        tool_calls=_adapt_tool_calls(message.get("tool_calls")),
-    )
-
-
-def _adapt_chat_response(data: Dict[str, Any]) -> Any:
-    """Adapt a non-streaming ``chat.completions`` response to SDK shape."""
-    choices = []
-    for rc in data.get("choices") or []:
-        choices.append(SimpleNamespace(
-            index=rc.get("index", 0),
-            message=_adapt_message(rc.get("message") or {}),
-            finish_reason=rc.get("finish_reason"),
-        ))
-    return SimpleNamespace(
-        id=data.get("id"),
-        choices=choices,
-        usage=data.get("usage"),
-    )
-
-
 @dataclass
 class ConnectionDiagnosis:
     """Result of a connection attempt, with diagnostics on failure."""
@@ -246,186 +176,6 @@ class ConnectionDiagnosis:
             )
 
         return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# .local (mDNS) hostname resolution
-# ---------------------------------------------------------------------------
-
-# https://stackoverflow.com/questions/106179/regular-expression-to-match-hostname-or-ip-address
-_HOSTNAME_RE = re.compile(
-    r"(?=^.{1,253}$)(^((?!-)[a-zA-Z0-9-]{1,63}(?<!-)\.)+[a-zA-Z]{2,63}$)"
-)
-
-# hostname -> IP resolution cache for .local hosts. Resolutions persist for the
-# process lifetime and are only refreshed when a connection failure invalidates
-# them. This avoids a getent subprocess on every connect while keeping stale
-# entries self-healing.
-_local_cache: dict[str, Optional[str]] = {}
-
-# Hostnames currently being resolved in a background prewarm thread. Used by the
-# UI to show an animated "resolving" indicator in the status bar.
-_resolving: set[str] = set()
-
-
-def _getent_host(hostname: str) -> Optional[str]:
-    """Resolve a hostname to an IPv4 address.
-
-    Tries ``socket.getaddrinfo`` in-process first (same libc resolver as the
-    shell), then ``getent hosts`` as a fallback. Returns the first IPv4 address,
-    or None if unresolvable.
-    """
-    import socket
-
-    try:
-        infos = socket.getaddrinfo(hostname, None, socket.AF_INET)
-        for info in infos:
-            ip = info[4][0]
-            if ip:
-                return ip
-    except Exception as e:
-        logger.warning("socket.getaddrinfo failed for %s: %s", hostname, e)
-
-    try:
-        result = subprocess.run(
-            ["getent", "hosts", hostname],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode != 0:
-            return None
-        line = result.stdout.splitlines()[0].strip() if result.stdout.splitlines() else ""
-        return line.split()[0] if line else None
-    except Exception as e:
-        logger.warning("getent failed for %s: %s", hostname, e)
-        return None
-
-
-def _cached_ip_for(hostname: str) -> Optional[str]:
-    """Return the cached IP for hostname, or None if not yet resolved."""
-    return _local_cache.get(hostname)
-
-
-def _resolve_once(hostname: str) -> Optional[str]:
-    """Resolve hostname via getent (uncached) and cache the result."""
-    ip = _getent_host(hostname)
-    if ip:
-        _local_cache[hostname] = ip
-        logger.info("Resolved %s via getent → %s", hostname, ip)
-    else:
-        _local_cache.pop(hostname, None)
-        logger.warning("getent could not resolve %s", hostname)
-    return ip
-
-
-def _resolve_local_hostname(url: str) -> str:
-    """Resolve a ``.local`` (mDNS/Bonjour) hostname to a routable address.
-
-    httpx/OpenAI connect through ``getaddrinfo``, which can return a bare IPv6
-    link-local (``fe80::``) address for ``.local`` names. For ``.local`` hosts we
-    instead ask ``getent hosts`` (which follows nsswitch and prefers IPv4) and
-    swap in the returned address. Cached for the process lifetime; refreshed on
-    connection failure. If anything goes wrong, the original URL is returned.
-    """
-    try:
-        hostname = urlsplit(url).hostname
-        if not hostname or not _HOSTNAME_RE.match(hostname) or not hostname.endswith(".local"):
-            return url
-
-        ip = _cached_ip_for(hostname) or _resolve_once(hostname)
-        if not ip:
-            return url
-
-        parts = urlsplit(url)
-        # Preserve scheme, path, query, fragment — only swap the host.
-        netloc = f"{ip}:{parts.port}" if parts.port else ip
-        return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
-    except Exception as e:
-        logger.warning("Failed to resolve %s host via getent: %s — using original URL", url, e)
-        return url
-
-
-def invalidate_local_hostname(url: str) -> None:
-    """Drop any cached getent resolution for ``url``'s hostname."""
-    try:
-        hostname = urlsplit(url).hostname
-        if hostname:
-            _local_cache.pop(hostname, None)
-    except Exception:
-        pass
-
-
-def prewarm_local_resolution(url: str) -> None:
-    """Kick off ``.local`` resolution for ``url`` in a background thread.
-
-    ``socket.getaddrinfo`` (used for mDNS) can block for a moment. Running it
-    off the event loop and populating the cache means the resolved IP is cached
-    by the time the user sends a message. Non-``.local`` hosts are no-ops.
-    """
-    hostname = urlsplit(url).hostname
-    if not hostname or not hostname.endswith(".local"):
-        return
-    if _cached_ip_for(hostname):
-        return
-    if hostname in _resolving:
-        return
-
-    import threading
-
-    _resolving.add(hostname)
-
-    def _resolve():
-        try:
-            _resolve_once(hostname)
-        except Exception as e:
-            logger.warning("prewarm resolution failed for %s: %s", hostname, e)
-        finally:
-            _resolving.discard(hostname)
-
-    threading.Thread(target=_resolve, daemon=True).start()
-
-
-def _resolve_local_hostname_async(url: str) -> str:
-    """Resolve a ``.local`` hostname without blocking the event loop.
-
-    Returns the resolved URL if the address is already cached, otherwise kicks
-    off a background resolution and returns the original URL unchanged. Never
-    performs blocking I/O on the calling thread.
-    """
-    hostname = urlsplit(url).hostname
-    if not hostname or not hostname.endswith(".local"):
-        return url
-    ip = _cached_ip_for(hostname)
-    if ip:
-        parts = urlsplit(url)
-        netloc = f"{ip}:{parts.port}" if parts.port else ip
-        return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
-    prewarm_local_resolution(url)
-    return url
-
-
-async def _resolve_local_hostname_await(url: str) -> str:
-    """Resolve a ``.local`` hostname to a routable URL, off the event loop."""
-    hostname = urlsplit(url).hostname
-    if not hostname or not hostname.endswith(".local"):
-        return url
-    ip = _cached_ip_for(hostname)
-    if not ip:
-        ip = await asyncio.to_thread(_resolve_once, hostname)
-    if not ip:
-        return url
-    parts = urlsplit(url)
-    netloc = f"{ip}:{parts.port}" if parts.port else ip
-    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
-
-
-def is_local_resolution_pending(url: str) -> bool:
-    """True if ``.local`` resolution for ``url`` is currently in progress."""
-    hostname = urlsplit(url).hostname
-    if not hostname or not hostname.endswith(".local"):
-        return False
-    return hostname in _resolving
 
 
 # ---------------------------------------------------------------------------
@@ -610,25 +360,11 @@ class Endpoint:
         finally:
             self._model_name_pending = False
 
-    # -- model / context discovery ------------------------------------------
+    # -- model / context discovery (delegates to endpoint_discovery) ---------
 
     async def list_models(self) -> list[ModelInfo]:
         """List models exposed by this endpoint."""
-        if self.type == "ollama":
-            return await self._list_ollama_models()
-        response = await asyncio.wait_for(
-            self.client.get("/models"), timeout=self.timeout
-        )
-        response.raise_for_status()
-        data = response.json()
-        result = []
-        for model in data.get("data", []) or []:
-            result.append(ModelInfo(
-                id=model.get("id"),
-                context_window=model.get("context_length"),
-                owned_by=model.get("owned_by"),
-            ))
-        return result
+        return await _discovery.list_models(self)
 
     async def discover_models(self) -> list[ModelInfo]:
         """Discover the models surfaced by this endpoint.
@@ -636,32 +372,13 @@ class Endpoint:
         OpenRouter exposes thousands of models, so only explicitly-enabled ids
         are surfaced. Ollama models are enriched with their context window.
         """
-        if self.type == "openrouter":
-            return await self._discover_openrouter_models()
-        if self.type == "ollama":
-            return await self._discover_ollama_models()
-        return await self.list_models()
+        return await _discovery.discover_models(self)
 
     async def query_model_name(self) -> str:
-        if self.type in ("openrouter", "openai"):
-            if self._selected_model:
-                return self._selected_model
-            raise RuntimeError(f"{self.type} requires a model to be configured")
-        if self.type == "ollama" and self._selected_model:
-            return self._selected_model
-        models = await self.list_models()
-        if models:
-            return models[0].id
-        raise RuntimeError(f"No models available on endpoint '{self.name}'")
+        return await _discovery.query_model_name(self)
 
     async def query_context_window(self, model_name: str) -> int:
-        if self.type == "ollama":
-            return await self._ollama_context_window(model_name)
-        if self.type == "openrouter":
-            return await self._openrouter_context_window(model_name)
-        if self.type == "openai":
-            return self._openai_context_window(model_name)
-        return await self._llamacpp_context_window(model_name)
+        return await _discovery.query_context_window(self, model_name)
 
     async def get_model_name(self) -> str:
         """Get the model name (cached or queried)."""
@@ -711,7 +428,7 @@ class Endpoint:
     async def check_connection(self) -> bool:
         """Check if the endpoint is reachable."""
         if self.type == "ollama":
-            return await self._check_ollama_connection()
+            return await _ollama.check_connection(self)
         return (await self.diagnose_connection()).ok
 
     async def diagnose_connection(self) -> "ConnectionDiagnosis":
@@ -766,170 +483,8 @@ class Endpoint:
             async for chunk in self._create_ollama_completion(messages, tools, stream):
                 yield chunk
             return
-        async for chunk in self._create_openai_completion(messages, tools, stream):
+        async for chunk in _openai.create_completion(self, messages, tools, stream):
             yield chunk
-
-    async def _create_openai_completion(
-        self,
-        messages: list[Dict[str, Any]],
-        tools: Optional[list[Dict[str, Any]]],
-        stream: bool,
-    ) -> AsyncGenerator[Any, None]:
-        _t0 = time.perf_counter()
-        model_name = await self.get_model_name()
-        logger.info(
-            "[llm] model_name resolved in %.0fms (cached=%s)",
-            (time.perf_counter() - _t0) * 1000,
-            bool(self._cached_model_name),
-        )
-
-        max_retries = self.retry_attempts
-        retry_delay = self.retry_delay
-
-        for attempt in range(max_retries):
-            payload: Dict[str, Any] = {
-                "model": model_name,
-                "messages": messages,
-                "stream": stream,
-            }
-            if tools:
-                payload["tools"] = tools
-            if stream:
-                payload["stream_options"] = {"include_usage": True}
-            if self.type == "openrouter":
-                provider_spec = self._provider_spec(model_name)
-                if provider_spec:
-                    payload["provider"] = provider_spec
-
-            if logger.isEnabledFor(logging.DEBUG):
-                msg_summary = []
-                for msg in messages:
-                    role = msg.get("role", "?")
-                    content_len = len(str(msg.get("content", "")))
-                    tc_count = len(msg.get("tool_calls", []))
-                    msg_summary.append(f"{role}:{content_len}chars:{tc_count}tools")
-                logger.debug(
-                    "API request: model=%s, messages=[%s], tools=%s",
-                    model_name, ", ".join(msg_summary), "yes" if tools else "no",
-                )
-
-            _t_req = time.perf_counter()
-            try:
-                if stream:
-                    async with self.client.stream("POST", "/chat/completions", json=payload) as response:
-                        if response.status_code == 503:
-                            error_body = await response.aread()
-                            error_message = error_body.decode(errors="replace")
-                            if attempt < max_retries - 1:
-                                logger.warning(
-                                    "Model loading (503), retrying in %.1fs (attempt %d/%d)",
-                                    retry_delay, attempt + 1, max_retries,
-                                )
-                                await asyncio.sleep(retry_delay)
-                                retry_delay *= 1.5
-                                continue
-                            raise httpx.HTTPStatusError(
-                                f"Model loading timeout after {max_retries} attempts: {error_message}",
-                                request=response.request, response=response,
-                            )
-                        response.raise_for_status()
-                        headers_at = time.perf_counter()
-                        logger.info(
-                            "[llm] POST /chat/completions headers received in %.0fms",
-                            (headers_at - _t_req) * 1000,
-                        )
-                        chunk_count = 0
-                        first_chunk_at = None
-                        async for chunk in self._iter_sse_chunks(response):
-                            if first_chunk_at is None:
-                                first_chunk_at = time.perf_counter()
-                                logger.info(
-                                    "[llm] first token after %.0fms (headers->first)",
-                                    (first_chunk_at - headers_at) * 1000,
-                                )
-                            chunk_count += 1
-                            if chunk_count <= 2 or chunk_count % 50 == 0:
-                                logger.debug("LLM chunk %d: choices=%d", chunk_count, len(chunk.choices))
-                            yield chunk
-                        logger.debug("LLM stream complete: %d total chunks", chunk_count)
-                    return
-                else:
-                    response = await asyncio.wait_for(
-                        self.client.post("/chat/completions", json=payload),
-                        timeout=self.timeout,
-                    )
-                    if response.status_code == 503:
-                        if attempt < max_retries - 1:
-                            logger.warning("Model loading (503), retrying in %.1fs", retry_delay)
-                            await asyncio.sleep(retry_delay)
-                            retry_delay *= 1.5
-                            continue
-                        response.raise_for_status()
-                    response.raise_for_status()
-                    data = response.json()
-                    yield _adapt_chat_response(data)
-                    return
-            except (httpx.HTTPStatusError, httpx.RequestError, asyncio.TimeoutError, httpx.TimeoutException) as e:
-                if isinstance(e, httpx.HTTPStatusError) and e.response.status_code != 503:
-                    raise
-                if attempt < max_retries - 1:
-                    logger.warning(
-                        "Request failed (%s) retrying in %.1fs (attempt %d/%d)",
-                        type(e).__name__, retry_delay, attempt + 1, max_retries,
-                    )
-                    await asyncio.sleep(retry_delay)
-                    retry_delay *= 1.5
-                    continue
-                raise
-
-    async def _iter_sse_chunks(self, response: httpx.Response):
-        """Parse SSE ``data:`` lines from a streaming response into chunks."""
-        async for line in response.aiter_lines():
-            if not line or not line.startswith("data:"):
-                continue
-            data = line[len("data:"):].strip()
-            if data == "[DONE]":
-                break
-            try:
-                obj = json.loads(data)
-            except json.JSONDecodeError:
-                logger.debug("Skipping non-JSON SSE line: %r", data[:80])
-                continue
-            yield _adapt_stream_chunk(obj)
-
-    # -- Ollama native -------------------------------------------------------
-
-    def _native_base_url(self) -> str:
-        return self.base_url.removesuffix("/v1").rstrip("/")
-
-    async def _check_ollama_connection(self) -> bool:
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{self._native_base_url()}/api/tags",
-                    timeout=self.timeout,
-                )
-                return response.is_success
-        except Exception:
-            return False
-
-    @staticmethod
-    def _ollama_messages(messages: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
-        """Normalize OpenAI-style history for Ollama's native chat API.
-
-        OpenAI allows ``content=None`` on tool-call-only assistant turns, but
-        Ollama (and proxies in front of it) validate content as a string and
-        reject the request with HTTP 422 otherwise.
-        """
-        normalized = []
-        for message in messages:
-            msg = dict(message)
-            if msg.get("content") is None:
-                msg["content"] = ""
-            if msg.get("tool_calls") is None:
-                msg.pop("tool_calls", None)
-            normalized.append(msg)
-        return normalized
 
     async def _create_ollama_completion(
         self,
@@ -937,121 +492,22 @@ class Endpoint:
         tools: Optional[list[Dict[str, Any]]],
         stream: bool,
     ) -> AsyncGenerator[Any, None]:
-        payload: Dict[str, Any] = {
-            "model": await self.get_model_name(),
-            "messages": self._ollama_messages(messages),
-            "stream": stream,
-        }
-        if tools:
-            payload["tools"] = tools
+        async for chunk in _ollama.create_completion(self, messages, tools, stream):
+            yield chunk
 
-        async with httpx.AsyncClient() as client:
-            async with client.stream(
-                "POST",
-                f"{self._native_base_url()}/api/chat",
-                json=payload,
-                timeout=None,
-            ) as response:
-                response.raise_for_status()
-                if not stream:
-                    data = await response.json()
-                    yield self._native_response(data)
-                    return
-                async for line in response.aiter_lines():
-                    if not line:
-                        continue
-                    yield self._native_response(json.loads(line))
+    def _native_base_url(self) -> str:
+        return _ollama.native_base_url(self)
+
+    @staticmethod
+    def _ollama_messages(messages: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+        return _ollama.ollama_messages(messages)
 
     @staticmethod
     def _native_response(data: Dict[str, Any]) -> Any:
-        """Adapt one native Ollama response to the OpenAI chunk shape."""
-        message = data.get("message") or {}
-        content = message.get("content")
-        reasoning = message.get("thinking")
-        tool_calls = []
-        for index, call in enumerate(message.get("tool_calls") or []):
-            function = call.get("function") or {}
-            arguments = function.get("arguments", {})
-            tool_calls.append(SimpleNamespace(
-                index=index,
-                id=call.get("id"),
-                function=SimpleNamespace(
-                    name=function.get("name"),
-                    arguments=json.dumps(arguments) if isinstance(arguments, dict) else arguments,
-                ),
-            ))
-        delta = SimpleNamespace(
-            content=content,
-            reasoning_content=reasoning,
-            tool_calls=tool_calls,
-        )
-        choice = SimpleNamespace(
-            delta=delta,
-            finish_reason="stop" if data.get("done") else None,
-        )
-        usage = {
-            "prompt_eval_count": data.get("prompt_eval_count"),
-            "eval_count": data.get("eval_count"),
-        }
-        return SimpleNamespace(
-            choices=[] if data.get("done") else [choice],
-            usage=usage,
-        )
+        return _ollama.native_response(data)
 
-    async def _list_ollama_models(self) -> list[ModelInfo]:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self._native_base_url()}/api/tags",
-                timeout=self.timeout,
-            )
-            response.raise_for_status()
-            data = response.json()
-        return [
-            ModelInfo(
-                id=model.get("name", model.get("model", "")),
-                context_window=model.get("context_length"),
-                metadata=model,
-            )
-            for model in data.get("models", [])
-            if model.get("name", model.get("model"))
-        ]
-
-    async def _discover_ollama_models(self) -> list[ModelInfo]:
-        """Discover Ollama models, enriching each with its context window."""
-        models = await self._list_ollama_models()
-        enriched = []
-        for model in models:
-            try:
-                ctx = await self._ollama_context_window(model.id)
-                enriched.append(ModelInfo(
-                    id=model.id,
-                    context_window=ctx,
-                    owned_by=model.owned_by,
-                    metadata=model.metadata,
-                ))
-            except Exception as e:
-                logger.debug("Could not enrich context for %s: %s", model.id, e)
-                enriched.append(model)
-        return enriched
-
-    async def _ollama_context_window(self, model_name: str) -> int:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{self._native_base_url()}/api/show",
-                json={"name": model_name},
-                timeout=self.timeout,
-            )
-            response.raise_for_status()
-            data = response.json()
-        for key, value in data.get("model_info", {}).items():
-            if key.lower().endswith(("context_length", "context", "n_ctx")) and isinstance(value, int):
-                return value
-        parameters = data.get("parameters", "")
-        for line in str(parameters).splitlines():
-            parts = line.split()
-            if len(parts) >= 2 and parts[0] in {"num_ctx", "n_ctx"}:
-                return int(parts[1])
-        raise RuntimeError(f"Could not determine context window for Ollama model: {model_name}")
+    async def _openrouter_context_window(self, model_name: str) -> int:
+        return await _discovery.openrouter_context_window(self, model_name)
 
     # -- OpenRouter ----------------------------------------------------------
 
@@ -1085,107 +541,6 @@ class Endpoint:
             return {"order": [self.provider]}
         return None
 
-    async def _discover_openrouter_models(self) -> list[ModelInfo]:
-        """Return only the enabled models for this OpenRouter endpoint."""
-        enabled = self._enabled_ids()
-        if not enabled:
-            return []
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                "https://openrouter.ai/api/v1/models",
-                timeout=self.timeout,
-            )
-            if response.status_code != 200:
-                return [ModelInfo(id=e) for e in enabled]
-        catalog = response.json().get("data", [])
-        by_id = {m.get("id"): m for m in catalog}
-
-        def _match(eid: str) -> dict:
-            if eid in by_id:
-                return by_id[eid]
-            # Accept a bare id (no provider namespace) by suffix match, so
-            # ``deepseek-v4-flash`` resolves ``deepseek/deepseek-v4-flash``.
-            # Prefer non-alias entries (ids not prefixed with ``~``).
-            suffix = "/" + eid
-            fallback = None
-            for cid, info in by_id.items():
-                if cid.endswith(suffix):
-                    if not cid.startswith("~"):
-                        return info
-                    fallback = fallback or info
-            return fallback or {}
-
-        result = []
-        for eid in enabled:
-            info = _match(eid)
-            result.append(ModelInfo(
-                id=info.get("id") or eid,
-                context_window=info.get("context_length"),
-                owned_by=info.get("owned_by"),
-                metadata=info,
-            ))
-        return result
-
-    async def _openrouter_context_window(self, model_name: str) -> int:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                "https://openrouter.ai/api/v1/models",
-                timeout=self.timeout,
-            )
-            if response.status_code == 200:
-                catalog = response.json().get("data", [])
-                suffix = "/" + model_name
-                fallback = None
-                for model in catalog:
-                    mid = model.get("id", "")
-                    if mid != model_name and not mid.endswith(suffix):
-                        continue
-                    ctx = model.get("context_length")
-                    if not ctx:
-                        continue
-                    if mid == model_name or not mid.startswith("~"):
-                        return ctx
-                    fallback = fallback or ctx
-                if fallback:
-                    return fallback
-        raise RuntimeError("Could not determine context window from OpenRouter")
-
-    # -- OpenAI / llama.cpp --------------------------------------------------
-
-    @staticmethod
-    def _openai_context_window(model_name: str) -> int:
-        context_windows = {
-            "gpt-4o": 128000,
-            "gpt-4o-mini": 128000,
-            "gpt-4-turbo": 128000,
-            "gpt-4": 8192,
-            "gpt-3.5-turbo": 16385,
-            "o1": 200000,
-            "o1-mini": 128000,
-        }
-        for known_model, ctx in context_windows.items():
-            if known_model in model_name:
-                return ctx
-        raise RuntimeError(f"Unknown context window for model: {model_name}")
-
-    async def _llamacpp_context_window(self, model_name: str) -> int:
-        """Query context window from a llama.cpp server via /props."""
-        try:
-            async with httpx.AsyncClient() as client:
-                url = self.base_url.replace("/v1", "/props")
-                response = await client.get(url, timeout=self.timeout)
-                if response.status_code == 200:
-                    ctx = response.json().get("default_generation_settings", {}).get("n_ctx")
-                    if ctx:
-                        return ctx
-        except Exception as e:
-            logger.debug("Failed to query /props endpoint: %s", e)
-
-        models = await self.list_models()
-        for model in models:
-            if model.id == model_name and model.context_window:
-                return model.context_window
-        raise RuntimeError("Could not determine context window from server")
 
 
 def default_endpoint() -> Endpoint:
@@ -1253,3 +608,12 @@ __all__ = [
     "prewarm_local_resolution",
     "is_local_resolution_pending",
 ]
+
+
+# Imported after the definitions above: the transport/discovery modules import
+# ``ModelInfo`` from this module, so loading them at the top would be circular.
+from pico_chat.harness import (  # noqa: E402
+    endpoint_discovery as _discovery,
+    endpoint_ollama as _ollama,
+    endpoint_openai as _openai,
+)

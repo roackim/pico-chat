@@ -3,7 +3,6 @@ Pico-Chat TUI Application.
 """
 
 import sys
-import os
 import asyncio
 import atexit
 import time
@@ -11,7 +10,6 @@ from typing import Any
 
 from pico_chat.ui.tui.compositor import Compositor
 from pico_chat.ui.tui.events import KeyEvent, MouseEvent, TickEvent
-from pico_chat.ui.tui.components.box import SPINNER_FRAMES
 from pico_chat.ui.tui.components import (
     Box, InputComponent,
 )
@@ -23,7 +21,9 @@ from pico_chat.ui.tui.components.bars import StatusBar
 from pico_chat.ui.chat_history_panel import ChatHistoryPanel
 from pico_chat.ui.chat_message import Message
 from pico_chat.ui.commands import handle_command, get_command_list, get_subcommand_list
-from pico_chat.ui.tui.layout_utils import strip_ansi
+from pico_chat.ui.generation_presenter import process_generation
+from pico_chat.ui.status_presenter import refresh_status_bar
+from pico_chat.ui.shell_command import handle_shell_command
 from pico_chat.ui.tui.focus import FocusScope
 from pico_chat.ui.tui.navigation import ModalHost
 from pico_chat.ui.tui.chat_screen import ChatScreen
@@ -31,13 +31,11 @@ from pico_chat.ui.tui.chat_screen import ChatScreen
         # Setup logging to debug panel
 import logging
 from pico_chat.ui.tui.colors import theme
-from pico_chat.ui.tui.msg_types import MsgType, MsgAction, PicoMsg, ThinkingMsg, UserMsg, SysMsg, SysMsgError, SysMsgWarning, ToolCallMsg, ToolDraftMsg, AskPermissionMsg
+from pico_chat.ui.tui.msg_types import MsgAction, UserMsg, SysMsg, SysMsgError, SysMsgWarning
 
 from pico_chat import pico_cfg
 from pico_chat.ui.logging_handlers import setup_tui_logging
 from pico_chat.ui.chat_action_handlers import ChatActionHandlers
-
-from pico_chat.harness import events
 
 
 class _AppFocusTarget:
@@ -200,105 +198,9 @@ class chatTUI(ChatActionHandlers):
         """Color the input row by focus (muted when unfocused)."""
         return theme.USER if self.input_box.focused else theme.MUTED
 
-    @staticmethod
-    def _format_status_tokens(value: int | None) -> str:
-        if value is None:
-            return "?"
-        if value < 1000:
-            return str(value)
-        # Use binary-sized exact values for common context limits (32k for
-        # 32768), while keeping the compact decimal style for live usage.
-        if value % 1024 == 0:
-            return f"{value // 1024}k"
-        return f"{value / 1000:.1f}k"
-
     def refresh_status_bar(self) -> None:
-        """Refresh local status fields without performing network I/O."""
-        agent = self.agent
-        endpoint = getattr(agent, "endpoint", None)
-        if endpoint is None:
-            return
-
-        # Prefer the model the endpoint actually resolved (the one sent in the
-        # next request) over a requested selection the endpoint may have
-        # ignored. ``_cached_model_name`` is set by ``set_model`` and by the
-        # connection probe, so this cannot show a model the request won't use.
-        model = (
-            getattr(endpoint, "_cached_model_name", None)
-            or getattr(endpoint, "selected_model", None)
-            or endpoint.model
-            or "?"
-        )
-        # Strip a leading path and common file suffix from a model id
-        # (e.g. /data/llm/weights/Qwen3.8-27B-Q4_0.gguf -> Qwen3.8-27B-Q4_0)
-        # for a compact status bar.
-        if isinstance(model, str):
-            if "/" in model:
-                model = model.rsplit("/", 1)[-1]
-            for suffix in (".gguf", ".bin", ".safetensors"):
-                if model.endswith(suffix):
-                    model = model[: -len(suffix)]
-                    break
-        role = getattr(getattr(agent, "role", None), "name", "default")
-        state = getattr(getattr(agent, "state", None), "name", "IDLE").lower()
-
-        # Show an animated spinner while .local hostname resolution or model
-        # name discovery is pending.
-        from pico_chat.harness.endpoint import is_local_resolution_pending
-        if is_local_resolution_pending(endpoint._original_base_url) or getattr(endpoint, "_model_name_pending", False):
-            frame = SPINNER_FRAMES[self._status_spinner_frame % len(SPINNER_FRAMES)]
-            model = f"{frame} {model}"
-
-        # Color the server/model field by connection state:
-        #   checking -> orange, error -> red, ok -> green.
-        conn = getattr(endpoint, "_connection_state", "unknown")
-        if conn == "checking":
-            server_color = theme.WARNING
-        elif conn == "error":
-            server_color = theme.ERROR
-        elif conn == "ok":
-            server_color = theme.SUCCESS
-        else:
-            server_color = theme.DEFAULT
-
-        usage = getattr(agent, "_last_usage", None)
-        context_used = getattr(usage, "prompt_tokens", None)
-        context_max = getattr(endpoint, "_cached_context_window", None)
-        if context_max is None:
-            context_max = endpoint.max_context or 32768
-        if context_used is None:
-            context_used = 0
-
-        self.status_bar.set_values({
-            "endpoint_model": f"{endpoint.name}:{model}",
-            "context": f"ctx {self._format_status_tokens(context_used)}/{self._format_status_tokens(context_max)}",
-            "role": f"role {role}",
-            "state": state,
-            "endpoint": endpoint.name,
-            "model": model,
-            "workspace": getattr(agent, "workspace", ""),
-        })
-        self.status_bar.set_field_colors({
-            "context": self._context_color(context_used, context_max),
-            "endpoint": server_color,
-            "model": server_color,
-            "endpoint_model": server_color,
-        })
-
-    @staticmethod
-    def _context_color(used: int | None, maximum: int | None) -> Any:
-        """Color the context field by how full the window is.
-
-        green < 33%, orange < 66%, red >= 66%.
-        """
-        if not used or not maximum or maximum <= 0:
-            return theme.DEFAULT
-        ratio = used / maximum
-        if ratio < 0.33:
-            return theme.SUCCESS
-        if ratio < 0.66:
-            return theme.WARNING
-        return theme.ERROR
+        """Refresh local status fields (see ``ui/status_presenter.py``)."""
+        refresh_status_bar(self)
 
     def _emergency_cleanup(self):
         """Emergency cleanup handler called by atexit."""
@@ -311,239 +213,11 @@ class chatTUI(ChatActionHandlers):
 
 
     async def _process_generation(self, user_input, user_msg):
-        """Process a single generation request."""
-        import logging
-        logger = logging.getLogger("tui")
-        logger.info(f"Starting generation for user input: {user_input[:50]}...")
+        """Process a single generation request.
 
-        chat = self.chat_history_panel
-        agent = self.agent
-        self.refresh_status_bar()
-        # No placeholder status message: the first real chunk creates its own
-        # message. This keeps the conversation free of transient "Sending
-        # request..." / "Processing results..." clutter.
-        current_msg = None
-        current_msg_type = None
-        current_harness_ids = []
-        processing_msg = None
-
-        def ensure_tool_message_type(msg: Message, target_type: MsgType) -> Message:
-            if isinstance(msg.type, type(target_type)):
-                return msg
-            new_msg = chat.new_message("", msg_type=target_type, harness_message_ids=msg.harness_message_ids or current_harness_ids)
-            new_msg.tool_name = msg.tool_name
-            new_msg.tool_args = msg.tool_args
-            new_msg.tool_output = msg.tool_output
-            new_msg.tool_status = msg.tool_status
-            new_msg.show_output = msg.show_output
-            chat.replace_message(msg, new_msg)
-            return new_msg
-
-        if self.compositor and hasattr(self.compositor, "set_streaming_active"):
-            self.compositor.set_streaming_active(True)
-
-        # Process streaming events from Harness
-        try:
-            async for event in agent.chat(user_input):
-                if self.compositor and hasattr(self.compositor, "request_render"):
-                    self.compositor.request_render()
-
-                if isinstance(event, events.Start):
-                    current_harness_ids = [event.message_id]
-                    logger.debug(f"Start: {event.role} with ID {event.message_id}")
-
-                    if event.role == "user":
-                        # Link the user message that was passed through the queue
-                        if not user_msg.harness_message_ids:
-                            user_msg.harness_message_ids = [event.message_id]
-                            logger.debug(f"Linked user message to harness ID {event.message_id}")
-
-                elif isinstance(event, events.Reasoning):
-                    # If not currently in a thinking message, create one
-                    if current_msg_type != ThinkingMsg:
-                        if current_msg is not None:
-                            # Finalize previous and create new
-                            current_msg.finalize()
-                        current_msg = chat.add_message("", msg_type=ThinkingMsg(), harness_message_ids=current_harness_ids)
-                        # Thinking folds to a single line by default; expand on focus.
-                        current_msg.set_collapsed(True)
-                        current_msg_type = ThinkingMsg
-
-                    current_msg.append(event.text)
-
-                elif isinstance(event, events.Token):
-                    # If not currently in a content message, create one
-                    if current_msg_type != PicoMsg:
-                        if current_msg is not None:
-                            # Finalize previous and create new
-                            current_msg.finalize()
-                        current_msg = chat.add_message("", msg_type=PicoMsg(), harness_message_ids=current_harness_ids)
-                        current_msg_type = PicoMsg
-
-                    current_msg.append(event.text)
-
-                elif isinstance(event, events.ToolCall):
-                    tool_id = event.id
-                    msg = self.active_tool_messages.get(tool_id)
-                    preserve_active_text_stream = current_msg_type in (ThinkingMsg, PicoMsg)
-
-                    # Flush any incomplete text message before showing tool draft
-                    if current_msg_type in (ThinkingMsg, PicoMsg) and current_msg:
-                        current_msg.finalize()
-
-                    if not msg:
-                        msg = chat.add_message("", msg_type=ToolDraftMsg(), harness_message_ids=current_harness_ids)
-                        self.active_tool_messages[tool_id] = msg
-
-                    msg = ensure_tool_message_type(msg, ToolDraftMsg())
-                    self.active_tool_messages[tool_id] = msg
-                    msg.tool_name = event.name or msg.tool_name
-                    msg.tool_args = event.args
-                    msg.tool_status = "drafting"
-                    msg.rebuild_tool_display()
-
-                    if not preserve_active_text_stream:
-                        current_msg = msg
-                        current_msg_type = type(msg.type)
-
-                elif isinstance(event, events.PermissionRequest):
-                    tool_id = event.id
-
-                    # Flush any incomplete text message before showing tool request
-                    if current_msg_type in (ThinkingMsg, PicoMsg) and current_msg:
-                        current_msg.finalize()
-
-                    msg = self.active_tool_messages.get(tool_id)
-
-                    if event.auto:
-                        # Auto-decision: show status marker
-                        if not msg:
-                            msg = chat.add_message(
-                                "",  # Will be built by rebuild_tool_display
-                                msg_type=ToolCallMsg(),
-                                harness_message_ids=current_harness_ids
-                            )
-                            self.active_tool_messages[tool_id] = msg
-                            processing_msg = None  # Clear processing indicator if showing new tool
-
-                        msg = ensure_tool_message_type(msg, ToolCallMsg())
-                        self.active_tool_messages[tool_id] = msg
-                        msg.tool_name = event.name
-                        msg.tool_args = event.args
-                        msg.tool_status = "auto-approved"
-                        msg.rebuild_tool_display()
-                        self.pending_permission_prompt = None
-                    else:
-                        # Need user permission - show request
-                        if not msg:
-                            msg = chat.add_message(
-                                "",
-                                msg_type=AskPermissionMsg(),
-                                harness_message_ids=current_harness_ids
-                            )
-                            self.active_tool_messages[tool_id] = msg
-                            processing_msg = None  # Clear processing indicator if showing new tool
-
-                        msg = ensure_tool_message_type(msg, AskPermissionMsg())
-                        self.active_tool_messages[tool_id] = msg
-                        msg.tool_name = event.name
-                        msg.tool_args = event.args
-                        msg.tool_status = None
-                        msg.rebuild_tool_display()
-
-                        # Auto-focus for user action
-                        try:
-                            msg_index = chat.messages.index(msg)
-                            chat.set_focused_message(msg_index)
-                        except ValueError:
-                            pass
-                        self._set_app_focus("history")
-
-                        # Force compositor render to show actions immediately
-                        if self.compositor:
-                            self.compositor.render()
-
-                        # Store prompt for handler
-                        self.pending_permission_prompt = event.prompt
-
-                    current_msg = msg
-                    current_msg_type = type(msg.type)
-
-                elif isinstance(event, events.ToolResult):
-                    tool_id = event.id
-                    msg = self.active_tool_messages.get(tool_id)
-                    if msg:
-                        msg = ensure_tool_message_type(msg, ToolCallMsg())
-                        self.active_tool_messages[tool_id] = msg
-                        msg.tool_name = event.name
-                        if event.outcome == "completed":
-                            msg.tool_status = "completed"
-                            msg.tool_output = event.output
-                        elif event.outcome == "denied":
-                            msg.tool_status = "denied"
-                            msg.tool_output = event.output
-                            msg.show_output = True  # Always show denial reason
-                        else:
-                            msg.tool_status = "error"
-                            msg.tool_output = event.output
-                            msg.show_output = True  # Always show errors
-                        msg.rebuild_tool_display()
-                        msg.finalize()
-                        del self.active_tool_messages[tool_id]
-                    self.pending_permission_prompt = None
-
-                elif isinstance(event, events.Usage):
-                    # Update message metrics (for live display in footer)
-                    # Only update for thinking/content messages, not tool messages
-                    if current_msg_type in (ThinkingMsg, PicoMsg):
-                        current_msg.update_metrics(
-                            tokens=event.tokens,
-                            tokens_per_second=event.tokens_per_second,
-                            ttft_ms=event.ttft_ms,
-                            duration_ms=event.duration_ms
-                        )
-                    self.refresh_status_bar()
-
-                elif isinstance(event, events.Error):
-                    if current_msg is not None:
-                        current_msg.finalize()
-                        current_msg = None
-                        current_msg_type = None
-                    chat.add_message(event.message, msg_type=SysMsgError())
-
-                elif isinstance(event, events.Done):
-                    pass
-
-
-                # Ensure we scroll to bottom if needed
-                if chat.auto_scroll:
-                    chat.scroll_offset = 0
-                    # Auto-focus input when new messages arrive (if at bottom)
-                    # BUT: Don't steal focus if user has explicitly focused a message
-                    if self._last_focus_id != "input" and chat.focused_message_index is None:
-                        self._set_app_focus("input")
-
-                # Yield to let the compositor render the update
-                await asyncio.sleep(0)
-                
-        except asyncio.CancelledError:
-            # Finalize current message and add a plain SysMsg notification.
-            # Avoid appending ANSI codes to a MarkdownComponent message (PicoMsg)
-            # since the component would render the escape sequences as literal text.
-            if current_msg is not None:
-                current_msg.finalize()
-            chat.add_message("[Generation stopped]", msg_type=SysMsg())
-            raise 
-            
-        except Exception as e:
-            raise e
-    
-        finally:
-            if self.compositor and hasattr(self.compositor, "set_streaming_active"):
-                self.compositor.set_streaming_active(False)
-            if current_msg is not None:
-                current_msg.finalized = True
-                current_msg.update_actions()
+        The event→UI mapping lives in ``ui/generation_presenter.py``.
+        """
+        await process_generation(self, user_input, user_msg)
 
     async def agent_worker(self):
         """Process queued requests for the conversation."""
@@ -811,92 +485,8 @@ class chatTUI(ChatActionHandlers):
             self.chat_history_panel.auto_scroll = True
 
     def _handle_shell_command(self, command: str):
-        """Execute a shell command and display output (not visible to LLM).
-        
-        Args:
-            command: The shell command to execute (without the $ prefix)
-        """
-        import subprocess
-        import time
-        from pico_chat.ui.tui.msg_types import SysMsg, SysMsgError
-        
-        if not command:
-            self.chat_history_panel.add_message(
-                "Usage: $ <command>\nExample: $ ls -la",
-                msg_type=SysMsgError()
-            )
-            return
-        
-        # Get workspace directory
-        workspace = self.agent.workspace if hasattr(self.agent, 'workspace') else os.getcwd()
-        
-        # Show command being executed
-        cmd_msg = self.chat_history_panel.add_message(
-            f"{theme.MUTED}$ {command}{theme.reset()}",
-            msg_type=SysMsg(),
-            title="shell"
-        )
-        
-        # Execute command
-        start_time = time.time()
-        try:
-            result = subprocess.run(
-                command,
-                shell=True,
-                cwd=workspace,
-                capture_output=True,
-                text=True,
-                timeout=30  # 30 second timeout
-            )
-            
-            elapsed = time.time() - start_time
-            
-            # Build output
-            output_parts = []
-            
-            if result.stdout:
-                output_parts.append(result.stdout.rstrip())
-            
-            if result.stderr:
-                if output_parts:
-                    output_parts.append("")
-                output_parts.append(f"{theme.ERROR}[stderr]{theme.reset()}")
-                output_parts.append(result.stderr.rstrip())
-            
-            # Add exit code and timing
-            exit_color = theme.SUCCESS if result.returncode == 0 else theme.ERROR
-            output_parts.append(f"\n{exit_color}[exit:{result.returncode}]{theme.reset()} {theme.MUTED}{elapsed:.1f}ms{theme.reset()}")
-            
-            # Display output
-            output_text = "\n".join(output_parts)
-            if output_text.strip():
-                self.chat_history_panel.add_message(
-                    output_text,
-                    msg_type=SysMsg(),
-                    title="output"
-                )
-            else:
-                self.chat_history_panel.add_message(
-                    f"{theme.MUTED}(no output){theme.reset()}",
-                    msg_type=SysMsg(),
-                    title="output"
-                )
-                
-        except subprocess.TimeoutExpired:
-            self.chat_history_panel.add_message(
-                f"{theme.ERROR}Command timed out after 30 seconds{theme.reset()}",
-                msg_type=SysMsgError(),
-                title="shell"
-            )
-        except Exception as e:
-            self.chat_history_panel.add_message(
-                f"{theme.ERROR}Command failed: {e}{theme.reset()}",
-                msg_type=SysMsgError(),
-                title="shell"
-            )
-        
-        # Enable auto-scroll to show the output
-        self.chat_history_panel.auto_scroll = True
+        """Execute a shell command (see ``ui/shell_command.py``)."""
+        handle_shell_command(self, command)
 
     def _update_focus_states(self):
         """Update focus states of components based on _last_focus_id."""
