@@ -3,8 +3,9 @@
 from typing import Any, Optional
 from pico_chat import pico_cfg
 from pico_chat.ui.tui.colors import theme, RGB
-from pico_chat.ui.tui.components import TextComponent, Box
+from pico_chat.ui.tui.components import TextComponent
 from pico_chat.ui.tui.components.markdown import MarkdownComponent
+from pico_chat.ui.tui.components.message_view import MessageView
 from pico_chat.ui.tui.layout_utils import wrap_text
 from pico_chat.ui.tui.msg_types import MsgType, MsgAction
 from pico_chat.ui.tui import msg_types
@@ -121,17 +122,16 @@ class Message:
         elif isinstance(thread_gutter_color, str):
             thread_gutter_color = getattr(theme, thread_gutter_color, frame_color)
 
-        self.box = Box(
+        self.box = MessageView(
             self.component,
             parent_msg=self,
-            compact_when_unfocused=(isinstance(msg_type, (msg_types.ToolCallMsg, msg_types.AskPermissionMsg))),  # Tool calls and permission requests use compact mode
-            thread_mode=True,
+            compact_when_unfocused=(isinstance(msg_type, (msg_types.ToolCallMsg, msg_types.AskPermissionMsg))),  # Tool calls and permission requests use compact headers
             gutter=thread_gutter,
             gutter_color=thread_gutter_color,
             content_pad_left=left_pad,
             content_pad_right=right_pad,
             # User/pico use a `▌` prefix bar that spans every row.
-            full_height_gutter=isinstance(msg_type, (msg_types.UserMsg, msg_types.PicoMsg)),
+            gutter_full_height=isinstance(msg_type, (msg_types.UserMsg, msg_types.PicoMsg)),
         )
     
     def finalize(self):

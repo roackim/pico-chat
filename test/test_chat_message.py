@@ -112,3 +112,39 @@ def test_thinking_done_glyph_and_label():
     glyph, color = msg.done_glyph()
     assert glyph == "✓"
     assert msg.done_label("thinking") == "thoughts"
+
+
+def _render_rows(msg, width, height):
+    from pico_chat.ui.tui.buffer import Buffer
+
+    box = msg.get_component()
+    box.set_layout(0, 0, width, height)
+    buf = Buffer(width, height)
+    box.render(buf)
+    return ["".join(c.char for c in row) for row in buf.cells]
+
+
+def test_thread_render_smoke_text_message():
+    """Thread-mode render draws the gutter and the content (regression guard)."""
+    from pico_chat.ui.tui.msg_types import PicoMsg
+
+    msg = Message("hello world", msg_type=PicoMsg(), max_width=20)
+    msg.finalize()
+    rows = _render_rows(msg, 20, 4)
+
+    joined = "\n".join(rows)
+    assert "hello world" in joined
+    assert "▌" in joined
+
+
+def test_thread_render_smoke_markdown_message():
+    from pico_chat.ui.tui.msg_types import UserMsg
+
+    msg = Message("a **bold** line", msg_type=UserMsg(), max_width=24,
+                  render_markdown=True)
+    msg.finalize()
+    rows = _render_rows(msg, 24, 4)
+
+    joined = "\n".join(rows)
+    assert "bold" in joined
+    assert "▌" in joined
