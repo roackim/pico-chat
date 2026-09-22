@@ -1,3 +1,8 @@
+> **Superseded.** The container was fully designed and then deliberately dropped:
+> pico ships no container support — the user runs pico inside their own sandbox.
+> See [`plans/containerization.md`](./containerization.md) (decision record) for
+> the reasoning. Kept for historical reference.
+
 ## AI Harness + Podman Implementation Summary
 
 ### Goal

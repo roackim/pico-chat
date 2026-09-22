@@ -10,6 +10,7 @@ This document tells AI agents and humans how to operate and maintain this wiki.
 .wiki/
   AGENT.md                  ← This file. Maintenance contract.
   notes/
+    principles.md           ← Canonical design principles (direction; read first)
     architecture.md         ← High-level system design and data flow
     config.md               ← Configuration reference (config.toml)
     reasoning-traces.md     ← Reasoning trace handling (thinking tags, reasoning_content)
@@ -37,6 +38,12 @@ Each entry contains: purpose, key classes/functions, dependencies.
 **Update when**: files are added, removed, renamed, or their public API changes.
 
 ---
+
+## State vs. direction
+
+This wiki documents **what exists**, not what should be. The one exception is
+`notes/principles.md`, which is the canonical statement of direction. Never infer
+intent from state documentation.
 
 ## Staleness Warning
 

@@ -255,6 +255,9 @@ Open improvements not yet requested but worth considering:
 
 ## 6. Working preferences
 
+Canonical principles: [`.wiki/notes/principles.md`](./.wiki/notes/principles.md).
+Quick reminders:
+
 - Aggressive simplification toward the essence; explicit over implicit
   (`/reload`, no watchers).
 - Config files over UI; edit with `$EDITOR`.

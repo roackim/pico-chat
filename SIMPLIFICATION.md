@@ -1,5 +1,10 @@
 # Pico-Chat Simplification — Plan
 
+> **The design principles that emerged from this work now live canonically in
+> [`.wiki/notes/principles.md`](./.wiki/notes/principles.md).** This file is the
+> historical record of the simplification rounds (R1–R11), not the principles
+> reference.
+
 **Status:** R1,R2,R3,R4,R4b,R5,R6,R7,R8,R9 done.
 See `HANDOFF.md` for current state and the remaining work (OSC 52 clipboard,
 optional picker polish / structural refactor). A round of UI/UX polish
