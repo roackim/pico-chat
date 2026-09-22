@@ -1,6 +1,6 @@
 # Pico-Chat — Handoff
 
-**Branch:** `cleanup` · **Suite:** 458 passing · **Last updated:** 2026-09-22
+**Branch:** `cleanup` · **Suite:** 510 passing · **Last updated:** 2026-09-22
 
 Read this to resume. The big simplification (R1–R9) is done; the recent work is
 UI/UX polish. The working tree is dirty with the latest UI changes — the user
@@ -44,7 +44,7 @@ No lint/typecheck beyond these. Keep the suite green and the R9 guard passing.
 - **`@` file picker:** `ContextCompletion` trigger `@`, subsequence
   `fuzzy_match` ranking (dirs first), scroll-following full-width menu, `USER`
   accent, `n/m` counter.
-- **Clipboard:** `ChatActionHandlers.handle_copy_action` (`ui/chat_action_handlers.py`).
+- **Clipboard:** `ui/clipboard.py` (`copy_to_clipboard`) — native helpers then OSC 52.
 
 ---
 
@@ -64,26 +64,17 @@ No lint/typecheck beyond these. Keep the suite green and the R9 guard passing.
   `shutdown_watcher` cancels in-flight generation; `main.py` swallows stray
   `KeyboardInterrupt`).
 - `/model` modal picker, `ui_max_input_height` (input cap + scroll).
+- **Clipboard:** `ui/clipboard.py` is the single owner; native
+  `xclip`/`xsel`/`wl-copy` first, then OSC 52 (`harness/clipboard.py`)
+  as the fallback so copying works over SSH. `handle_copy_action`,
+  `_auto_copy_selection`, and `/debug get_context` all use it. The OSC 52
+  payload truncates on a 4-byte base64 boundary so it stays decodable.
 
 ---
 
 ## 4. What needs change
 
-### Next: OSC 52 clipboard (SSH copy/paste)
-`handle_copy_action` only tries `xclip`/`xsel`/`wl-copy`, which need X/Wayland.
-Over SSH, emit an OSC 52 sequence so the terminal owns the clipboard:
-
-```python
-import base64, sys
-seq = "\x1b]52;c;" + base64.b64encode(text.encode()).decode() + "\x07"
-sys.stdout.write(seq); sys.stdout.flush()
-```
-
-Add it as a method (e.g. "Method 0" before xclip) or as the fallback; tmux users
-need `set -g allow-passthrough on` (or wrap in `\x1bPtmux;...\x1b\\`). Test it
-without a terminal by asserting the encoded sequence.
-
-### Optional picker polish
+### Next: optional picker polish
 Breadcrumb/header for the drilled directory; tail-truncation for very deep
 paths; dir/file styling. (Match highlighting was deliberately removed.)
 

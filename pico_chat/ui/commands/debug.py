@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
-import subprocess
 from typing import List
 
+from pico_chat.ui.clipboard import copy_to_clipboard
 from pico_chat.ui.tui.msg_types import SysMsg, SysMsgError
 
 from .base import ChatUIProtocol, Command
@@ -38,15 +38,9 @@ class DebugGetContextCommand(Command):
             lines.extend(["=" * 80, f"Total messages: {len(context)}",
                           f"Total characters: {len(context_json):,}", "=" * 80])
             ui.chat_history_panel.add_message("\n".join(lines), msg_type=SysMsg())
-            for command in (("xclip", "-selection", "clipboard"),
-                            ("xsel", "--clipboard", "--input"), ("wl-copy",)):
-                try:
-                    subprocess.run(command, input=context_json.encode(), check=True,
-                                   stderr=subprocess.DEVNULL)
-                    ui.chat_history_panel.add_message("JSON also copied to clipboard", msg_type=SysMsg())
-                    break
-                except (FileNotFoundError, subprocess.CalledProcessError):
-                    continue
+            method = copy_to_clipboard(context_json)
+            if method:
+                ui.chat_history_panel.add_message(f"JSON also copied to clipboard ({method})", msg_type=SysMsg())
         except Exception as exc:
             logging.getLogger("tui").error("Error getting context: %s", exc, exc_info=True)
             ui.chat_history_panel.add_message(f"Failed to get context: {exc}", msg_type=SysMsgError())

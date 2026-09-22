@@ -1,7 +1,7 @@
 """Action handlers for chat messages."""
 
 import logging
-import subprocess
+from pico_chat.ui.clipboard import copy_to_clipboard
 from pico_chat.ui.tui.layout_utils import strip_ansi
 from pico_chat.ui.tui.msg_types import UserMsg, SysMsg, SysMsgError
 
@@ -59,50 +59,17 @@ class ChatActionHandlers:
                 if text_to_copy and not text_to_copy.endswith("\n"):
                     text_to_copy += "\n"
             
-            # Try to copy to clipboard using various methods
-            
-            # Method 1: Try xclip (X11)
-            try:
-                subprocess.run(['xclip', '-selection', 'clipboard'], 
-                             input=text_to_copy.encode(), 
-                             check=True, 
-                             stderr=subprocess.DEVNULL)
-                logger.info("Message copied to clipboard (xclip)")
+            # Native helpers first, then OSC 52 (works over SSH).
+            if copy_to_clipboard(text_to_copy):
                 self._copy_feedback()
-                return
-            except (FileNotFoundError, subprocess.CalledProcessError):
-                pass
-            
-            # Method 2: Try xsel (X11 alternative)
-            try:
-                subprocess.run(['xsel', '--clipboard', '--input'], 
-                             input=text_to_copy.encode(), 
-                             check=True,
-                             stderr=subprocess.DEVNULL)
-                logger.info("Message copied to clipboard (xsel)")
-                self._copy_feedback()
-                return
-            except (FileNotFoundError, subprocess.CalledProcessError):
-                pass
-            
-            # Method 3: Try wl-copy (Wayland)
-            try:
-                subprocess.run(['wl-copy'], 
-                             input=text_to_copy.encode(), 
-                             check=True,
-                             stderr=subprocess.DEVNULL)
-                logger.info("Message copied to clipboard (wl-copy)")
-                self._copy_feedback()
-                return
-            except (FileNotFoundError, subprocess.CalledProcessError):
-                pass
-            
-            # If all methods fail
-            logger.warning("No clipboard utility found (tried xclip, xsel, wl-copy)")
-            self.chat_history_panel.add_message(
-                "Could not copy: no clipboard utility found\nInstall xclip, xsel, or wl-copy",
-                msg_type=SysMsgError()
-            )
+            else:
+                logger.warning("No clipboard method succeeded")
+                self.chat_history_panel.add_message(
+                    "Could not copy: no clipboard method found\n"
+                    "Install xclip, xsel or wl-copy, or use a terminal that "
+                    "supports OSC 52",
+                    msg_type=SysMsgError()
+                )
             
         except Exception as e:
             logger.error(f"Error copying to clipboard: {e}")

@@ -1,6 +1,7 @@
 """Chat history panel for the Pico-Chat TUI."""
 
 import bisect
+import logging
 import time
 from dataclasses import dataclass
 from typing import Optional, Any
@@ -9,6 +10,7 @@ from pico_chat.ui.tui.components import TextComponent
 from pico_chat.ui.tui.events import MouseEvent, TickEvent
 
 from pico_chat import pico_cfg
+from pico_chat.ui.clipboard import copy_to_clipboard
 from pico_chat.ui.tui.colors import theme, RGB
 from pico_chat.ui.tui.msg_types import MsgType, MsgAction
 
@@ -353,23 +355,11 @@ class ChatHistoryPanel(TextComponent):
         text = self.get_selection_text()
         if not text:
             return
-        # Use the same clipboard logic as handle_copy_action
-        import subprocess
-        import logging
-        logger = logging.getLogger("tui")
-        try:
-            for cmd in (['xclip', '-selection', 'clipboard'],
-                         ['xsel', '--clipboard', '--input'],
-                         ['wl-copy']):
-                try:
-                    subprocess.run(cmd, input=text.encode(), check=True, stderr=subprocess.DEVNULL)
-                    logger.info(f"Selection copied to clipboard ({cmd[0]})")
-                    return
-                except (FileNotFoundError, subprocess.CalledProcessError):
-                    continue
-            logger.warning("No clipboard utility found for selection copy")
-        except Exception as e:
-            logger.error(f"Error copying selection: {e}")
+        method = copy_to_clipboard(text)
+        if method:
+            logging.getLogger("tui").info("Selection copied to clipboard (%s)", method)
+        else:
+            logging.getLogger("tui").warning("No clipboard method for selection copy")
 
     def move_focus_up(self) -> bool:
         """Move focus to the previous message.

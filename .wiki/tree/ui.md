@@ -73,7 +73,7 @@ scrollable message component in `ChatScreen`.
 
 ### `chat_action_handlers.py`
 `ChatActionHandlers` mixin for `chatTUI`.
-- Copy to clipboard via `xclip` or `wl-copy` (auto-detected)
+- Copy to clipboard via native `xclip`/`xsel`/`wl-copy`, falling back to an OSC 52 escape sequence (terminal-owned clipboard, works over SSH; tmux needs `allow-passthrough on`)
 - Delete message from history
 - `handle_edit_action` — expanded in-place editing: edits paused AI messages (thinking prefill), finalized `ThinkingMsg` (edit reasoning as prefill), finalized `PicoMsg` (finds preceding `ThinkingMsg`), and `UserMsg` (edit + wipe subsequent messages)
 - Retry (re-send last user message)

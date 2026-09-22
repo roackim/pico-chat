@@ -8,11 +8,15 @@ Requires the terminal emulator to support OSC 52
 """
 
 import base64
+import logging
 import os
 
-# Max bytes OSC 52 can handle (base64-encoded).
-# Many terminals cap at ~4 KB; some at ~64 KB.
-OSC52_MAX_BYTES = 4000
+logger = logging.getLogger(__name__)
+
+# Upper bound on the base64 payload. Terminals vary (often 100 KB or more);
+# staying below this keeps the escape sequence manageable. The payload is
+# truncated on a 4-byte base64 boundary so it remains decodable.
+OSC52_MAX_BYTES = 100_000
 
 
 def copy_to_clipboard(text: str) -> bool:
@@ -29,8 +33,9 @@ def copy_to_clipboard(text: str) -> bool:
     encoded = base64.b64encode(text.encode("utf-8")).decode("ascii")
 
     if len(encoded) > OSC52_MAX_BYTES:
-        # Truncate and notify — better than silently failing.
-        encoded = encoded[: OSC52_MAX_BYTES - 1] + "~"
+        # Cut on a base64 quantum boundary so the result still decodes.
+        encoded = encoded[: OSC52_MAX_BYTES - (OSC52_MAX_BYTES % 4)]
+        logger.warning("Clipboard payload truncated to %d bytes for OSC 52", OSC52_MAX_BYTES)
 
     # OSC 52 ; c ; <base64> ST
     # ST = String Terminator = ESC \  (or BEL / \x07)
