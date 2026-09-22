@@ -60,8 +60,9 @@ class ChatActionHandlers:
                     text_to_copy += "\n"
             
             # Native helpers first, then OSC 52 (works over SSH).
-            if copy_to_clipboard(text_to_copy):
-                self._copy_feedback()
+            method = copy_to_clipboard(text_to_copy)
+            if method:
+                self._copy_feedback(method)
             else:
                 logger.warning("No clipboard method succeeded")
                 self.chat_history_panel.add_message(
@@ -75,13 +76,19 @@ class ChatActionHandlers:
             logger.error(f"Error copying to clipboard: {e}")
             self.chat_history_panel.add_message(f"Copy failed: {e}", msg_type=SysMsgError())
     
-    def _copy_feedback(self):
-        """Confirm a copy without disturbing the action mode line."""
+    def _copy_feedback(self, method: str | None = None):
+        """Confirm a copy without disturbing the action mode line.
+
+        Native helpers report success reliably; OSC 52 is fire-and-forget —
+        the terminal may silently ignore it (e.g. VTE/Ptyxis) — so it gets
+        distinct wording instead of a false "copied" checkmark.
+        """
+        hint = "sent via OSC 52" if method == "OSC 52" else "copied ✓"
         panel = getattr(self, "chat_history_panel", None)
         selected = panel is not None and panel.focused_message_index is not None
         flash = getattr(self, "flash_hint", None)
         if selected and callable(flash):
-            flash("copied ✓")
+            flash(hint)
         elif hasattr(self, "notify"):
             self.notify("Copied to clipboard")
 

@@ -87,6 +87,18 @@ def test_copy_feedback_flashes_hint_without_clearing_selection():
     assert ui.action_bar.expanded is True
 
 
+def test_copy_feedback_distinguishes_osc52_from_native():
+    ui, _ = _ui_with_screen()
+    ui.chat_history_panel.add_message("hello", msg_type=UserMsg()).finalize()
+    ui.chat_history_panel.set_focused_message(0)
+
+    ui._copy_feedback("OSC 52")
+    assert ui.action_bar.hint == "sent via OSC 52"
+
+    ui._copy_feedback("xclip")
+    assert ui.action_bar.hint == "copied ✓"
+
+
 def test_escape_clears_selection_and_hides_action_line():
     ui, _ = _ui_with_screen()
     ui.chat_history_panel.add_message("hello", msg_type=UserMsg()).finalize()

@@ -146,6 +146,74 @@ def test_check_connection_reports_success():
         assert asyncio_run(server.check_connection()) is True
 
 
+def test_ollama_messages_coerce_null_content_and_drop_null_tool_calls():
+    messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "call_1"}]},
+        {"role": "tool", "content": "ok", "tool_call_id": "call_1"},
+        {"role": "assistant", "content": "hi", "tool_calls": None},
+    ]
+
+    normalized = Endpoint._ollama_messages(messages)
+
+    assert normalized[1]["content"] == ""
+    assert normalized[1]["tool_calls"] == [{"id": "call_1"}]
+    assert normalized[3]["content"] == "hi"
+    assert "tool_calls" not in normalized[3]
+    # The caller's history must not be mutated.
+    assert messages[1]["content"] is None
+    assert messages[3]["tool_calls"] is None
+
+
+def test_create_ollama_completion_sends_string_content(monkeypatch):
+    import json
+
+    server = make_server()
+    server._selected_model = "test-model"
+    captured = {}
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+        async def aiter_lines(self):
+            yield json.dumps({"message": {"content": "ok"}, "done": True})
+
+    class _Stream:
+        async def __aenter__(self):
+            return _Response()
+
+        async def __aexit__(self, *args):
+            return False
+
+    class _Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        def stream(self, method, url, json=None, timeout=None):
+            captured["json"] = json
+            return _Stream()
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda *a, **k: _Client())
+
+    async def run():
+        return [
+            chunk
+            async for chunk in server._create_ollama_completion(
+                [{"role": "assistant", "content": None, "tool_calls": [{"id": "call_1"}]}],
+                None,
+                True,
+            )
+        ]
+
+    asyncio_run(run())
+
+    assert captured["json"]["messages"][0]["content"] == ""
+
+
 def asyncio_run(coro):
     import asyncio
     return asyncio.run(coro)

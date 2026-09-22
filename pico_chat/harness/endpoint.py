@@ -913,6 +913,24 @@ class Endpoint:
         except Exception:
             return False
 
+    @staticmethod
+    def _ollama_messages(messages: list[Dict[str, Any]]) -> list[Dict[str, Any]]:
+        """Normalize OpenAI-style history for Ollama's native chat API.
+
+        OpenAI allows ``content=None`` on tool-call-only assistant turns, but
+        Ollama (and proxies in front of it) validate content as a string and
+        reject the request with HTTP 422 otherwise.
+        """
+        normalized = []
+        for message in messages:
+            msg = dict(message)
+            if msg.get("content") is None:
+                msg["content"] = ""
+            if msg.get("tool_calls") is None:
+                msg.pop("tool_calls", None)
+            normalized.append(msg)
+        return normalized
+
     async def _create_ollama_completion(
         self,
         messages: list[Dict[str, Any]],
@@ -921,7 +939,7 @@ class Endpoint:
     ) -> AsyncGenerator[Any, None]:
         payload: Dict[str, Any] = {
             "model": await self.get_model_name(),
-            "messages": messages,
+            "messages": self._ollama_messages(messages),
             "stream": stream,
         }
         if tools:

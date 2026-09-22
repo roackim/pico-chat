@@ -69,6 +69,9 @@ No lint/typecheck beyond these. Keep the suite green and the R9 guard passing.
   as the fallback so copying works over SSH. `handle_copy_action`,
   `_auto_copy_selection`, and `/debug get_context` all use it. The OSC 52
   payload truncates on a 4-byte base64 boundary so it stays decodable.
+  Feedback distinguishes verified copies (`copied ✓`) from OSC 52
+  (`sent via OSC 52`). Note: VTE terminals (Ptyxis/GNOME Terminal) ignore
+  OSC 52 — use `ssh -X` (X11 forwarding, xclip) or an OSC 52 terminal.
 
 ---
 
