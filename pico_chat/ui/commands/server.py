@@ -34,159 +34,138 @@ def _activate_endpoint(ui: ChatUIProtocol, endpoint) -> None:
         ui.refresh_status_bar()
 
 
-class ServerListCommand(Command):
-    def __init__(self):
-        super().__init__("list", "List all configured servers")
-
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        servers = pico_cfg.config.servers
-        if not servers:
-            ui.chat_history_panel.add_message(
-                "No servers configured.\n\n"
-                "Add one by editing your config: /config",
-                msg_type=SysMsg(), title="server")
-            return
-        color, muted, active, reset = (
-            str(theme.DEFAULT), str(theme.MUTED), str(theme.SUCCESS), theme.reset())
-        active_name = pico_cfg.config.active_server
-        lines = [f"{color}Configured servers:{reset}", ""]
-        for name, cfg in sorted(servers.items()):
-            server_type = cfg.get("type", "unknown")
-            detail = cfg.get("model", cfg.get("base_url", "unknown"))
-            marker = "*" if name == active_name else " "
-            lines.append(
-                f"{marker} {active if name == active_name else color}{name}{reset} "
-                f"{muted}({server_type}) - {detail}{reset}")
-        ui.chat_history_panel.add_message("\n".join(lines), msg_type=SysMsg())
+async def server_list(ui: ChatUIProtocol, args: List[str]):
+    servers = pico_cfg.config.servers
+    if not servers:
+        ui.chat_history_panel.add_message(
+            "No servers configured.\n\n"
+            "Add one by editing your config: /config",
+            msg_type=SysMsg(), title="server")
+        return
+    color, muted, active, reset = (
+        str(theme.DEFAULT), str(theme.MUTED), str(theme.SUCCESS), theme.reset())
+    active_name = pico_cfg.config.active_server
+    lines = [f"{color}Configured servers:{reset}", ""]
+    for name, cfg in sorted(servers.items()):
+        server_type = cfg.get("type", "unknown")
+        detail = cfg.get("model", cfg.get("base_url", "unknown"))
+        marker = "*" if name == active_name else " "
+        lines.append(
+            f"{marker} {active if name == active_name else color}{name}{reset} "
+            f"{muted}({server_type}) - {detail}{reset}")
+    ui.chat_history_panel.add_message("\n".join(lines), msg_type=SysMsg())
 
 
-class ServerUseCommand(Command):
-    def __init__(self):
-        super().__init__("use", "Switch to a configured server",
-                         params=[Param("NAME", completions=server_name_completions)])
+async def server_use(ui: ChatUIProtocol, args: List[str]):
+    if not args:
+        ui.chat_history_panel.add_message("Usage: /server use <name>", msg_type=SysMsgError())
+        return
+    name = args[0]
+    if name not in pico_cfg.config.servers:
+        ui.chat_history_panel.add_message(
+            f"Server '{name}' not found.\n\nUse '/server list' to see configured servers.",
+            msg_type=SysMsgError(), title="server")
+        return
+    from pico_chat.harness.endpoint import get_endpoint
 
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        if not args:
-            ui.chat_history_panel.add_message("Usage: /server use <name>", msg_type=SysMsgError())
-            return
-        name = args[0]
-        if name not in pico_cfg.config.servers:
-            ui.chat_history_panel.add_message(
-                f"Server '{name}' not found.\n\nUse '/server list' to see configured servers.",
-                msg_type=SysMsgError(), title="server")
-            return
-        from pico_chat.harness.endpoint import get_endpoint
-
-        pico_cfg.config.set_active_server(name)
-        endpoint = get_endpoint(name)
-        if endpoint is None:
-            ui.chat_history_panel.add_message(
-                f"Failed to parse server '{name}'.", msg_type=SysMsgError(), title="server")
-            return
-        _activate_endpoint(ui, endpoint)
-        ui.chat_history_panel.add_message(f"Switched to '{name}'.", msg_type=SysMsg(), title="server")
+    pico_cfg.config.set_active_server(name)
+    endpoint = get_endpoint(name)
+    if endpoint is None:
+        ui.chat_history_panel.add_message(
+            f"Failed to parse server '{name}'.", msg_type=SysMsgError(), title="server")
+        return
+    _activate_endpoint(ui, endpoint)
+    ui.chat_history_panel.add_message(f"Switched to '{name}'.", msg_type=SysMsg(), title="server")
 
 
-class ServerEditCommand(Command):
-    def __init__(self):
-        super().__init__("edit", "Open servers.toml in your editor and reload it")
+async def server_edit(ui: ChatUIProtocol, args: List[str]):
+    from pico_chat.ui.external_editor import open_editor
 
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        from pico_chat.ui.external_editor import open_editor
-
-        path = pico_cfg.config.ensure_section_file("servers")
-        open_editor(ui, path)
-        errors = pico_cfg.reload_config()
-        if errors:
-            ui.chat_history_panel.add_message(
-                "Config reloaded with errors:\n" + "\n".join(errors),
-                msg_type=SysMsgError(), title="server")
-        else:
-            ui.chat_history_panel.add_message("Config reloaded.", msg_type=SysMsg(), title="server")
+    path = pico_cfg.config.ensure_section_file("servers")
+    open_editor(ui, path)
+    errors = pico_cfg.reload_config()
+    if errors:
+        ui.chat_history_panel.add_message(
+            "Config reloaded with errors:\n" + "\n".join(errors),
+            msg_type=SysMsgError(), title="server")
+    else:
+        ui.chat_history_panel.add_message("Config reloaded.", msg_type=SysMsg(), title="server")
 
 
-class ServerRemoveCommand(Command):
-    def __init__(self):
-        super().__init__("remove", "Remove a server configuration",
-                         params=[Param("SERVER_NAME", completions=server_name_completions)])
+async def server_remove(ui: ChatUIProtocol, args: List[str]):
+    if not args:
+        ui.chat_history_panel.add_message("Usage: /server remove <name>", msg_type=SysMsgError())
+        return
+    name = args[0]
+    was_active = pico_cfg.config.active_server == name
+    if not pico_cfg.config.remove_server(name):
+        ui.chat_history_panel.add_message(f"Server '{name}' not found.", msg_type=SysMsgError())
+        return
+    message = f"Removed server '{name}'"
+    if was_active:
+        from pico_chat.harness.endpoint import get_active_endpoint
 
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        if not args:
-            ui.chat_history_panel.add_message("Usage: /server remove <name>", msg_type=SysMsgError())
-            return
-        name = args[0]
-        was_active = pico_cfg.config.active_server == name
-        if not pico_cfg.config.remove_server(name):
-            ui.chat_history_panel.add_message(f"Server '{name}' not found.", msg_type=SysMsgError())
-            return
-        message = f"Removed server '{name}'"
-        if was_active:
-            from pico_chat.harness.endpoint import get_active_endpoint
-
-            _activate_endpoint(ui, get_active_endpoint())
-            message += f"\nSwitched to '{pico_cfg.config.active_server}'"
-        ui.chat_history_panel.add_message(message, msg_type=SysMsg(), title="server")
+        _activate_endpoint(ui, get_active_endpoint())
+        message += f"\nSwitched to '{pico_cfg.config.active_server}'"
+    ui.chat_history_panel.add_message(message, msg_type=SysMsg(), title="server")
 
 
-class ServerInfoCommand(Command):
-    def __init__(self):
-        super().__init__("info", "Show full details for a server configuration",
-                         params=[Param("SERVER_NAME", completions=server_name_completions)])
-
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        if not args:
-            ui.chat_history_panel.add_message("Usage: /server info <name>", msg_type=SysMsgError())
-            return
-        cfg = pico_cfg.config.servers.get(args[0])
-        if cfg is None:
-            ui.chat_history_panel.add_message(f"Server '{args[0]}' not found.", msg_type=SysMsgError())
-            return
-        reset, color = theme.reset(), str(theme.WARNING)
-        fields = [
-            ("Name", args[0]),
-            ("Type", cfg.get("type", "unknown")),
-            ("Base URL", cfg.get("base_url", "unknown")),
-            ("Model", cfg.get("model", "-")),
-            ("Timeout", f"{cfg.get('timeout', 30.0)}s"),
-            ("Retry attempts", cfg.get("retry_attempts", 3)),
-        ]
-        msg = "\n".join(f"{color}{label:<17}: {reset}{value}" for label, value in fields)
-        ui.chat_history_panel.add_message(msg, msg_type=SysMsg(), title="server")
+async def server_info(ui: ChatUIProtocol, args: List[str]):
+    if not args:
+        ui.chat_history_panel.add_message("Usage: /server info <name>", msg_type=SysMsgError())
+        return
+    cfg = pico_cfg.config.servers.get(args[0])
+    if cfg is None:
+        ui.chat_history_panel.add_message(f"Server '{args[0]}' not found.", msg_type=SysMsgError())
+        return
+    reset, color = theme.reset(), str(theme.WARNING)
+    fields = [
+        ("Name", args[0]),
+        ("Type", cfg.get("type", "unknown")),
+        ("Base URL", cfg.get("base_url", "unknown")),
+        ("Model", cfg.get("model", "-")),
+        ("Timeout", f"{cfg.get('timeout', 30.0)}s"),
+        ("Retry attempts", cfg.get("retry_attempts", 3)),
+    ]
+    msg = "\n".join(f"{color}{label:<17}: {reset}{value}" for label, value in fields)
+    ui.chat_history_panel.add_message(msg, msg_type=SysMsg(), title="server")
 
 
-class ServerDiagnoseCommand(Command):
-    def __init__(self):
-        super().__init__("diagnose", "Test connectivity to a server and show the reason on failure",
-                         params=[Param("SERVER_NAME", completions=server_name_completions)])
+async def server_diagnose(ui: ChatUIProtocol, args: List[str]):
+    if not args:
+        ui.chat_history_panel.add_message("Usage: /server diagnose <name>", msg_type=SysMsgError())
+        return
+    from pico_chat.harness.endpoint import get_endpoint
 
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        if not args:
-            ui.chat_history_panel.add_message("Usage: /server diagnose <name>", msg_type=SysMsgError())
-            return
-        from pico_chat.harness.endpoint import get_endpoint
-
-        endpoint = get_endpoint(args[0])
-        if endpoint is None:
-            ui.chat_history_panel.add_message(
-                f"Server '{args[0]}' not found.\n\nUse '/server list' to see available servers.",
-                msg_type=SysMsgError())
-            return
-        diagnosis = await endpoint.diagnose_connection()
-        ui.chat_history_panel.add_message(diagnosis.message(), msg_type=SysMsg())
-        if hasattr(ui, "refresh_status_bar"):
-            ui.refresh_status_bar()
+    endpoint = get_endpoint(args[0])
+    if endpoint is None:
+        ui.chat_history_panel.add_message(
+            f"Server '{args[0]}' not found.\n\nUse '/server list' to see available servers.",
+            msg_type=SysMsgError())
+        return
+    diagnosis = await endpoint.diagnose_connection()
+    ui.chat_history_panel.add_message(diagnosis.message(), msg_type=SysMsg())
+    if hasattr(ui, "refresh_status_bar"):
+        ui.refresh_status_bar()
 
 
 class ServerCommand(Command):
     def __init__(self):
-        remove = ServerRemoveCommand()
+        remove = Command("remove", "Remove a server configuration", handler=server_remove,
+                         params=[Param("SERVER_NAME", completions=server_name_completions)])
         super().__init__("server", "Manage LLM server configurations", subcommands={
-            "list": ServerListCommand(),
-            "use": ServerUseCommand(),
-            "edit": ServerEditCommand(),
-            "info": ServerInfoCommand(),
+            "list": Command("list", "List all configured servers", handler=server_list),
+            "use": Command("use", "Switch to a configured server", handler=server_use,
+                           params=[Param("NAME", completions=server_name_completions)]),
+            "edit": Command("edit", "Open servers.toml in your editor and reload it",
+                            handler=server_edit),
+            "info": Command("info", "Show full details for a server configuration",
+                            handler=server_info,
+                            params=[Param("SERVER_NAME", completions=server_name_completions)]),
             "remove": remove, "rm": remove,
-            "diagnose": ServerDiagnoseCommand(),
+            "diagnose": Command("diagnose", "Test connectivity to a server and show the reason on failure",
+                                handler=server_diagnose,
+                                params=[Param("SERVER_NAME", completions=server_name_completions)]),
         })
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
@@ -203,6 +182,6 @@ class ServerCommand(Command):
 
 
 __all__ = [
-    "ServerCommand", "ServerListCommand", "ServerUseCommand", "ServerEditCommand",
-    "ServerRemoveCommand", "ServerInfoCommand", "ServerDiagnoseCommand",
+    "ServerCommand", "server_list", "server_use", "server_edit",
+    "server_remove", "server_info", "server_diagnose",
 ]

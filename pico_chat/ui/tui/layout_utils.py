@@ -1,7 +1,7 @@
 """Text layout and utility functions for Pico-Chat."""
 
 import re
-from typing import Optional, List, Tuple
+from typing import Optional, List
 from wcwidth import wcswidth
 
 # ANSI escape code pattern for stripping colors when calculating width
@@ -17,35 +17,6 @@ def display_width(text: str) -> int:
     width = wcswidth(clean_text)
     return width if width >= 0 else len(clean_text)
 
-def split_word_at_width(word: str, max_width: int) -> Tuple[str, str]:
-    """Split a word at a specific width, preserving ANSI escape codes."""
-    if max_width <= 0:
-        return ("", word)
-    
-    first_part = ""
-    i = 0
-    visible_width = 0
-    
-    while i < len(word):
-        if word[i:i+1] == '\x1b':
-            match = ANSI_ESCAPE.match(word[i:])
-            if match:
-                ansi_code = match.group()
-                first_part += ansi_code
-                i += len(ansi_code)
-                continue
-        
-        char = word[i]
-        char_width = display_width(char)
-        
-        if visible_width + char_width > max_width:
-            return (first_part, word[i:])
-        
-        first_part += char
-        visible_width += char_width
-        i += 1
-    
-    return (word, "")
 
 def break_long_word(word: str, max_width: int) -> List[str]:
     """Break a word that's too long into chunks that fit within max_width."""

@@ -76,7 +76,7 @@ async def _open_picker(ui: ChatUIProtocol) -> None:
 
     show_modal = getattr(ui, "show_list_modal", None)
     if show_modal is None:
-        await ModelListCommand().execute(ui, [])
+        await model_list(ui, [])
         return
 
     active_name, selected = _current_selection(ui)
@@ -143,93 +143,84 @@ def _activate(ui: ChatUIProtocol, server: str, model: str) -> None:
         ui.refresh_status_bar()
 
 
-class ModelListCommand(Command):
-    def __init__(self):
-        super().__init__("list", "List models across all servers")
+async def model_list(ui: ChatUIProtocol, args: List[str]):
+    pairs = await _discover_all()
+    if not pairs:
+        ui.chat_history_panel.add_message(
+            "No models discovered.\n\n"
+            "Configure a server with '/config', then check it is reachable "
+            "with '/server diagnose <name>'.",
+            msg_type=SysMsg(), title="model")
+        return
 
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        pairs = await _discover_all()
-        if not pairs:
+    active_endpoint = getattr(ui.agent, "endpoint", None)
+    active_name = getattr(active_endpoint, "name", None)
+    selected = getattr(active_endpoint, "selected_model", None)
+
+    lines = [f"{str(theme.DEFAULT)}Models:{theme.reset()}"]
+    for server, model in sorted(pairs, key=lambda p: (p[0], p[1].id)):
+        active = server == active_name and model.id == selected
+        lines.append(_model_row(server, model, active))
+    ui.chat_history_panel.add_message("\n".join(lines), msg_type=SysMsg(), title="model")
+
+
+async def model_use(ui: ChatUIProtocol, args: List[str]):
+    if not args:
+        ui.chat_history_panel.add_message("Usage: /model <model>", msg_type=SysMsgError())
+        return
+
+    raw = " ".join(args).strip()
+    server_hint, model = _split_server_model(raw)
+
+    if server_hint is not None:
+        if server_hint not in pico_cfg.config.servers:
             ui.chat_history_panel.add_message(
-                "No models discovered.\n\n"
-                "Configure a server with '/config', then check it is reachable "
-                "with '/server diagnose <name>'.",
-                msg_type=SysMsg(), title="model")
-            return
-
-        active_endpoint = getattr(ui.agent, "endpoint", None)
-        active_name = getattr(active_endpoint, "name", None)
-        selected = getattr(active_endpoint, "selected_model", None)
-
-        lines = [f"{str(theme.DEFAULT)}Models:{theme.reset()}"]
-        for server, model in sorted(pairs, key=lambda p: (p[0], p[1].id)):
-            active = server == active_name and model.id == selected
-            lines.append(_model_row(server, model, active))
-        ui.chat_history_panel.add_message("\n".join(lines), msg_type=SysMsg(), title="model")
-
-
-class ModelUseCommand(Command):
-    def __init__(self):
-        super().__init__("use", "Select a model, switching to the server that serves it",
-                         params=[Param("MODEL", completions=_known_model_ids, required=True)])
-
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        if not args:
-            ui.chat_history_panel.add_message("Usage: /model <model>", msg_type=SysMsgError())
-            return
-
-        from pico_chat.harness.endpoint import get_endpoint
-
-        raw = " ".join(args).strip()
-        server_hint, model = _split_server_model(raw)
-
-        if server_hint is not None:
-            if server_hint not in pico_cfg.config.servers:
-                ui.chat_history_panel.add_message(
-                    f"Server '{server_hint}' not found.\n\n"
-                    "Use '/server list' to see configured servers.",
-                    msg_type=SysMsgError(), title="model")
-                return
-            servers = [server_hint]
-        else:
-            pairs = await _discover_all()
-            servers = [server for server, info in pairs if info.id == model]
-
-        if not servers:
-            ui.chat_history_panel.add_message(
-                f"Model '{model}' not found on any configured server.\n\n"
-                "Run '/model list' to see discovered models.",
+                f"Server '{server_hint}' not found.\n\n"
+                "Use '/server list' to see configured servers.",
                 msg_type=SysMsgError(), title="model")
             return
+        servers = [server_hint]
+    else:
+        pairs = await _discover_all()
+        servers = [server for server, info in pairs if info.id == model]
 
-        if len(servers) > 1:
-            active_name = getattr(getattr(ui.agent, "endpoint", None), "name", None)
-            if active_name in servers:
-                server = active_name
-            else:
-                ui.chat_history_panel.add_message(
-                    f"Model '{model}' is served by multiple servers:\n"
-                    + "\n".join(f"  - {s}" for s in servers)
-                    + "\n\nUse '/model <server>:<model>' to disambiguate.",
-                    msg_type=SysMsgError(), title="model")
-                return
+    if not servers:
+        ui.chat_history_panel.add_message(
+            f"Model '{model}' not found on any configured server.\n\n"
+            "Run '/model list' to see discovered models.",
+            msg_type=SysMsgError(), title="model")
+        return
+
+    if len(servers) > 1:
+        active_name = getattr(getattr(ui.agent, "endpoint", None), "name", None)
+        if active_name in servers:
+            server = active_name
         else:
-            server = servers[0]
+            ui.chat_history_panel.add_message(
+                f"Model '{model}' is served by multiple servers:\n"
+                + "\n".join(f"  - {s}" for s in servers)
+                + "\n\nUse '/model <server>:<model>' to disambiguate.",
+                msg_type=SysMsgError(), title="model")
+            return
+    else:
+        server = servers[0]
 
-        try:
-            _activate(ui, server, model)
-            ui.chat_history_panel.add_message(
-                f"Selected {model} on {server}.", msg_type=SysMsg(), title="model")
-        except Exception as exc:
-            ui.chat_history_panel.add_message(
-                f"Could not select model: {exc}", msg_type=SysMsgError(), title="model")
+    try:
+        _activate(ui, server, model)
+        ui.chat_history_panel.add_message(
+            f"Selected {model} on {server}.", msg_type=SysMsg(), title="model")
+    except Exception as exc:
+        ui.chat_history_panel.add_message(
+            f"Could not select model: {exc}", msg_type=SysMsgError(), title="model")
 
 
 class ModelCommand(Command):
     def __init__(self):
         super().__init__("model", "Discover and select models", subcommands={
-            "list": ModelListCommand(),
-            "use": ModelUseCommand(),
+            "list": Command("list", "List models across all servers", handler=model_list),
+            "use": Command("use", "Select a model, switching to the server that serves it",
+                           handler=model_use,
+                           params=[Param("MODEL", completions=_known_model_ids, required=True)]),
         })
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
@@ -244,4 +235,4 @@ class ModelCommand(Command):
         await subcommand.execute(ui, args[1:])
 
 
-__all__ = ["ModelCommand", "ModelListCommand", "ModelUseCommand"]
+__all__ = ["ModelCommand", "model_list", "model_use"]

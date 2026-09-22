@@ -17,9 +17,6 @@ from pico_chat.ui.tui.msg_types import MsgType, MsgAction
 from pico_chat.ui.chat_message import Message
 
 
-WELCOME_MESSAGE = "Welcome to pico-chat!\n"
-
-
 @dataclass
 class SelectionState:
     """Tracks text selection within a message."""
@@ -75,9 +72,6 @@ class ChatHistoryPanel(TextComponent):
         # Selection drag throttle: cap update+repaint rate during drag
         self._selection_throttle_interval: float = 0.050  # 30ms between repaints
         self._selection_last_update: float = 0.0  # last monotonic time we updated
-        
-        # Add welcome message
-        # self.add_message(WELCOME_MESSAGE.rstrip())
         
         # Initial component - self is now the component
         self.compositor: Optional[object] = None
@@ -141,12 +135,6 @@ class ChatHistoryPanel(TextComponent):
         if self.on_selection_changed is not None:
             self.on_selection_changed()
 
-    def current_actions(self) -> list:
-        """Actions for the selected message (empty when nothing is selected)."""
-        index = self.focused_message_index
-        if index is None or not (0 <= index < len(self.messages)):
-            return []
-        return list(self.messages[index].get_active_actions())
 
     # --- Text Selection ---
 
@@ -992,18 +980,6 @@ class ChatHistoryPanel(TextComponent):
             self._message_height_cache.clear()
             self._request_repaint()
 
-    def remove_message(self, message: Message):
-        """Remove a specific message from the chat history.
-        
-        Args:
-            message: The message to remove
-        """
-        try:
-            index = self.messages.index(message)
-            self.remove_message_by_index(index)
-        except ValueError:
-            # Message not found, ignore
-            pass
     
     def remove_message_by_index(self, index: int):
         """Remove a message by its index.
@@ -1148,6 +1124,3 @@ class ChatHistoryPanel(TextComponent):
         
         # No implicit render call here
 
-    def get_messages(self) -> list:
-        """Get the list of Message objects."""
-        return self.messages

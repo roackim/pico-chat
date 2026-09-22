@@ -11,7 +11,6 @@ class CursorRenderer:
     def __init__(self, config_getter):
         self.get_config = config_getter  # Callable that returns config
         self.last_input_time = time.time()  # Start with solid cursor
-        self.last_blink_time = time.time()  # Initialize to now
         self.cursor_visible = True
     
     def mark_input(self):

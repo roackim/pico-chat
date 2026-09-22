@@ -43,23 +43,3 @@ class SeparatorLine(Component):
         return 1
 
 
-class VerticalDivider(Component):
-    """A one-column vertical separator spanning the allocated height."""
-
-    min_width = 1
-
-    def __init__(self, character: str = "│", id: Optional[str] = None,
-                 fg=None, bg=None):
-        super().__init__(id)
-        if not character:
-            raise ValueError("character must not be empty")
-        self.character = character[0]
-        self.fg = theme.MUTED if fg is None else fg
-        self.bg = theme.get_bg() if bg is None else bg
-
-    def render(self, buffer: Buffer):
-        buffer.fill(self.x, self.y, 1, self.height, self.character,
-                    fg=self.fg, bg=self.bg)
-
-    def get_preferred_width(self) -> int:
-        return 1

@@ -42,43 +42,42 @@ async def fetch_openrouter_balance() -> Tuple[bool, str, dict]:
         return False, f"Failed to fetch balance: {e}", {}
 
 
-class OpenRouterBalanceCommand(Command):
-    def __init__(self):
-        super().__init__("balance", "Show OpenRouter account credit balance")
+async def openrouter_balance(ui: ChatUIProtocol, args: List[str]):
+    # Balance is transient account information, so keep it in a modal
+    # rather than adding a permanent chat-history message.
+    ui.show_popup("OpenRouter balance", "Fetching balance...")
 
-    async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        # Balance is transient account information, so keep it in a modal
-        # rather than adding a permanent chat-history message.
-        ui.show_popup("OpenRouter balance", "Fetching balance...")
+    ok, message, balance = await fetch_openrouter_balance()
+    if not ok:
+        ui.show_popup("OpenRouter balance", message)
+        return
 
-        ok, message, balance = await fetch_openrouter_balance()
-        if not ok:
-            ui.show_popup("OpenRouter balance", message)
-            return
+    remaining = balance["remaining"]
+    if remaining > 5:
+        status = "healthy"
+    elif remaining > 1:
+        status = "low"
+    else:
+        status = "critical"
 
-        remaining = balance["remaining"]
-        if remaining > 5:
-            status = "healthy"
-        elif remaining > 1:
-            status = "low"
-        else:
-            status = "critical"
-
-        content = (
-            f"Status           : {status}\n"
-            f"Remaining        : ${remaining:.4f}\n"
-            f"Total credits    : ${balance['total_credits']:.4f}\n"
-            f"Total usage      : ${balance['total_usage']:.4f}"
-        )
-        ui.show_popup("OpenRouter balance", content)
+    content = (
+        f"Status           : {status}\n"
+        f"Remaining        : ${remaining:.4f}\n"
+        f"Total credits    : ${balance['total_credits']:.4f}\n"
+        f"Total usage      : ${balance['total_usage']:.4f}"
+    )
+    ui.show_popup("OpenRouter balance", content)
 
 
 class OpenRouterCommand(Command):
     def __init__(self):
-        subcommands = {
-            "balance": OpenRouterBalanceCommand(),
-        }
-        super().__init__("openrouter", "OpenRouter account utilities", subcommands=subcommands)
+        super().__init__(
+            "openrouter", "OpenRouter account utilities",
+            subcommands={
+                "balance": Command("balance", "Show OpenRouter account credit balance",
+                                   handler=openrouter_balance),
+            },
+        )
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
         if not args:
@@ -98,4 +97,4 @@ class OpenRouterCommand(Command):
                 )
 
 
-__all__ = ["OpenRouterCommand", "OpenRouterBalanceCommand"]
+__all__ = ["OpenRouterCommand", "openrouter_balance", "fetch_openrouter_balance"]

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Protocol, Union
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Union
 
 from pico_chat import pico_cfg
 
 
 CompletionSource = Union[List[str], Callable[[], List[str]]]
+CommandHandler = Callable[["ChatUIProtocol", List[str]], Awaitable[None]]
 
 
 @dataclass
@@ -29,20 +30,29 @@ class ChatUIProtocol(Protocol):
     compositor: Any
 
     def show_popup(self, title: str, content: str, content_padding: int = 1) -> None: ...
-    def hide_popup(self) -> None: ...
 
 
 class Command:
+    """A slash command: metadata plus either a handler or a subcommand tree.
+
+    Leaf commands use ``handler`` (a plain ``async def``); only commands that
+    own a real subcommand tree subclass this and override :meth:`execute`.
+    """
+
     def __init__(self, name: str, description: str,
+                 handler: Optional[CommandHandler] = None,
                  subcommands: Optional[Dict[str, "Command"]] = None,
                  params: Optional[List[Param]] = None):
         self.name = name
         self.description = description
+        self.handler = handler
         self.subcommands = subcommands or {}
         self.params = params or []
 
     async def execute(self, ui: ChatUIProtocol, args: List[str]):
-        raise NotImplementedError
+        if self.handler is None:
+            raise NotImplementedError(f"command '{self.name}' has no handler")
+        await self.handler(ui, args)
 
     def has_subcommands(self) -> bool:
         return bool(self.subcommands)

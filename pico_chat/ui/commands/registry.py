@@ -1,78 +1,75 @@
 """Command registry: the single assembly point for all slash commands.
 
-Each command lives in a module named after its domain (``core``, ``server``,
-``models``, ``roles``, ``debug``, ``conversation``, ``tabs``, ``tools``,
-``openrouter``). Those modules depend only on
-:mod:`pico_chat.ui.commands.base`; this module is the only place that knows
-about all of them, which keeps the import graph acyclic.
+Handlers live in per-domain modules (``core``, ``server``, ``models``,
+``roles``, ``debug``, ``conversation``, ``tools``, ``openrouter``). Those
+modules depend only on :mod:`pico_chat.ui.commands.base`; this module is the
+only place that knows about all of them, which keeps the import graph acyclic.
+
+Most commands are plain handler functions with metadata. ``Command`` classes
+are reserved for commands that own a subcommand tree (server/model/debug/
+openrouter/conversation).
 """
 
 from __future__ import annotations
 
 from typing import Dict, List
 
-from .base import ChatUIProtocol, Command, Param
-from .conversation import (
-    ConversationCommand,
-    ConversationExportCommand,
-    ConversationImportCommand,
-)
+from .base import ChatUIProtocol, Command, Param, config_section_completions
+from .conversation import ConversationCommand
 from .core import (
-    ActivityCommand,
-    CdCommand,
-    ClearCommand,
-    CompactCommand,
-    ConfigCommand,
-    EditCommand,
-    ExitCommand,
-    HelpCommand,
-    PwdCommand,
-    ReloadCommand,
-    ResumeCommand,
-    StatusCommand,
-    StopCommand,
+    cmd_activity,
+    cmd_cd,
+    cmd_clear,
+    cmd_compact,
+    cmd_config,
+    cmd_edit,
+    cmd_exit,
+    cmd_help,
+    cmd_pwd,
+    cmd_reload,
+    cmd_status,
+    cmd_stop,
 )
-from .debug import (
-    DebugCommand,
-    DebugGetContextCommand,
-    DebugLogCommand,
-    DebugPanelCommand,
-    DebugSystemPromptCommand,
-)
-from .models import ModelCommand, ModelListCommand, ModelUseCommand
-from .openrouter import OpenRouterBalanceCommand, OpenRouterCommand
-from .roles import RolesCommand
-from .server import (
-    ServerCommand,
-    ServerEditCommand,
-    ServerInfoCommand,
-    ServerListCommand,
-    ServerRemoveCommand,
-    ServerUseCommand,
-)
-from .tools import ToolsCommand
+from .debug import DebugCommand
+from .models import ModelCommand
+from .openrouter import OpenRouterCommand
+from .roles import cmd_roles
+from .server import ServerCommand
+from .tools import cmd_tools
+
+# Help needs the whole registry, so its handler is assembled here.
+async def _help(ui: ChatUIProtocol, args: List[str]):
+    await cmd_help(ui, args, COMMANDS)
+
 
 # Command Registry
 COMMANDS: Dict[str, Command] = {
-    "help":         HelpCommand(lambda: COMMANDS),
-    "clear":        ClearCommand(),
-    "reload":       ReloadCommand(),
-    "config":       ConfigCommand(),
-    "edit":         EditCommand(),
-    "compact":      CompactCommand(),
-    "exit":         ExitCommand(),
-    "stop":         StopCommand(),
-    "resume":       ResumeCommand(),
-    "status":       StatusCommand(),
-    "activity":     ActivityCommand(),
+    "help":         Command("help", "Show available commands", handler=_help),
+    "clear":        Command("clear", "Clear chat history", handler=cmd_clear),
+    "reload":       Command("reload", "Reload config files and the roles directory from disk",
+                            handler=cmd_reload),
+    "config":       Command("config", "Edit a config file in $EDITOR and reload it",
+                            handler=cmd_config,
+                            params=[Param("SECTION", completions=config_section_completions)]),
+    "edit":         Command("edit", "Open a file in $EDITOR", handler=cmd_edit,
+                            params=[Param("FILE", path=True)]),
+    "compact":      Command("compact", "Compact context with an LLM summary marker",
+                            handler=cmd_compact),
+    "exit":         Command("exit", "Close the application", handler=cmd_exit),
+    "stop":         Command("stop", "Stop current generation", handler=cmd_stop),
+    "status":       Command("status", "Show system and connection status", handler=cmd_status),
+    "activity":     Command("activity", "Toggle the activity overlay (shell/status output)",
+                            handler=cmd_activity),
     "server":       ServerCommand(),
     "model":        ModelCommand(),
-    "tools":        ToolsCommand(),
+    "tools":        Command("tools", "Show available tools and their permissions",
+                            handler=cmd_tools),
     "debug":        DebugCommand(),
-    "roles":        RolesCommand(),
+    "roles":        Command("roles", "Select and inspect conversation roles", handler=cmd_roles),
     "openrouter":   OpenRouterCommand(),
-    "cd":           CdCommand(),
-    "pwd":          PwdCommand(),
+    "cd":           Command("cd", "Change workspace directory and rebuild context",
+                            handler=cmd_cd, params=[Param("DIR", path=True)]),
+    "pwd":          Command("pwd", "Show current workspace directory", handler=cmd_pwd),
     "conversation": ConversationCommand(),
 }
 
@@ -117,18 +114,4 @@ __all__ = [
     "handle_command",
     "get_command_list",
     "get_subcommand_list",
-    # Re-exported for tests and hosts that import concrete commands.
-    "HelpCommand", "ClearCommand", "ReloadCommand", "ConfigCommand", "EditCommand",
-    "CompactCommand", "ExitCommand",
-    "StopCommand", "ResumeCommand", "StatusCommand", "PwdCommand", "CdCommand",
-    "ActivityCommand",
-    "ServerCommand", "ServerListCommand", "ServerUseCommand", "ServerEditCommand",
-    "ServerRemoveCommand", "ServerInfoCommand",
-    "ModelCommand", "ModelListCommand", "ModelUseCommand",
-    "RolesCommand",
-    "ToolsCommand", "OpenRouterCommand", "OpenRouterBalanceCommand",
-    "DebugCommand", "DebugPanelCommand", "DebugGetContextCommand",
-    "DebugLogCommand", "DebugSystemPromptCommand",
-    "ConversationCommand", "ConversationExportCommand", "ConversationImportCommand",
 ]
-

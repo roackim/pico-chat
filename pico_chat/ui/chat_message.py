@@ -170,10 +170,6 @@ class Message:
         self.box.fg = color
         self.box.mark_changed()  # Color changed
 
-    def set_content_color(self, color: RGB):
-        """Update the content color of the message."""
-        self.component.fg = color
-        self.box.mark_changed()  # Color changed
 
     def _is_markdown(self) -> bool:
         """Check if this message uses markdown rendering."""
@@ -391,10 +387,6 @@ class Message:
         """Get the TUI component for this message."""
         return self.box
 
-    def set_text(self, new_text: str):
-        """Set new text for the message and reformat."""
-        self.base_text = new_text
-        self.reformat(self.max_width)
 
     def append(self, text: str):
         """Append text to the message and reformat.

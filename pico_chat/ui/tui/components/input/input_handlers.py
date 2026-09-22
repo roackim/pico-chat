@@ -11,11 +11,10 @@ if TYPE_CHECKING:
 class InputContext:
     """Context object passed to input handlers."""
     
-    def __init__(self, buffer, coord_mapper, scroll_manager, menu_manager=None):
+    def __init__(self, buffer, coord_mapper, scroll_manager):
         self.buffer = buffer  # TextBuffer
         self.coord_mapper = coord_mapper  # CoordinateMapper
         self.scroll = scroll_manager  # ScrollManager
-        self.menus = menu_manager  # Optional, kept for backwards compatibility
 
 
 class InputHandler:

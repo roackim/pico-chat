@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from pico_chat.ui.external_editor import edit_file, resolve_editor
-from pico_chat.ui.commands.core import ConfigCommand, EditCommand, ReloadCommand
+from pico_chat.ui.commands.core import cmd_config, cmd_edit, cmd_reload
 
 
 class _Panel:
@@ -84,7 +84,7 @@ def test_config_command_opens_section_and_reloads(monkeypatch, tmp_path):
 
     monkeypatch.setattr("pico_chat.ui.external_editor.open_editor", _fake_open)
 
-    asyncio.run(ConfigCommand().execute(ui, ["servers"]))
+    asyncio.run(cmd_config(ui, ["servers"]))
 
     assert opened == [tmp_path / "servers.toml"]
     assert (tmp_path / "servers.toml").exists()
@@ -94,7 +94,7 @@ def test_config_command_opens_section_and_reloads(monkeypatch, tmp_path):
 def test_config_command_no_args_lists_sections(monkeypatch):
     ui = _UI()
 
-    asyncio.run(ConfigCommand().execute(ui, []))
+    asyncio.run(cmd_config(ui, []))
 
     assert ui.popups and ui.popups[0][0] == "config"
     assert "ui.toml" in ui.popups[0][1]
@@ -103,7 +103,7 @@ def test_config_command_no_args_lists_sections(monkeypatch):
 def test_config_command_unknown_section_reports_error(monkeypatch):
     ui = _UI()
 
-    asyncio.run(ConfigCommand().execute(ui, ["nope"]))
+    asyncio.run(cmd_config(ui, ["nope"]))
 
     assert any("Unknown section" in m for m in ui.chat_history_panel.messages)
 
@@ -114,7 +114,7 @@ def test_config_command_without_editor_reports_error(monkeypatch):
     monkeypatch.setattr("pico_chat.ui.external_editor.shutil.which", lambda _name: None)
     ui = _UI()
 
-    asyncio.run(ConfigCommand().execute(ui, ["ui"]))
+    asyncio.run(cmd_config(ui, ["ui"]))
 
     assert any("No editor" in m for m in ui.chat_history_panel.messages)
 
@@ -129,7 +129,7 @@ def test_edit_command_opens_requested_file(monkeypatch, tmp_path):
     )
 
     target = tmp_path / "notes.txt"
-    asyncio.run(EditCommand().execute(ui, [str(target)]))
+    asyncio.run(cmd_edit(ui, [str(target)]))
 
     assert opened == [target]
 
@@ -141,7 +141,7 @@ def test_reload_command_success(monkeypatch, tmp_path):
     monkeypatch.setattr(cfg_mod, "get_state_path", lambda: tmp_path / "state.toml")
     ui = _UI()
 
-    asyncio.run(ReloadCommand().execute(ui, []))
+    asyncio.run(cmd_reload(ui, []))
 
     assert any("Config reloaded" in m for m in ui.chat_history_panel.messages)
     assert ui.refreshed == 1

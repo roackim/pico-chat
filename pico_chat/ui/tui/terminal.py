@@ -30,13 +30,7 @@ class ANSI:
     def move_to(row: int, col: int) -> str:
         return f"\033[{row};{col}H"
 
-    @staticmethod
-    def color_rgb_fg(r: int, g: int, b: int) -> str:
-        return f"\033[38;2;{r};{g};{b}m"
 
-    @staticmethod
-    def color_rgb_bg(r: int, g: int, b: int) -> str:
-        return f"\033[48;2;{r};{g};{b}m"
 
 class Terminal:
     def __init__(self):

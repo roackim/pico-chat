@@ -123,7 +123,6 @@ class Box(Component):
         self.subbuffer: Optional[SubBuffer] = None
         self._sub_valid = False  # True once the SubBuffer holds a full frame
         self._grew_from: Optional[int] = None  # pre-growth height of the SubBuffer
-        self._last_size = (0, 0)  # Track size changes
 
         # Optional in-place editor (replaces child rendering while active)
         self.inline_editor = None
@@ -144,12 +143,6 @@ class Box(Component):
             return self._title_provider() or self.title
         return self.title
 
-    @property
-    def current_fg_color(self):
-        """Resolve the foreground color, honoring a dynamic color_provider."""
-        if self._color_provider is not None:
-            return self._color_provider() or self.fg
-        return self.fg
     
     def set_focused(self, focused: bool):
         """Set the focused state of this box."""
@@ -160,11 +153,6 @@ class Box(Component):
     def set_layout(self, x: int, y: int, width: int, height: int):
         old_size = (self.width, self.height)
         size_changed = old_size != (width, height)
-
-        if self.focus_in_padding and hasattr(self.child, "fields"):
-            fields = getattr(self.child, "all_fields", self.child.fields)
-            for field in fields:
-                field.suppress_focus_marker = True
 
         # In thread mode, no borders - child is inset by the gutter width (1 col)
         # so content flows to the right of the role gutter. When focused with
@@ -261,7 +249,6 @@ class Box(Component):
                 self._grew_from = self.subbuffer.height
                 self.subbuffer.grow(height)
             self.mark_changed()
-            self._last_size = (width, height)
         
         # Update blit position (free for scrolling!)
         if self.subbuffer:

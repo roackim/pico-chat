@@ -43,9 +43,6 @@ class SelectionMenu(Component):
         self.compositor = compositor
         self._registered_with_compositor = False
 
-    def set_highlight_color(self, color):
-        self.highlight_color = color
-        self.mark_changed()
 
     def set_fill_width(self, fill_width: bool):
         if self.fill_width != fill_width:
@@ -124,10 +121,6 @@ class SelectionMenu(Component):
             return self.items[self.selected_index]
         return None
     
-    def set_position_at(self, x: int, y: int):
-        """Set menu position explicitly. Useful for positioning above trigger."""
-        self._manual_x = x
-        self._manual_y = y
 
     def render(self, buffer: Buffer):
         """Render the menu at its current position."""
@@ -215,8 +208,3 @@ class SelectionMenu(Component):
         if self.items:
             self.selected_index = (self.selected_index + 1) % len(self.items)
     
-    def get_selection(self) -> Optional[str]:
-        """Get the currently selected item, or None if no items."""
-        if self.items and 0 <= self.selected_index < len(self.items):
-            return self.items[self.selected_index]
-        return None

@@ -1,6 +1,6 @@
 # Pico-Chat Simplification — Plan
 
-**Status:** R1,R2,R4,R4b,R5,R6,R7,R8,R9 done; R3 (commands as data) pending.
+**Status:** R1,R2,R3,R4,R4b,R5,R6,R7,R8,R9 done.
 See `HANDOFF.md` for current state and the remaining work (OSC 52 clipboard,
 optional picker polish / structural refactor). A round of UI/UX polish
 (message prefix bar, selection + action line, activity surface, `@` picker) is
@@ -55,9 +55,10 @@ TUI terminal suspends/resumes around the editor (`ui/tui/terminal.py`,
 `ui/external_editor.py`). `/server` is list/use/edit/info/remove/diagnose;
 `/model` discovers live. Full command-registry-as-data cleanup still pending.
 
-### R3 — Commands as data
-One registry of `(name, description, params, handler)`. Classes only where a
-subcommand tree plus state is real.
+### R3 — Commands as data *(done 2026-09-22)*
+One registry of `(name, description, params, handler)`. Leaf commands are plain
+handler functions; `Command` classes are reserved for real subcommand trees
+(server/model/debug/openrouter/conversation).
 
 ### R4b — Split intent into per-section files *(done 2026-09-21)*
 `pico.toml` was replaced by single-concern files (`ui.toml`, `context.toml`,
@@ -206,7 +207,7 @@ item.
 1. **R4** config schema + loader + validation + `/reload`. *(done 2026-09-21)*
 2. **R2** `Endpoint`; delete the server/service/llm-config split. *(done 2026-09-21)*
 3. **R1** event union; harness yields, UI consumes. *(done 2026-09-21)*
-4. **R3** command registry as data; prune command classes.
+4. **R3** command registry as data; prune command classes. *(done 2026-09-22)*
 5. **R5** delete forms/settings. *(done 2026-09-21)*
 6. **R6** remove tabs; one conversation per process. *(done 2026-09-21)*
 7. **R7/R8** delete autosave, search, containerization, token estimation. *(done 2026-09-21)*

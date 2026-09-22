@@ -3,7 +3,7 @@ import json
 from types import SimpleNamespace
 
 from pico_chat.harness.roles import Role
-from pico_chat.ui.commands.conversation import ConversationExportCommand, ConversationImportCommand
+from pico_chat.ui.commands.conversation import conversation_export, conversation_import
 
 
 class FakeAgent:
@@ -49,7 +49,7 @@ def test_conversation_export_includes_active_role(tmp_path):
     ui = FakeUI()
     filename = tmp_path / "conversation.json"
 
-    asyncio.run(ConversationExportCommand().execute(ui, [str(filename)]))
+    asyncio.run(conversation_export(ui, [str(filename)]))
 
     exported = json.loads(filename.read_text())
     assert exported["role"] == "default"
@@ -66,11 +66,11 @@ def test_conversation_import_restores_role_before_history_replay(tmp_path, monke
         lambda name: Role(name),
     )
 
-    command = ConversationImportCommand()
-    command._rebuild_ui_from_history = lambda ui, history: setattr(
-        ui, "replayed_role", ui.agent.role.name
+    monkeypatch.setattr(
+        "pico_chat.ui.commands.conversation._rebuild_ui_from_history",
+        lambda ui, history: setattr(ui, "replayed_role", ui.agent.role.name),
     )
-    asyncio.run(command.execute(ui, [str(filename)]))
+    asyncio.run(conversation_import(ui, [str(filename)]))
 
     assert ui.agent.role.name == "reviewer"
     assert ui.agent.history == history
@@ -83,9 +83,7 @@ def test_conversation_import_accepts_legacy_history_array(tmp_path):
     history = [{"role": "user", "content": "legacy"}]
     filename.write_text(json.dumps(history))
 
-    command = ConversationImportCommand()
-    command._rebuild_ui_from_history = lambda ui, history: None
-    asyncio.run(command.execute(ui, [str(filename)]))
+    asyncio.run(conversation_import(ui, [str(filename)]))
 
     assert ui.agent.history == history
     assert ui.agent.role.name == "default"
@@ -104,9 +102,7 @@ def test_conversation_import_defaults_role_when_missing(tmp_path, monkeypatch):
 
     monkeypatch.setattr("pico_chat.harness.roles.load_role", fake_load)
 
-    command = ConversationImportCommand()
-    command._rebuild_ui_from_history = lambda ui, history: None
-    asyncio.run(command.execute(ui, [str(filename)]))
+    asyncio.run(conversation_import(ui, [str(filename)]))
 
     # Defaulted to 'default' and warned in the chat.
     assert ui.agent.role.name == "default"
@@ -129,8 +125,7 @@ def test_conversation_import_handles_tool_call_only_assistant(tmp_path):
     ]
     filename.write_text(json.dumps({"role": "default", "history": history}))
 
-    command = ConversationImportCommand()
-    asyncio.run(command.execute(ui, [str(filename)]))
+    asyncio.run(conversation_import(ui, [str(filename)]))
 
     assert ui.agent.history == history
     assert "Import failed" not in "\n".join(m.text for m in ui.chat_history_panel.messages)
@@ -156,7 +151,7 @@ def test_conversation_import_keeps_assistant_reply_in_one_message(tmp_path):
     filename = tmp_path / "music.json"
     filename.write_text(json.dumps({"role": "default", "history": history}))
 
-    asyncio.run(ConversationImportCommand().execute(ui, [str(filename)]))
+    asyncio.run(conversation_import(ui, [str(filename)]))
 
     assistant = [m for m in ui.chat_history_panel.messages
                  if isinstance(m.type, PicoMsg)]
@@ -169,8 +164,7 @@ def test_conversation_import_rejects_malformed_envelope(tmp_path):
     filename = tmp_path / "malformed.json"
     filename.write_text(json.dumps({"role": "reviewer", "history": [{"content": "missing role"}]}))
 
-    command = ConversationImportCommand()
-    asyncio.run(command.execute(ui, [str(filename)]))
+    asyncio.run(conversation_import(ui, [str(filename)]))
 
     assert "missing 'role'" in ui.chat_history_panel.messages[-1].text
 
@@ -180,7 +174,7 @@ def test_conversation_import_rejects_non_string_role(tmp_path):
     filename = tmp_path / "bad-role.json"
     filename.write_text(json.dumps({"role": 42, "history": []}))
 
-    asyncio.run(ConversationImportCommand().execute(ui, [str(filename)]))
+    asyncio.run(conversation_import(ui, [str(filename)]))
 
     assert "role must be a string" in ui.chat_history_panel.messages[-1].text
 
@@ -190,6 +184,6 @@ def test_conversation_import_rejects_invalid_json(tmp_path):
     filename = tmp_path / "invalid.json"
     filename.write_text("not json")
 
-    asyncio.run(ConversationImportCommand().execute(ui, [str(filename)]))
+    asyncio.run(conversation_import(ui, [str(filename)]))
 
     assert "Invalid JSON file" in ui.chat_history_panel.messages[-1].text

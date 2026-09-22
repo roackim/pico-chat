@@ -130,12 +130,6 @@ class FocusScope:
             return index is not None and self.manager.focus(index)
         return False
 
-    def focus_previous(self) -> bool:
-        if self.manager.previous():
-            return True
-        if self.trap and self.manager._widgets:
-            index = self.manager._next_focusable(len(self.manager._widgets), step=-1)
-            return index is not None and self.manager.focus(index)
 
     def focus_at(self, x: int, y: int) -> bool:
         """Focus the topmost focusable widget containing a coordinate."""

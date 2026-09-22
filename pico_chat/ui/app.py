@@ -25,12 +25,11 @@ from pico_chat.ui.chat_message import Message
 from pico_chat.ui.commands import handle_command, get_command_list, get_subcommand_list
 from pico_chat.ui.tui.layout_utils import strip_ansi
 from pico_chat.ui.tui.focus import FocusScope
-from pico_chat.ui.tui.navigation import Navigator, ModalHost
+from pico_chat.ui.tui.navigation import ModalHost
 from pico_chat.ui.tui.chat_screen import ChatScreen
 
         # Setup logging to debug panel
 import logging
-from pico_chat.ui.commands import StatusCommand
 from pico_chat.ui.tui.colors import theme
 from pico_chat.ui.tui.msg_types import MsgType, MsgAction, PicoMsg, ThinkingMsg, UserMsg, SysMsg, SysMsgError, SysMsgWarning, ToolCallMsg, ToolDraftMsg, AskPermissionMsg
 
@@ -111,10 +110,8 @@ class chatTUI(ChatActionHandlers):
             from pico_chat.harness.endpoint import prewarm_local_resolution
             prewarm_local_resolution(endpoint._original_base_url)
         self.compositor = None
-        self.navigator = None
         self.modal_host = None
         self.popup_screen = None
-        self._list_modal_screen = None
         self._last_focus_id = "input"
         self.chat_history_panel = ChatHistoryPanel()
         self.input_component = InputComponent(" ", id="entry", frame_color=theme.USER)
@@ -152,7 +149,6 @@ class chatTUI(ChatActionHandlers):
         self.chat_history_panel.activity_sink = self._on_activity
         self.popup = Popup()
         self.log_handler = setup_tui_logging(self.debug_panel)
-        self.editing_prefill_for_resume = False
         # Left-align the status text (no leading padding).
         self.status_bar = StatusBar(
             fields=pico_cfg.config.ui_status_bar_fields,
@@ -173,7 +169,6 @@ class chatTUI(ChatActionHandlers):
         self._hint_flash_until = 0.0
         self.chat_history_panel.on_selection_changed = self._update_mode_line
         self.input_component.on_change = self._update_action_strip
-        self.chat_screen = None
         self.command_queue = asyncio.Queue()
         self.shutdown_event = asyncio.Event()
         # Single-conversation state (formerly owned by ConversationRuntime).
@@ -184,9 +179,6 @@ class chatTUI(ChatActionHandlers):
         self.pending_permission_prompt = None
         self._active_user_input = None
         self._active_user_msg = None
-        self._requeue_after_cancel = False
-        self._paused_user_input = None
-        self._paused_user_msg = None
         atexit.register(self._emergency_cleanup)
 
     def switch_role(self, role):
@@ -317,9 +309,6 @@ class chatTUI(ChatActionHandlers):
             except Exception:
                 pass
 
-    @staticmethod
-    def _rgb_to_ansi_fg(r: int, g: int, b: int) -> str:
-        return f"\033[38;2;{r};{g};{b}m"
 
     async def _process_generation(self, user_input, user_msg):
         """Process a single generation request."""
@@ -578,8 +567,6 @@ class chatTUI(ChatActionHandlers):
                     self.stop_generation()
                     return
                 user_input, user_msg = get_task.result()
-                if getattr(user_msg, "is_steered", False):
-                    continue
                 if getattr(user_msg, "is_queued", False):
                     user_msg.is_queued = False
                     user_msg.set_title("user")
@@ -599,9 +586,6 @@ class chatTUI(ChatActionHandlers):
                 self.chat_history_panel.add_message(str(error), msg_type=SysMsgError())
             finally:
                 self.current_generation_task = None
-                if self._requeue_after_cancel and self._active_user_input:
-                    self.message_queue.put_nowait((self._active_user_input, self._active_user_msg))
-                self._requeue_after_cancel = False
                 self._active_user_input = None
                 self._active_user_msg = None
 
@@ -769,13 +753,6 @@ class chatTUI(ChatActionHandlers):
                                         content_padding=content_padding)
         self.modal_host.present_screen(self.popup_screen)
 
-    def hide_popup(self):
-        """Hide the popup overlay."""
-        if self.modal_host is not None and self.popup_screen is not None:
-            self.modal_host.dismiss_screen(self.popup_screen)
-            self.popup_screen = None
-            return
-        self.popup.hide()
 
     def show_list_modal(self, title, items, formatter=None, on_accept=None,
                         on_cancel=None, initial_index=None):
@@ -788,11 +765,9 @@ class chatTUI(ChatActionHandlers):
             modal.set_compositor(self.compositor)
             modal.show(items, title=title, on_accept=on_accept, on_cancel=on_cancel,
                        initial_index=initial_index)
-            self._list_modal_screen = modal
             return
         screen = ListModalScreen(modal, items, title=title, on_accept=on_accept,
                                  on_cancel=on_cancel, initial_index=initial_index)
-        self._list_modal_screen = screen
         self.modal_host.present_screen(screen)
 
     def on_user_submit(self, text: str):
@@ -808,13 +783,6 @@ class chatTUI(ChatActionHandlers):
         # $ prefix: execute shell command directly (not visible to LLM)
         if clean_text.startswith('$'):
             self._handle_shell_command(clean_text[1:].strip())
-            return
-
-        # Editing a paused message's thinking prefill: set prefill then resume
-        if getattr(self, 'editing_prefill_for_resume', False):
-            self.editing_prefill_for_resume = False
-            self.agent.set_thinking_prefill(clean_text)
-            self.handle_resume_action(None)
             return
 
         if self.pending_permission_prompt:
@@ -1118,7 +1086,6 @@ class chatTUI(ChatActionHandlers):
             self.status_bar,
             self.action_bar,
         )
-        self.chat_screen = chat_screen
         self.root = chat_screen.root  # Store root for global handler
         # Read fps at construction time (not import time) so config changes apply.
         self.compositor = Compositor(self.root, fps=pico_cfg.config.target_fps,
@@ -1126,10 +1093,6 @@ class chatTUI(ChatActionHandlers):
         self.compositor.padding = pico_cfg.config.ui_app_global_padding  # Apply global padding from config
         self.modal_host = ModalHost(self.compositor)
         self._focus_scope.enter()
-        self.navigator = Navigator(
-            self.compositor,
-            chat_screen,
-        )
         
         self.compositor.event_router.set_interceptor(self.handle_global_input)
         self.compositor.event_router.set_focus_scope(self._focus_scope)

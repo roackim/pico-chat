@@ -593,16 +593,6 @@ class InputComponent(Component):
             )
         )
 
-    def hide_completions(self) -> None:
-        """Hide all completion menus before changing the surrounding view."""
-        for completion in (
-            self.command_completion,
-            self.subcommand_completion,
-            self.argument_completion,
-            self.context_completion,
-        ):
-            if completion and completion.is_active:
-                completion.hide()
 
     def handle_input(self, event: Any) -> bool:
         """Handle input events by delegating to appropriate handlers."""
@@ -670,12 +660,11 @@ class InputComponent(Component):
                     self.y <= event.y < self.y + self.height):
                 return False
         
-        # Create context for handlers (no menu_manager needed)
+        # Create context for handlers
         context = InputContext(
             self.buffer,
             self.coord_mapper,
             self.scroll_manager,
-            None  # menu_manager is removed
         )
         
         # Try each handler

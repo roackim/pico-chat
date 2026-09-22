@@ -47,8 +47,6 @@ class Buffer:
         cx, cy, cw, ch = self.clip_rect
         return cx <= x < cx + cw and cy <= y < cy + ch
 
-    def set_cursor(self, x: int, y: int):
-        self.cursor_pos = (x, y)
 
     def set(self, x: int, y: int, char: str, fg=None, bg=None, bold=False, reverse=False, underline=False):
         if 0 <= x < self.width and 0 <= y < self.height:

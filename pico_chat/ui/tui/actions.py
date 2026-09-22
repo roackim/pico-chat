@@ -46,8 +46,6 @@ class ActionMap:
             return True
         return self.parent.dispatch(action) if self.parent else False
 
-    def has(self, name: str) -> bool:
-        return name in self._handlers
 
 
 def action(name: str, payload: Any = None) -> Action:

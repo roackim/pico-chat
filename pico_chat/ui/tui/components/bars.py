@@ -68,12 +68,6 @@ class StatusBar(Component):
     def get_preferred_height(self, width: int) -> int:
         return 1
 
-    def set_text(self, left: str, right: Optional[str] = None):
-        self.left = left
-        if right is not None:
-            self.right = right
-        self.fields = None
-        self.mark_changed()
 
     def set_fields(self, fields: Sequence[str]):
         """Set visible field names without changing their values."""

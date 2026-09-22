@@ -64,10 +64,6 @@ class Compositor:
         self._full_redraw = True
         self.request_render()
 
-    def update_component(self, id: str, data: Any):
-        comp = self.get_component(id)
-        if comp:
-            comp.update(data)
     
     def add_overlay(self, component: Component):
         """Register a component as a floating overlay.
@@ -310,16 +306,3 @@ class Compositor:
         if hasattr(self.root, 'clear_dirty'):
             self.root.clear_dirty()
     
-    def get_actual_fps(self) -> float:
-        """Calculate actual measured FPS based on recent render times."""
-        if len(self.render_times) < 2:
-            return 0.0
-        
-        # Calculate FPS from time difference between first and last render in window
-        time_span = self.render_times[-1] - self.render_times[0]
-        if time_span == 0:
-            return 0.0
-        
-        # Number of frames in the time span (frames - 1 intervals)
-        frame_count = len(self.render_times) - 1
-        return frame_count / time_span

@@ -6,7 +6,8 @@ Read this to resume. The big simplification (R1–R9) is done; the recent work i
 UI/UX polish. The working tree is dirty with the latest UI changes — the user
 commits manually, so **nothing is staged by the assistant**.
 
-Canonical plans: `SIMPLIFICATION.md` (R1–R11), `plans/message_ui_rework.md`.
+Canonical plans: `SIMPLIFICATION.md` (R1–R11), `plans/message_ui_rework.md`,
+`plans/cleanup_round2.md` (next: C1–C5).
 
 ---
 
@@ -64,6 +65,9 @@ No lint/typecheck beyond these. Keep the suite green and the R9 guard passing.
   `shutdown_watcher` cancels in-flight generation; `main.py` swallows stray
   `KeyboardInterrupt`).
 - `/model` modal picker, `ui_max_input_height` (input cap + scroll).
+- **R3 done:** leaf slash commands are plain handler functions assembled in
+  `commands/registry.py`; only the 5 subcommand trees stay as classes.
+  Classes 38 → 8, commands LOC 1716 → 1581. Import-graph guard intact.
 - **Clipboard:** `ui/clipboard.py` is the single owner; native
   `xclip`/`xsel`/`wl-copy` first, then OSC 52 (`harness/clipboard.py`)
   as the fallback so copying works over SSH. `handle_copy_action`,
