@@ -9,10 +9,12 @@ from .input_handlers import (
 )
 from .scroll_manager import ScrollManager
 from .cursor_renderer import CursorRenderer
-from .command_completion import CommandCompletion
-from .subcommand_completion import SubcommandCompletion
-from .context_completion import ContextCompletion
-from .argument_completion import ArgumentCompletion
+from .completion import (
+    CommandCompletion,
+    SubcommandCompletion,
+    ArgumentCompletion,
+    ContextCompletion,
+)
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.events import KeyEvent, MouseEvent, TickEvent
 from pico_chat.ui.tui.layout_utils import display_width
@@ -174,120 +176,47 @@ class InputComponent(Component):
         if hasattr(self, 'parent') and self.parent and hasattr(self.parent, 'mark_changed'):
             self.parent.mark_changed()
         self._notify_changed()
-        
-        # Try command completion first (has priority at line start, no space)
-        if self.command_list:
-            self._ensure_command_menu()
-            self.command_completion.update(self.buffer.text, self.buffer.cursor_pos)
-            
-            if self.command_completion.is_active:
-                # Command menu is active - hide others and position
-                if self.subcommand_completion:
-                    self.subcommand_completion.hide()
-                if self.context_completion:
-                    self.context_completion.hide()
-                if self.argument_completion:
-                    self.argument_completion.hide()
-                self._position_command_menu()
-                return
-        
-        # Try subcommand completion (if command has space)
-        if self.subcommand_callback:
-            self._ensure_subcommand_menu()
-            self.subcommand_completion.update(self.buffer.text, self.buffer.cursor_pos)
-            
-            if self.subcommand_completion.is_active:
-                # Subcommand menu is active - hide others and position
-                if self.context_completion:
-                    self.context_completion.hide()
-                if self.argument_completion:
-                    self.argument_completion.hide()
-                self._position_subcommand_menu()
-                return
-        
-        # Try generic argument completion (Param-driven)
-        if self._command_registry:
-            self._ensure_argument_menu()
-            self.argument_completion.update(self.buffer.text, self.buffer.cursor_pos)
-            
-            if self.argument_completion.is_active:
-                if self.context_completion:
-                    self.context_completion.hide()
-                self._position_argument_menu()
+
+        providers = self._completion_providers()
+        for provider in providers:
+            provider.update(self.buffer.text, self.buffer.cursor_pos)
+            if provider.is_active:
+                # Higher-priority menu owns the screen; dismiss the rest.
+                for other in providers:
+                    if other is not provider:
+                        other.hide()
+                self._position_menu(provider)
                 return
 
-        # Try context completion if no other menu active
+    def _completion_providers(self):
+        """Return the configured completion providers in priority order."""
+        providers = []
+        if self.command_list:
+            self._ensure_command_menu()
+            providers.append(self.command_completion)
+        if self.subcommand_callback:
+            self._ensure_subcommand_menu()
+            providers.append(self.subcommand_completion)
+        if self._command_registry:
+            self._ensure_argument_menu()
+            providers.append(self.argument_completion)
         if self.context_items_callback:
             self._ensure_context_menu()
-            self.context_completion.update(self.buffer.text, self.buffer.cursor_pos)
-            
-            if self.context_completion.is_active:
-                self._position_context_menu()
-                return
+            providers.append(self.context_completion)
+        return providers
+
+    def _position_menu(self, completion):
+        """Anchor the provider's menu at its trigger position."""
+        if not completion or not completion.is_active:
+            return
+        trigger_pos = completion.trigger_pos(self.buffer.text, self.buffer.cursor_pos)
+        if trigger_pos is not None:
+            self._position_menu_at(completion.menu, trigger_pos)
 
     def _notify_changed(self):
         if self.on_change is not None:
             self.on_change()
-    
-    def _position_command_menu(self):
-        """Position command menu at the '/' character."""
-        if not self.command_completion or not self.command_completion.is_active:
-            return
-        
-        text = self.buffer.text.lstrip()
-        leading_ws = len(self.buffer.text) - len(text)
-        trigger_pos = leading_ws  # Position of '/'
-        
-        self._position_menu_at(self.command_completion.menu, trigger_pos)
-    
-    def _position_subcommand_menu(self):
-        """Position subcommand menu at the subcommand text location."""
-        if not self.subcommand_completion or not self.subcommand_completion.is_active:
-            return
-        
-        text = self.buffer.text.lstrip()
-        leading_ws = len(self.buffer.text) - len(text)
-        
-        # Find position of space after command
-        if ' ' in text:
-            space_pos = text.find(' ')
-            trigger_pos = leading_ws + space_pos + 1  # +1 to skip space
-        else:
-            trigger_pos = leading_ws
-        
-        self._position_menu_at(self.subcommand_completion.menu, trigger_pos)
-    
-    def _position_argument_menu(self):
-        """Position argument completion menu at the current argument location."""
-        if not self.argument_completion or not self.argument_completion.is_active:
-            return
-        
-        text = self.buffer.text.lstrip()
-        leading_ws = len(self.buffer.text) - len(text)
-        
-        # Position at the start of the current argument being typed.
-        # Walk to the last space in the clean text to find where the current word starts.
-        parts = text.split()
-        if len(parts) >= 2:
-            # Find position of the last space (before current arg)
-            last_space = text.rfind(' ')
-            trigger_pos = leading_ws + last_space + 1
-        else:
-            trigger_pos = leading_ws
-        
-        self._position_menu_at(self.argument_completion.menu, trigger_pos)
 
-    def _position_context_menu(self):
-        """Position context menu at the './' trigger."""
-        if not self.context_completion or not self.context_completion.is_active:
-            return
-        
-        trigger_pos = self.context_completion.find_trigger_position(
-            self.buffer.text, self.buffer.cursor_pos
-        )
-        if trigger_pos is not None:
-            self._position_menu_at(self.context_completion.menu, trigger_pos)
-    
     def _position_menu_at(self, menu, trigger_pos: int):
         """Position menu at specific text position (shared logic)."""
         # Calculate screen position
@@ -537,49 +466,33 @@ class InputComponent(Component):
         )
 
     def _accept_completion(self, completion, add_space=False) -> bool:
-        """Generic completion acceptance handler.
-        
+        """Commit the provider's highlighted candidate into the buffer.
+
         Args:
-            completion: The completion object to accept
-            add_space: Whether to add a trailing space after completion
-            
-        Returns:
-            True if completion was accepted, False otherwise
+            completion: The completion provider to accept
+            add_space: Whether to append a trailing space (Tab) instead of
+                just placing the cursor after the selection (Enter)
         """
-        if isinstance(completion, ContextCompletion):
-            result = completion.accept_selection(self.buffer.text, self.buffer.cursor_pos)
-            if result:
-                new_text, new_cursor_pos = result
-                # accept_selection already appends "/" to a directory selection
-                # (so the user can keep drilling). For a file selection, append
-                # a space to finish the path. Never append a second "/".
-                selected = completion.menu.get_selected() or ""
-                is_dir = selected.endswith('/')
-                if add_space and not is_dir:
-                    self.buffer.text = new_text + " "
-                    self.buffer.cursor_pos = len(self.buffer.text)
-                else:
-                    self.buffer.text = new_text
-                    self.buffer.cursor_pos = new_cursor_pos
-                completion.hide()
-                if add_space:
-                    self._on_text_changed()
-                return True
+        result = completion.accept_selection(self.buffer.text, self.buffer.cursor_pos)
+        if not result:
+            return False
+
+        new_text, new_cursor_pos = result
+        selected = completion.menu.get_selected() or ""
+        # A directory picked from the @ menu ends with "/": keep drilling, no
+        # trailing space.
+        is_dir = selected.endswith('/')
+
+        if add_space and not is_dir:
+            self.buffer.text = new_text + " "
+            self.buffer.cursor_pos = len(self.buffer.text)
         else:
-            # Generic pattern for Command, Subcommand, and Server completions
-            completed = completion.accept_selection(self.buffer.text)
-            if completed:
-                if add_space:
-                    self.buffer.text = completed + " "
-                    self.buffer.cursor_pos = len(self.buffer.text)
-                else:
-                    self.buffer.text = completed
-                    self.buffer.cursor_pos = len(completed)
-                completion.hide()
-                if add_space:
-                    self._on_text_changed()
-                return True
-        return False
+            self.buffer.text = new_text
+            self.buffer.cursor_pos = new_cursor_pos
+        completion.hide()
+        if add_space:
+            self._on_text_changed()
+        return True
 
     def has_active_completion(self) -> bool:
         """Return True when any completion menu is currently active."""

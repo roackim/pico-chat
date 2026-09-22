@@ -3,34 +3,19 @@
 import bisect
 import logging
 import time
-from dataclasses import dataclass
 from typing import Optional, Any
 from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.components import TextComponent
+from pico_chat.ui.tui.components.box import Box
 from pico_chat.ui.tui.events import MouseEvent, TickEvent
 
 from pico_chat import pico_cfg
 from pico_chat.ui.clipboard import copy_to_clipboard
+from pico_chat.ui.message_selection import MessageSelection
 from pico_chat.ui.tui.colors import theme, RGB
 from pico_chat.ui.tui.msg_types import MsgType, MsgAction
 
 from pico_chat.ui.chat_message import Message
-
-
-@dataclass
-class SelectionState:
-    """Tracks text selection within a message."""
-    msg: Any                    # The Message object
-    start_line: int = 0         # Display line index (0-based within message component)
-    start_col: int = 0          # Display column index (0-based within wrapped line)
-    end_line: int = 0
-    end_col: int = 0
-
-    def get_normalized(self) -> tuple[int, int, int, int]:
-        """Return (start_line, start_col, end_line, end_col) with start <= end."""
-        if (self.start_line, self.start_col) <= (self.end_line, self.end_col):
-            return self.start_line, self.start_col, self.end_line, self.end_col
-        return self.end_line, self.end_col, self.start_line, self.start_col
 
 
 class ChatHistoryPanel(TextComponent):
@@ -60,18 +45,15 @@ class ChatHistoryPanel(TextComponent):
         # (SysMsg/SysMsgError/SysMsgWarning). When set, those messages are
         # routed out of the transcript into the activity surface.
         self.activity_sink = None
-        self._selection: Optional[SelectionState] = None  # Current text selection
-        self._selection_dragging: bool = False  # Whether user is actively dragging to select
         self._message_height_cache: dict[tuple[int, int, int], int] = {}
-        
+
+        # Text selection (drag state, coordinate math, highlight overlay).
+        self.selection = MessageSelection(self)
+
         # Action click feedback: flash an action with inverted colors briefly
         self._flash_msg: Optional[Message] = None
         self._flash_action_key: Optional[str] = None  # e.g. "c" for COPY
         self._flash_until: float = 0.0  # monotonic time when flash expires
-        
-        # Selection drag throttle: cap update+repaint rate during drag
-        self._selection_throttle_interval: float = 0.050  # 30ms between repaints
-        self._selection_last_update: float = 0.0  # last monotonic time we updated
         
         # Initial component - self is now the component
         self.compositor: Optional[object] = None
@@ -135,149 +117,9 @@ class ChatHistoryPanel(TextComponent):
         if self.on_selection_changed is not None:
             self.on_selection_changed()
 
-
-    # --- Text Selection ---
-
-    def start_selection(self, msg_index: int, display_line: int, col: int):
-        """Begin a text selection at the given display position inside a message."""
-        msg = self.messages[msg_index]
-        self._selection = SelectionState(msg=msg, start_line=display_line, start_col=col, end_line=display_line, end_col=col)
-        self._selection_dragging = True
-        self._selection_last_update = time.monotonic()
-        self._request_repaint()
-
-    def update_selection(self, msg_index: int, display_line: int, col: int):
-        """Extend the active selection to a new end position."""
-        if self._selection is None:
-            return
-        if self._selection_dragging and self._selection.msg is self.messages[msg_index]:
-            self._selection.end_line = display_line
-            self._selection.end_col = col
-            self._request_repaint()
-
-    def end_selection(self):
-        """Finalize the current selection (stop dragging)."""
-        self._selection_dragging = False
-
-    def get_selection_text(self) -> Optional[str]:
-        """Extract the selected text from the component's rendered lines.
-        
-        Returns the selected text as a plain string, or None if nothing selected.
-        """
-        sel = self._selection
-        if sel is None:
-            return None
-        
-        box = sel.msg.get_component()
-        # Unwrap Box → inner component (MarkdownComponent or TextComponent)
-        component = getattr(box, 'child', box)
-        wrapped_lines = getattr(component, '_wrapped_lines', None)
-        if wrapped_lines is None:
-            # TextComponent: fall back to _lines
-            wrapped_lines = getattr(component, '_lines', None)
-            if wrapped_lines is None:
-                return None
-
-        sl, sc, el, ec = sel.get_normalized()
-        sl = max(0, min(sl, len(wrapped_lines) - 1))
-        el = max(0, min(el, len(wrapped_lines) - 1))
-        
-        parts = []
-        for line_i in range(sl, el + 1):
-            if line_i >= len(wrapped_lines):
-                break
-            
-            line = wrapped_lines[line_i]
-            if line_i == sl and line_i == el:
-                # Same line: select substring
-                parts.append(self._extract_line_text(line, sc, ec))
-            elif line_i == sl:
-                # First line: from sc to end
-                parts.append(self._extract_line_text(line, sc, None))
-            elif line_i == el:
-                # Last line: from start to ec
-                parts.append(self._extract_line_text(line, 0, ec))
-            else:
-                # Middle lines: full line
-                parts.append(self._extract_line_text(line, 0, None))
-        
-        # Each selected line ends with a newline so pasting elsewhere keeps
-        # the line breaks (the terminal's rendered rows are display-wrapped,
-        # so without trailing newlines the copy collapses into one blob).
-        text = "".join(part + "\n" for part in parts)
-        return text if text else None
-
-    def _extract_line_text(self, line, start_col: int, end_col: Optional[int]) -> str:
-        """Extract plain text from a wrapped line (list of StyledSegments or strings)."""
-        if isinstance(line, str):
-            return line[start_col:end_col]
-        
-        # List of StyledSegments
-        text_parts = []
-        col = 0
-        for seg in line:
-            seg_w = seg.display_width
-            seg_end_col = col + seg_w
-            
-            # Check if segment overlaps with selection range
-            if end_col is not None and col >= end_col:
-                break
-            if seg_end_col > start_col:
-                # Figure out which portion of the segment text to include
-                if col >= start_col and (end_col is None or seg_end_col <= end_col):
-                    text_parts.append(seg.text)
-                else:
-                    # Partial overlap — character-level extraction
-                    char_col = col
-                    for ch in seg.text:
-                        from wcwidth import wcswidth
-                        cw = wcswidth(ch)
-                        if cw < 0:
-                            cw = 1
-                        ch_end = char_col + cw
-                        if char_col >= start_col and (end_col is None or ch_end <= end_col):
-                            text_parts.append(ch)
-                        char_col = ch_end
-            
-            col = seg_end_col
-        
-        return "".join(text_parts)
-
-    @staticmethod
-    def _resolve_column(line, screen_x: int) -> int:
-        """Map a screen x offset to a display column index within a wrapped line.
-
-        Uses segment display_width for fast skipping; only walks characters
-        when the target falls inside a segment.
-        """
-        if isinstance(line, str):
-            return min(screen_x, len(line))
-
-        col = 0
-        for seg in line:
-            seg_w = seg.display_width
-            if col + seg_w <= screen_x:
-                # Entire segment is before the target — skip
-                col += seg_w
-                continue
-            if col + seg_w > screen_x:
-                # Target falls inside this segment — walk characters
-                from wcwidth import wcswidth
-                seg_col = col
-                for ch in seg.text:
-                    cw = wcswidth(ch)
-                    if cw < 0:
-                        cw = 1
-                    if seg_col + cw > screen_x:
-                        return seg_col
-                    seg_col += cw
-                return seg_col
-            col += seg_w
-        return col
-
     def _dispatch_action(self, message, action: MsgAction):
         """Dispatch a MsgAction for a message, mirroring the keyboard handler logic.
-        
+
         Triggers a brief visual flash on the action button before dispatching.
         """
         # Flash the action button for visual feedback
@@ -287,7 +129,7 @@ class ChatHistoryPanel(TextComponent):
         message._flash_action_key = action.key
         message.box.mark_changed()
         self._request_repaint()
-        
+
         if self.on_action:
             self.on_action(message, action)
 
@@ -312,35 +154,9 @@ class ChatHistoryPanel(TextComponent):
             return None, None  # inside the gap after a message
         return index, virtual_y - starts[index]
 
-    def _screen_to_display_col(self, msg, box, content_y: int, screen_x: int) -> Optional[int]:
-        """Convert a screen x coordinate to a display column within a message's wrapped content.
-        
-        Returns the display column index, or None if the position is outside content.
-        """
-        panel_x = screen_x - self.x
-        box_x = panel_x - msg.left_margin
-        # Thread mode: content starts after the 2-col gutter; boxed mode: after
-        # the 1-col left border.
-        content_x = box_x - (2 if getattr(box, "thread_mode", False) else 1)
-        
-        md_component = getattr(box, 'child', box)
-        left_pad = getattr(md_component, 'left_pad', 0)
-        wrapped_x = content_x - left_pad
-        
-        if wrapped_x < 0:
-            return None
-        
-        wrapped_lines = getattr(md_component, '_wrapped_lines', None)
-        if wrapped_lines is None:
-            wrapped_lines = getattr(md_component, '_lines', None)
-        if wrapped_lines is None or content_y >= len(wrapped_lines):
-            return None
-        
-        return self._resolve_column(wrapped_lines[content_y], wrapped_x)
-
     def _auto_copy_selection(self):
         """Copy the current selection to clipboard (called on mouse release after drag)."""
-        text = self.get_selection_text()
+        text = self.selection.get_text()
         if not text:
             return
         method = copy_to_clipboard(text)
@@ -420,7 +236,8 @@ class ChatHistoryPanel(TextComponent):
         # Content width for a message = panel width - gutter (1) - padding.
         # The Box owns the gutter/padding; this is just the wrap width.
         for message in self.messages:
-            msg_inner_width = new_width - 1 - message.left_pad - message.right_pad
+            msg_inner_width = Box.thread_content_width(
+                new_width, message.left_pad, message.right_pad)
             if msg_inner_width < 1:
                 msg_inner_width = 1
             message.reformat(msg_inner_width)
@@ -617,106 +434,13 @@ class ChatHistoryPanel(TextComponent):
                                      bg=theme.get_bg(), max_width=1)
 
             # Render selection highlight if this message has an active selection
-            sel = self._selection
+            sel = self.selection.state
             if sel is not None and sel.msg is msg:
-                self._render_selection(buffer, msg, child, child_y, child_w, child_h)
+                self.selection.render(buffer, msg, child, child_y, child_w, child_h)
 
         # Clear clipping region
         if hasattr(buffer, 'clear_clip'):
             buffer.clear_clip()
-
-    def _render_selection(self, buffer: Buffer, msg, box, box_y: int, _box_w: int, _box_h: int):
-        """Overlay a highlight on the selected range within a message box.
-        
-        Uses segment-level display_width for speed; only walks characters
-        when a segment partially overlaps the selection boundary.
-        """
-        sel = self._selection
-        if sel is None or sel.msg is not msg:
-            return
-        
-        sl, sc, el, ec = sel.get_normalized()
-        
-        md_component = getattr(box, 'child', box)  # unwrap Box → inner component
-        wrapped_lines = getattr(md_component, '_wrapped_lines', None)
-        if wrapped_lines is None:
-            wrapped_lines = getattr(md_component, '_lines', None)
-        if wrapped_lines is None:
-            return
-        
-        left_pad = getattr(md_component, 'left_pad', 0)
-        content_abs_y = box_y + 1  # skip top border
-        
-        for line_i in range(sl, el + 1):
-            if line_i >= len(wrapped_lines):
-                break
-            
-            screen_y = content_abs_y + line_i
-            if screen_y < self.y or screen_y >= self.y + self.height:
-                continue  # clipped off-screen
-            
-            line = wrapped_lines[line_i]
-            col_start = sc if line_i == sl else 0
-            col_end = ec if line_i == el else None
-            
-            screen_x_base = self.x + msg.left_margin + 1 + left_pad
-            current_screen_x = screen_x_base
-            current_col = 0
-            
-            if isinstance(line, str):
-                # Simple string line — use slice-based highlight
-                line_col_end = col_end if col_end is not None else len(line)
-                if col_start < line_col_end:
-                    start_x = current_screen_x + col_start
-                    end_x = current_screen_x + min(line_col_end, len(line))
-                    for x in range(max(0, start_x), min(buffer.width, end_x)):
-                        if 0 <= screen_y < buffer.height:
-                            buffer.cells[screen_y][x].reverse = True
-            else:
-                # List of StyledSegments — use segment display_width for fast skipping
-                for seg in line:
-                    seg_w = seg.display_width
-                    seg_col_end = current_col + seg_w
-                    
-                    # Fast skip: segment entirely before selection
-                    if col_end is not None and current_col >= col_end:
-                        break
-                    # Fast skip: segment entirely after selection
-                    if seg_col_end <= col_start:
-                        current_col = seg_col_end
-                        current_screen_x += seg_w
-                        continue
-                    
-                    # Segment overlaps selection — walk characters only if partial
-                    seg_start_in_sel = current_col >= col_start
-                    seg_end_in_sel = col_end is None or seg_col_end <= col_end
-                    
-                    if seg_start_in_sel and seg_end_in_sel:
-                        # Entire segment is selected — highlight whole width at once
-                        for dx in range(seg_w):
-                            x = current_screen_x + dx
-                            if 0 <= x < buffer.width and 0 <= screen_y < buffer.height:
-                                buffer.cells[screen_y][x].reverse = True
-                    else:
-                        # Partial overlap — walk characters
-                        from wcwidth import wcswidth as _wcswidth
-                        char_col = current_col
-                        char_x = current_screen_x
-                        for ch in seg.text:
-                            cw = _wcswidth(ch)
-                            if cw < 0:
-                                cw = 1
-                            in_range = char_col >= col_start and (col_end is None or char_col < col_end)
-                            if in_range:
-                                for dx in range(cw):
-                                    x = char_x + dx
-                                    if 0 <= x < buffer.width and 0 <= screen_y < buffer.height:
-                                        buffer.cells[screen_y][x].reverse = True
-                            char_col += cw
-                            char_x += cw
-                    
-                    current_col = seg_col_end
-                    current_screen_x += seg_w
 
     def handle_input(self, event: Any) -> bool:
         """Handle mouse wheel for scrolling and keyboard navigation."""
@@ -732,14 +456,14 @@ class ChatHistoryPanel(TextComponent):
         # Handle keyboard input only if this panel has keyboard focus
         if isinstance(event, str) and self.has_keyboard_focus:
             # 'y' yanks (copies) the current mouse selection, if any
-            if event == 'y' and self._selection is not None:
+            if event == 'y' and self.selection.has_selection:
                 self._auto_copy_selection()
                 return True
-            
+
             # ESC clears an active text selection, then the message selection.
             if event == '\x1b':
-                if self._selection is not None:
-                    self._selection = None
+                if self.selection.has_selection:
+                    self.selection.clear()
                     self._request_repaint()
                     return True
                 if self.focused_message_index is not None:
@@ -783,69 +507,63 @@ class ChatHistoryPanel(TextComponent):
                     if event.pressed and not event.drag:
                         # Use cached line map (rebuilt only when needed)
                         msg_index, local_y = self._cached_hit_test(event.y)
-                        
+
                         if msg_index is not None:
                             msg = self.messages[msg_index]
                             box = msg.get_component()
-                            
+
                             # Focus the message and start text selection
                             self.set_focused_message(msg_index)
-                            
+
                             content_y = local_y - 1  # subtract top border
                             if 0 <= content_y < box.height - 2:
-                                display_col = self._screen_to_display_col(msg, box, content_y, event.x)
+                                display_col = self.selection.screen_to_display_col(msg, box, content_y, event.x)
                                 if display_col is not None:
-                                    self.start_selection(msg_index, content_y, display_col)
+                                    self.selection.start(msg_index, content_y, display_col)
                                 else:
-                                    self._selection_dragging = False
+                                    self.selection.dragging = False
                             else:
-                                self._selection_dragging = False
+                                self.selection.dragging = False
                         else:
                             # Clicked on a gap - clear focus and selection
                             self.clear_focus()
-                            self._selection = None
-                            self._selection_dragging = False
+                            self.selection.clear()
                         self._request_repaint()
                         return True
 
                     # Mouse drag: extend selection (throttled to ~30ms between repaints)
-                    if event.pressed and event.drag and self._selection_dragging:
-                        now = time.monotonic()
-                        if now - self._selection_last_update < self._selection_throttle_interval:
-                            return True  # Too soon — skip this frame, keep consuming
-                        self._selection_last_update = now
-                        
+                    if event.pressed and event.drag and self.selection.dragging:
                         msg_index, local_y = self._cached_hit_test(event.y)
-                        if msg_index is not None and self._selection is not None and \
-                           self._selection.msg is self.messages[msg_index]:
+                        if msg_index is not None and self.selection.has_selection and \
+                           self.selection.state.msg is self.messages[msg_index]:
                             msg = self.messages[msg_index]
                             box = msg.get_component()
                             content_y = local_y - 1
                             if 0 <= content_y < box.height - 2:
-                                display_col = self._screen_to_display_col(msg, box, content_y, event.x)
+                                display_col = self.selection.screen_to_display_col(msg, box, content_y, event.x)
                                 if display_col is not None:
-                                    self.update_selection(msg_index, content_y, display_col)
+                                    self.selection.extend(msg_index, content_y, display_col)
                         return True
 
                     # Left button release: finalize selection
                     if not event.pressed and not event.drag:
-                        was_dragging = self._selection_dragging
-                        self.end_selection()
-                        
+                        was_dragging = self.selection.dragging
+                        self.selection.end()
+
                         # If we actually dragged a selection (not just a click),
                         # auto-copy the selection to clipboard.
-                        if was_dragging and self._selection is not None:
+                        if was_dragging and self.selection.has_selection:
                             self._auto_copy_selection()
-                        
+
                         # If we didn't drag (just clicked), clear selection
-                        if self._selection and not was_dragging:
-                            self._selection = None
+                        if self.selection.has_selection and not was_dragging:
+                            self.selection.clear()
                         return True
 
                 # Handle released drag outside the panel (stop dragging)
-                if event.button == 0 and not event.pressed and self._selection_dragging:
-                    self.end_selection()
-                    if self._selection is not None:
+                if event.button == 0 and not event.pressed and self.selection.dragging:
+                    self.selection.end()
+                    if self.selection.has_selection:
                         self._auto_copy_selection()
                     return True
                 
@@ -926,7 +644,8 @@ class ChatHistoryPanel(TextComponent):
         # Create a new message
         # Content width = panel width - gutter (1) - padding. The Box owns the
         # gutter and padding, so ``max_width`` here is the wrap width.
-        initial_max_width = self.max_width - 1 - self.left_pad - self.right_pad
+        initial_max_width = Box.thread_content_width(
+            self.max_width, self.left_pad, self.right_pad)
         if initial_max_width < 1:
             initial_max_width = 1
 
@@ -1091,8 +810,7 @@ class ChatHistoryPanel(TextComponent):
         self.auto_scroll = True
         self.anchored_start_y = None
         self.focused_message_index = None
-        self._selection = None
-        self._selection_dragging = False
+        self.selection.clear()
         self._request_repaint()
 
     def restore_messages(self, messages: list) -> None:
@@ -1101,8 +819,7 @@ class ChatHistoryPanel(TextComponent):
         for message in self.messages:
             message.get_component().parent = self
         self.focused_message_index = None
-        self._selection = None
-        self._selection_dragging = False
+        self.selection.clear()
         self._message_height_cache.clear()
         self.scroll_offset = 0
         self.auto_scroll = True

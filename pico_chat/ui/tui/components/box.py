@@ -136,6 +136,16 @@ class Box(Component):
     def children(self):
         return [self.child]
 
+    @staticmethod
+    def thread_content_width(box_width: int, pad_left: int, pad_right: int) -> int:
+        """Wrap width for thread-mode content: box minus gutter and padding.
+
+        Single owner of the ``gutter(1) + pad_left + pad_right`` arithmetic that
+        both the :class:`Box` layout and the history panel's wrapping need.
+        Callers clamp to a minimum of 1 before wrapping.
+        """
+        return box_width - 1 - pad_left - pad_right
+
     @property
     def current_title(self) -> str:
         """Resolve the title, honoring a dynamic title_provider if set."""
@@ -164,7 +174,7 @@ class Box(Component):
             has_actions = bool(self._visible_actions())
             child_h = max(0, height - (1 if has_actions else 0))
             child_x = x + gutter_w + pad_l
-            child_w = max(0, width - gutter_w - pad_l - pad_r)
+            child_w = max(0, self.thread_content_width(width, pad_l, pad_r))
             if size_changed:
                 super().set_layout(x, y, width, height)
                 self.child.set_layout(child_x, y, child_w, child_h)
@@ -269,14 +279,11 @@ class Box(Component):
     def _visible_actions(self):
         """Actions this box should render.
 
-        A parent message can opt out of inline actions by setting
-        ``inline_actions = False``; such messages surface their actions through
-        the app's bottom mode line instead.
+        A parent message can opt out of inline actions; such messages surface
+        their actions through the app's bottom mode line instead.
         """
         if self.parent_msg is not None:
-            if not getattr(self.parent_msg, "inline_actions", True):
-                return []
-            return self.parent_msg.get_active_actions() if self.focused else []
+            return self.parent_msg.inline_action_items() if self.focused else []
         return self.actions if self.focused else []
 
     def get_preferred_height(self, width: int) -> int:
@@ -294,7 +301,8 @@ class Box(Component):
             # A focused message with actions gains one extra row for the action
             # line below the content, which pushes subsequent messages down.
             if self.thread_mode:
-                inner_w = max(1, width - 1 - self.content_pad_left - self.content_pad_right)
+                inner_w = max(1, self.thread_content_width(
+                    width, self.content_pad_left, self.content_pad_right))
                 base = self.child.get_preferred_height(inner_w)
                 if self._visible_actions():
                     return base + 1
@@ -655,7 +663,12 @@ class Box(Component):
         # Collapsed messages (e.g. thinking folded by default) render a single
         # summary line instead of the full content.
         if collapsed:
-            self._render_collapsed_line()
+            self.parent_msg.render_collapsed_line(
+                self.subbuffer,
+                max_width=max(0, self.width - 2),
+                fg=self.gutter_color or self.fg,
+                bg=bg,
+            )
             return
 
         # Render child content (no border offset). For incremental raster, clip
@@ -681,29 +694,6 @@ class Box(Component):
                     formatted = action.format()
                     self._action_hit_regions.append((x_offset, x_offset + len(formatted), action))
                     x_offset += len(formatted) + 1
-
-    def _render_collapsed_line(self):
-        """Render a single summary line for a collapsed message.
-
-        Shows an animated spinner while the message is not finalized, then a
-        static marker once finalized.
-        """
-        bg = self.bg
-        parent = self.parent_msg
-        text = parent._collapsed_text()
-
-        # The gutter already marks the role (… for thinking), so the collapsed
-        # line shows the spinner + label while streaming, then a completion
-        # marker + "thoughts" once finalized.
-        if not parent.finalized:
-            frame = SPINNER_FRAMES[parent.spinner_frame % len(SPINNER_FRAMES)]
-            line = f"{frame} {text}"
-        else:
-            done_glyph, done_color = parent.done_glyph()
-            line = f"{done_color}{done_glyph}{theme.reset()} {parent.done_label(text)}"
-
-        self.subbuffer.write_str(2, 0, line, fg=self.gutter_color or self.fg,
-                                 bg=bg, max_width=max(0, self.width - 2))
 
     def _create_subbuffer_wrapper(self):
         """Create a Buffer-compatible wrapper redirecting to this Box's SubBuffer."""

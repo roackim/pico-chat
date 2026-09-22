@@ -149,6 +149,16 @@ class Message:
         that alter or remove conversation state live behind commands.
         """
         return list(self.type.actions)
+
+    def inline_action_items(self):
+        """Actions the Box should render inline, or [] when opted out.
+
+        Messages surface their actions through the app's bottom mode line
+        instead of inline, so this is normally empty.
+        """
+        if not self.inline_actions:
+            return []
+        return self.get_active_actions()
     
     def update_actions(self):
         """Update the box's actions list based on current state.
@@ -299,6 +309,23 @@ class Message:
         if isinstance(self.type, msg_types.ThinkingMsg):
             return "thoughts"
         return collapsed_text
+
+    def render_collapsed_line(self, subbuffer, max_width: int, fg, bg) -> None:
+        """Render the single-line summary for a collapsed message.
+
+        Shows an animated spinner while the message is not finalized, then a
+        static marker once finalized. Owned by the message (not the Box) so the
+        Box stays free of lifecycle decoration.
+        """
+        text = self._collapsed_text()
+        if not self.finalized:
+            frame = SPINNER_FRAMES[self.spinner_frame % len(SPINNER_FRAMES)]
+            line = f"{frame} {text}"
+        else:
+            done_glyph, done_color = self.done_glyph()
+            line = f"{done_color}{done_glyph}{theme.reset()} {self.done_label(text)}"
+
+        subbuffer.write_str(2, 0, line, fg=fg, bg=bg, max_width=max(0, max_width))
     
     def _format_line_wrap(self) -> str:
         """Format the message text with smart word wrapping and padding.
