@@ -134,7 +134,7 @@ def test_thread_render_smoke_text_message():
 
     joined = "\n".join(rows)
     assert "hello world" in joined
-    assert "▌" in joined
+    assert "▌" in joined  # heavy prefix bar (unfocused)
 
 
 def test_thread_render_smoke_markdown_message():
@@ -147,4 +147,4 @@ def test_thread_render_smoke_markdown_message():
 
     joined = "\n".join(rows)
     assert "bold" in joined
-    assert "▌" in joined
+    assert "▌" in joined  # heavy prefix bar (unfocused)

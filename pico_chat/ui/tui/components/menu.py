@@ -7,6 +7,11 @@ from pico_chat.ui.tui.fuzzy import fuzzy_search
 from pico_chat.ui.tui.colors import RGB, theme
 
 
+def _tail_len(description: str, footer: str) -> int:
+    """Width of a row's muted description plus its optional footer."""
+    return len(description) + (2 + len(footer) if footer else 0)
+
+
 class SelectionMenu(Component):
     """A floating menu component for autocomplete/suggestions.
     
@@ -38,6 +43,10 @@ class SelectionMenu(Component):
         # Optional name -> one-line description; drawn muted to the right of the
         # item, aligned into a column.
         self.item_descriptions: dict[str, str] = {}
+        # Optional per-item footer (e.g. an "active" tag) drawn after the
+        # description in ``footer_color``.
+        self.item_footers: dict[str, str] = {}
+        self.footer_color = theme.SUCCESS
         # Optional title shown in the top border, and status text (e.g. the
         # current search query) shown in the bottom border.
         self.title = ""
@@ -77,7 +86,8 @@ class SelectionMenu(Component):
             self.compositor.request_render()
     
     def update(self, all_items: List[str], search_term: str = "",
-               display_prefix: str = "", descriptions: Optional[dict] = None):
+               display_prefix: str = "", descriptions: Optional[dict] = None,
+               footers: Optional[dict] = None):
         """Update menu with new items and optional search filter.
 
         Args:
@@ -88,6 +98,8 @@ class SelectionMenu(Component):
         """
         if descriptions is not None:
             self.item_descriptions = dict(descriptions)
+        if footers is not None:
+            self.item_footers = dict(footers)
         self.display_prefix = display_prefix
         if not search_term:
             self.items = all_items
@@ -107,13 +119,16 @@ class SelectionMenu(Component):
         self._update_compositor_registration()
 
     def set_items(self, items: List[str], display_prefix: str = "",
-                  descriptions: Optional[dict] = None):
+                  descriptions: Optional[dict] = None,
+                  footers: Optional[dict] = None):
         """Replace items with an already-filtered/ranked list.
 
         Unlike :meth:`update`, no fuzzy filtering is applied.
         """
         if descriptions is not None:
             self.item_descriptions = dict(descriptions)
+        if footers is not None:
+            self.item_footers = dict(footers)
         self.display_prefix = display_prefix
         self.items = list(items)
         self.is_visible = len(self.items) > 0
@@ -148,7 +163,9 @@ class SelectionMenu(Component):
                 default=0,
             )
             desc_col = max(
-                (len(self.item_descriptions.get(item, "")) for item in self.items),
+                (_tail_len(self.item_descriptions.get(item, ""),
+                           self.item_footers.get(item, ""))
+                 for item in self.items),
                 default=0,
             )
             raw_len = name_col + (2 + desc_col if desc_col > 0 else 0)
@@ -168,7 +185,9 @@ class SelectionMenu(Component):
             default=0,
         )
         desc_col = max(
-            (len(self.item_descriptions.get(item, "")) for item in self.items),
+            (_tail_len(self.item_descriptions.get(item, ""),
+                       self.item_footers.get(item, ""))
+             for item in self.items),
             default=0,
         )
         has_desc = desc_col > 0
@@ -230,10 +249,19 @@ class SelectionMenu(Component):
 
             if has_desc:
                 desc = self.item_descriptions.get(item, "")
-                desc_area = content_area - name_col - 2
-                if desc and desc_area > 0:
-                    buffer.write_str(content_x + name_col + 2, curr_y, desc,
-                                     fg=theme.MUTED, bg=self.bg, max_width=desc_area)
+                footer = self.item_footers.get(item, "")
+                tail_x = content_x + name_col + 2
+                tail_area = content_area - name_col - 2
+                if desc and tail_area > 0:
+                    buffer.write_str(tail_x, curr_y, desc,
+                                     fg=theme.MUTED, bg=self.bg, max_width=tail_area)
+                if footer:
+                    footer_x = tail_x + len(desc) + 2
+                    footer_area = content_area - (name_col + 2 + len(desc) + 2)
+                    if footer_area > 0:
+                        buffer.write_str(footer_x, curr_y, footer,
+                                         fg=self.footer_color, bg=self.bg,
+                                         max_width=footer_area)
 
             for p in range(self.right_pad):
                 buffer.set(self.x + 1 + self.left_pad + content_area + p, curr_y, " ",

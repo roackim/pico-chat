@@ -290,9 +290,8 @@ class TestInputComponentSubBuffer:
         main = Buffer(80, 24)
         box.render(main)
 
-        # Gutter/prefix glyph at column 0 on the content row.
-        assert main.cells[1][0].char == '▸'
-        # Child content starts at column 1.
+        # No prefix glyph; a 1-space margin precedes the content.
+        assert main.cells[1][0].char == ' '
         assert main.cells[1][1].char == 'h'
         assert main.cells[1][2].char == 'i'
 
@@ -307,10 +306,8 @@ class TestInputComponentSubBuffer:
         main = Buffer(80, 24)
         box.render(main)
 
-        # Prefix and bars use the box fg color.
-        assert main.cells[1][0].char == '▸'
-        assert main.cells[1][0].fg == user_color
-        assert main.cells[0][0].char == '─'
+        # Rules span the full width and use the box fg color.
+        assert main.cells[0][0].char == '╶'
         assert main.cells[0][0].fg == user_color
         # A one-char prompt (space) leaves the text at col 2, like chat gutter.
         assert main.cells[1][1].char == ' '
@@ -330,12 +327,12 @@ class TestInputComponentSubBuffer:
         main = Buffer(80, 24)
         box.set_focused(True)
         box.render(main)
-        assert main.cells[1][0].fg == user_color
+        assert main.cells[0][0].fg == user_color
 
         box.set_focused(False)
         box.render(main)
-        assert main.cells[1][0].char == '▸'
-        assert main.cells[1][0].fg == muted_color
+        assert main.cells[0][0].char == '╶'
+        assert main.cells[0][0].fg == muted_color
 
     def test_input_content_color_provider_tints_text(self):
         """A content color provider recolors the typed text (not the bars)."""
@@ -369,7 +366,9 @@ class TestInputComponentSubBuffer:
         box.set_layout(0, 0, 40, 3)
         main = Buffer(80, 24)
         box.render(main)
-        # Normal bar character '─' across the top/bottom, no section.
-        assert main.cells[0][0].char == '─'
-        assert main.cells[2][0].char == '─'
+        # Full-width rules ending in half-lines, no inline section.
+        assert main.cells[0][0].char == '╶'
+        assert main.cells[0][39].char == '╴'
+        assert main.cells[2][0].char == '╶'
+        assert main.cells[2][39].char == '╴'
         assert 'message' not in "".join(c.char for c in main.cells[0])

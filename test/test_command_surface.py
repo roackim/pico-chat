@@ -38,15 +38,15 @@ def test_build_rows_marks_active_and_aligns_description():
         ("local", ModelInfo(id="qwen", context_window=32768)),
         ("openrouter", ModelInfo(id="deepseek/x", context_window=1310720)),
     ]
-    items, descriptions, index = _build_rows(pairs, "local", "qwen")
+    items, descriptions, footers, index = _build_rows(pairs, "local", "qwen")
 
     assert items[0] == "qwen"
     assert items[1] == "deepseek/x"
     assert index[items[0]] == ("local", "qwen")
     assert "local" in descriptions[items[0]]
     assert "32k" in descriptions[items[0]]
-    assert "active" in descriptions[items[0]]
-    assert "active" not in descriptions[items[1]]
+    assert footers.get(items[0]) == "active"
+    assert items[1] not in footers
     assert "1.3M" in descriptions[items[1]]
     # Server column starts at the same offset in every description.
     assert descriptions[items[0]].index("local") == descriptions[items[1]].index("openrouter")
@@ -60,7 +60,7 @@ def test_build_rows_disambiguates_duplicate_model_ids():
         ("a", ModelInfo(id="qwen", context_window=32768)),
         ("b", ModelInfo(id="qwen", context_window=32768)),
     ]
-    items, descriptions, index = _build_rows(pairs, None, None)
+    items, descriptions, _footers, index = _build_rows(pairs, None, None)
 
     assert len(set(items)) == 2
     assert index[items[0]][0] == "a"
@@ -97,10 +97,11 @@ def test_open_picker_shows_cached_catalog_without_network(monkeypatch):
     )
     captured = {}
 
-    def show_search_modal(title, items, descriptions=None, on_accept=None,
-                          on_cancel=None, initial_index=0):
+    def show_search_modal(title, items, descriptions=None, footers=None,
+                          on_accept=None, on_cancel=None, initial_index=0):
         captured.update(title=title, items=items, descriptions=descriptions,
-                        on_accept=on_accept, initial_index=initial_index)
+                        footers=footers, on_accept=on_accept,
+                        initial_index=initial_index)
         return SimpleNamespace(is_visible=True, refresh=lambda *a, **k: None)
 
     ui.show_search_modal = show_search_modal

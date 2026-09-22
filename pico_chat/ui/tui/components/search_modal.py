@@ -24,6 +24,7 @@ class SearchModal(SelectionMenu):
         self.title = title
         self._base_title = title
         self._base_items: List[str] = []
+        self._footers: dict = {}
         self._search = ""
         self._on_accept: Optional[Callable[[str], None]] = None
         self._on_cancel: Optional[Callable[[], None]] = None
@@ -42,6 +43,7 @@ class SearchModal(SelectionMenu):
     # -- lifecycle -----------------------------------------------------
 
     def open(self, items: List[str], descriptions: Optional[dict] = None,
+             footers: Optional[dict] = None,
              on_accept: Optional[Callable[[str], None]] = None,
              on_cancel: Optional[Callable[[], None]] = None,
              initial_index: int = 0) -> None:
@@ -51,6 +53,7 @@ class SearchModal(SelectionMenu):
         self._search = ""
         if descriptions is not None:
             self.item_descriptions = dict(descriptions)
+        self._footers = dict(footers or {})
         self._apply_filter()
         if self.items:
             self.selected_index = max(0, min(initial_index, len(self.items) - 1))
@@ -59,12 +62,15 @@ class SearchModal(SelectionMenu):
         self._request_render()
 
     def refresh(self, items: List[str], descriptions: Optional[dict] = None,
+                footers: Optional[dict] = None,
                 initial_index: Optional[int] = None) -> None:
         """Replace the candidate list, preserving the current search/selection."""
         current = self.get_selected()
         self._base_items = list(items)
         if descriptions is not None:
             self.item_descriptions = dict(descriptions)
+        if footers is not None:
+            self._footers = dict(footers)
         self._apply_filter()
         if initial_index is not None and 0 <= initial_index < len(self.items):
             self.selected_index = initial_index
@@ -83,7 +89,8 @@ class SearchModal(SelectionMenu):
 
     def _apply_filter(self) -> None:
         self.update(self._base_items, self._search,
-                    descriptions=self.item_descriptions)
+                    descriptions=self.item_descriptions,
+                    footers=self._footers)
         # The query lives in the title: "Models: qwe " while typing (trailing
         # space so it reads like a caret), "Models" when empty.
         self.title = (f"{self._base_title}: {self._search} "

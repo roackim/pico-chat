@@ -98,7 +98,7 @@ Base contracts:
 
 **Server/model management:**
 - `/server` — add, list, info, diagnose, remove. The `use`/switch subcommand was **removed**; switching is done implicitly by selecting a model.
-- `/model` — opens the searchable picker; `/model <model>` selects directly. Refreshes discovery live (it does not trust the cached catalog), verifies the model is actually served by the chosen server, switches the harness to it, and selects it. Accepts an explicit `server:model` form (the model id may itself contain colons, e.g. Ollama quantized tags); if that server does not list the model, the command refuses instead of switching. Model completions are fuzzy-filtered from the cached catalog. The picker (`SearchModal`) shows cached models instantly, refreshes in the background, tags the current model with a muted `active`, and supports type-to-filter.
+- `/model` — opens the searchable picker; `/model <model>` selects directly. Refreshes discovery live (it does not trust the cached catalog), verifies the model is actually served by the chosen server, switches the harness to it, and selects it. Accepts an explicit `server:model` form (the model id may itself contain colons, e.g. Ollama quantized tags); if that server does not list the model, the command refuses instead of switching. Model completions are fuzzy-filtered from the cached catalog. The picker (`SearchModal`) shows cached models instantly, refreshes in the background, tags the current model with a green `active`, and supports type-to-filter.
 
 The input layer's `ArgumentCompletion` reads `Param.completions` to drive
 fuzzy argument completion for `/model <model>`. See [notes/ui.md](../notes/ui.md) for how to add a new command.

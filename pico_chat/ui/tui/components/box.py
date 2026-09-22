@@ -151,12 +151,12 @@ class Box(Component):
         size_changed = (self.width, self.height) != (width, height)
 
         if self.lines_only:
-            # Only full-width top/bottom lines; child inset by 1 vertically and
-            # 1 column right (to clear the ">" prefix), no walls.
+            # Only top/bottom rules; the child is inset by the same 1-space
+            # margin on each side, no walls.
             inset_x = 1 + self.padding
             inset_y = 1 + self.padding_y
             cx, cy = x + inset_x, y + inset_y
-            cw, ch = width - inset_x - self.padding, height - 2 * inset_y
+            cw, ch = width - 2 * inset_x, height - 2 * inset_y
         else:
             # Normal mode with borders.
             inset_x = 1 + self.padding
@@ -418,9 +418,8 @@ class Box(Component):
         """Render only full-width horizontal bars on the top and bottom edges.
 
         No corner characters and no vertical walls — just a clean top and
-        bottom line spanning the full width. The current title (mode) is drawn
-        inline in the top bar, and a ``>`` prompt prefix sits in the first
-        content column.
+        bottom line spanning the full width, ending in half-lines. The
+        current title (mode) is drawn inline in the top bar.
         """
         if self.focused and self.focus_color:
             fg = self.focus_color
@@ -438,9 +437,20 @@ class Box(Component):
                 for ix in range(self.width):
                     self.subbuffer.set(ix, iy, " ", bg=bg)
 
-        # Top horizontal bar, full width.
-        for ix in range(self.width):
-            self.subbuffer.set(ix, 0, "─", fg=fg, bg=bg)
+        # Top and bottom rules span the full width but start/end with light
+        # half-lines so the rule fades at the edges instead of butting into a
+        # corner (used by the input field).
+        def _draw_rule(row: int) -> None:
+            if self.width >= 2:
+                self.subbuffer.set(0, row, "╶", fg=fg, bg=bg)
+                for ix in range(1, self.width - 1):
+                    self.subbuffer.set(ix, row, "─", fg=fg, bg=bg)
+                self.subbuffer.set(self.width - 1, row, "╴", fg=fg, bg=bg)
+            else:
+                for ix in range(self.width):
+                    self.subbuffer.set(ix, row, "─", fg=fg, bg=bg)
+
+        _draw_rule(0)
 
         # Section name (mode) inline in the top bar: "─ message ───...".
         title = self.current_title
@@ -448,14 +458,7 @@ class Box(Component):
             title_str = f" {title[:max(0, self.width - 4)]} "
             self.subbuffer.write_str(1, 0, title_str, fg=fg, bg=bg)
 
-        # Bottom horizontal bar, full width.
-        for ix in range(self.width):
-            self.subbuffer.set(ix, self.height - 1, "─", fg=fg, bg=bg)
-
-        # Prompt prefix ("▸") in the first content column, matching the role
-        # gutter used for chat-history messages in thread mode.
-        if self.width > 1 and self.height > 2:
-            self.subbuffer.set(0, 1, "▸", fg=fg, bg=bg)
+        _draw_rule(self.height - 1)
 
         # Render child content (inset by the layout previously computed).
         temp_buffer = self._create_subbuffer_wrapper()

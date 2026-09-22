@@ -90,10 +90,9 @@ def _cached_pairs() -> List[Tuple[str, "ModelInfo"]]:
 def _build_rows(pairs, active_name: Optional[str], selected: Optional[str]):
     """Aligned picker rows.
 
-    Returns ``(items, descriptions, item -> (server, model_id))``. The primary
-    text is the model id; the muted description is the aligned
-    ``server  context`` pair, with a trailing ``active`` tag on the current
-    model.
+    Returns ``(items, descriptions, footers, item -> (server, model_id))``.
+    The primary text is the model id; the muted description is the aligned
+    ``server  context`` pair; the current model gets an ``active`` footer.
     """
     server_w = max((len(server) for server, _ in pairs), default=0)
     ctx_w = max((len(_format_context(m.context_window)) for _, m in pairs), default=0)
@@ -101,20 +100,20 @@ def _build_rows(pairs, active_name: Optional[str], selected: Optional[str]):
 
     items: List[str] = []
     descriptions: dict = {}
+    footers: dict = {}
     index: dict = {}
     for server, model in pairs:
         # Disambiguate the rare case of one model id on several servers.
         item = model.id if counts[model.id] == 1 else f"{model.id} [{server}]"
         active = server == active_name and model.id == selected
-        description = (
+        descriptions[item] = (
             f"{server:<{server_w}}  {_format_context(model.context_window):>{ctx_w}}"
         )
         if active:
-            description += "  active"
+            footers[item] = "active"
         items.append(item)
-        descriptions[item] = description
         index[item] = (server, model.id)
-    return items, descriptions, index
+    return items, descriptions, footers, index
 
 
 def _select_pair(ui: ChatUIProtocol, server: str, model: str) -> None:
@@ -138,8 +137,9 @@ def _list_models_text(ui: ChatUIProtocol, pairs) -> None:
         return
     active_name, selected = _current_selection(ui)
     ordered = sorted(pairs, key=lambda p: (p[0], p[1].id))
-    items, descriptions, _ = _build_rows(ordered, active_name, selected)
-    lines = [f"{item}  {descriptions.get(item, '')}" for item in items]
+    items, descriptions, footers, _ = _build_rows(ordered, active_name, selected)
+    lines = [f"{item}  {descriptions.get(item, '')}  {footers.get(item, '')}".rstrip()
+             for item in items]
     lines += ["", "Use '/model <model>' to select."]
     ui.chat_history_panel.add_message("\n".join(lines), msg_type=SysMsg(), title="model")
 
@@ -156,7 +156,7 @@ async def _open_picker(ui: ChatUIProtocol) -> None:
     def _show(pairs, modal=None):
         active_name, selected = _current_selection(ui)
         ordered = sorted(pairs, key=lambda p: (p[0], p[1].id))
-        items, descriptions, index = _build_rows(ordered, active_name, selected)
+        items, descriptions, footers, index = _build_rows(ordered, active_name, selected)
         state["index"] = index
         initial = next(
             (i for i, (server, model) in enumerate(ordered)
@@ -170,12 +170,13 @@ async def _open_picker(ui: ChatUIProtocol) -> None:
                 _select_pair(ui, pair[0], pair[1])
 
         if modal is not None:
-            modal.refresh(items, descriptions=descriptions, initial_index=initial)
+            modal.refresh(items, descriptions=descriptions, footers=footers,
+                          initial_index=initial)
             return modal
         show = getattr(ui, "show_search_modal", None)
         if show is None:
             return None
-        return show("Models", items, descriptions=descriptions,
+        return show("Models", items, descriptions=descriptions, footers=footers,
                     on_accept=_accept, initial_index=initial)
 
     cached = _cached_pairs()

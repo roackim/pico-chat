@@ -140,5 +140,27 @@ def test_anchored_modal_sits_directly_above_input():
     assert modal.x == 0
     assert modal.width == 80
     assert modal.y + modal.height == inp.y
+    # The picker is a normal box (corners), anchored above the input.
     assert buffer.cells[modal.y][0].char == "┌"
+    assert buffer.cells[modal.y][modal.width - 1].char == "┐"
+    assert buffer.cells[modal.y + 1][0].char == "│"
     assert buffer.cells[modal.y + modal.height - 1][0].char == "└"
+    assert buffer.cells[modal.y + modal.height - 1][modal.width - 1].char == "┘"
+
+
+def test_item_footer_is_success_colored():
+    from pico_chat.ui.tui.colors import theme
+    from pico_chat.ui.tui.components.menu import SelectionMenu
+
+    menu = SelectionMenu()
+    menu.set_layout(0, 0, 60, 4)
+    menu.update(["qwen"], "", descriptions={"qwen": "local 32k"},
+                footers={"qwen": "active"})
+    buffer = Buffer(60, 4)
+    menu.render(buffer)
+
+    row = "".join(c.char for c in buffer.cells[1])
+    idx = row.find("active")
+    assert idx != -1
+    assert buffer.cells[1][idx].fg == theme.SUCCESS
+    assert buffer.cells[1][row.find("local")].fg == theme.MUTED

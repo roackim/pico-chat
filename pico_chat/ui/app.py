@@ -115,7 +115,7 @@ class chatTUI(ChatActionHandlers):
         self.popup_screen = None
         self._last_focus_id = "input"
         self.chat_history_panel = ChatHistoryPanel()
-        self.input_component = InputComponent(" ", id="entry", frame_color=theme.USER)
+        self.input_component = InputComponent("", id="entry", frame_color=theme.USER)
         self.input_component.config = pico_cfg.config
         self.input_component.on_submit = self.on_user_submit
         self.input_component.setup_commands(get_command_list(), get_command_descriptions())
@@ -154,14 +154,14 @@ class chatTUI(ChatActionHandlers):
         self.status_bar = StatusBar(
             fields=pico_cfg.config.ui_status_bar_fields,
             id="status",
-            style=BarStyle(theme.DEFAULT, theme.get_bg(), theme.FOCUSED, padding=0),
+            style=BarStyle(theme.DEFAULT, theme.get_bg(), theme.FOCUSED, padding=1),
         )
         self._status_spinner_frame = 0
         # Bottom mode line: shows the selected message's actions while a message
         # is selected, otherwise the status bar is mounted there.
         self.action_bar = ActionBar(
             id="actions",
-            style=BarStyle(theme.MUTED, theme.get_bg(), theme.MUTED, padding=0),
+            style=BarStyle(theme.MUTED, theme.get_bg(), theme.MUTED, padding=1),
         )
         self._mode_hint_default = "↑↓ move · esc back"
         self.action_bar.set_hint(self._mode_hint_default)
@@ -430,8 +430,8 @@ class chatTUI(ChatActionHandlers):
                                         content_padding=content_padding)
         self.modal_host.present_screen(self.popup_screen)
 
-    def show_search_modal(self, title, items, descriptions=None, on_accept=None,
-                          on_cancel=None, initial_index=0):
+    def show_search_modal(self, title, items, descriptions=None, footers=None,
+                          on_accept=None, on_cancel=None, initial_index=0):
         """Present a centered, type-to-filter selection overlay.
 
         Returns the modal (so callers can ``refresh`` it) or None when there is
@@ -446,8 +446,9 @@ class chatTUI(ChatActionHandlers):
         modal.auto_center = False
         modal.fill_width = True
         modal.anchor = lambda: self.input_component.place_menu_above_input(modal)
-        modal.open(items, descriptions=descriptions, on_accept=on_accept,
-                   on_cancel=on_cancel, initial_index=initial_index)
+        modal.open(items, descriptions=descriptions, footers=footers,
+                   on_accept=on_accept, on_cancel=on_cancel,
+                   initial_index=initial_index)
         return modal
 
     def on_user_submit(self, text: str):

@@ -128,3 +128,16 @@ def test_menu_clears_its_background():
         row = "".join(cell.char for cell in buffer.cells[y])
         assert "X" not in row[:15], row
     assert buffer.cells[1][2].char == "a"
+
+
+def test_menu_draws_normal_box_corners():
+    menu = _menu(width=40, height=4)
+    menu.set_items(["a"])
+
+    buffer = Buffer(40, 4)
+    menu.render(buffer)
+    assert buffer.cells[0][0].char == "┌"
+    assert buffer.cells[0][14].char == "┐"
+    assert buffer.cells[1][0].char == "│"
+    assert buffer.cells[2][0].char == "└"
+    assert buffer.cells[2][14].char == "┘"
