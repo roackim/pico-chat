@@ -12,3 +12,6 @@
     [ ] based on actual throughput -> start very fine grained interp, if we too slow for streaming, catch up with coarser grainsI 
     
 [ ] better markdown interpreting (bold sucks)/con
+[ ] support multiple styles / themes definitions with command for selection like /model
+[ ] remove /pwd /cd /openrouter(?) /roles /tools /servers /debug(?) /activity /status(?)
+[ ] bug in / command selector with up and down and scrolls (weirdness) works but non ergonomic 
