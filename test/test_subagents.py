@@ -16,7 +16,7 @@ from unittest.mock import patch
 import pytest
 
 from pico_chat.harness.tools import SubagentTool, WaitForSubagentsTool
-from pico_chat.harness.permissions import scaffolder
+from pico_chat.harness.roles import scaffolder_role
 import pico_chat.pico_cfg as pico_cfg_module
 from pico_chat.harness.endpoint import Endpoint
 
@@ -57,30 +57,27 @@ def _cfg(max_depth: int = 2, timeout: float = 10, max_context=None):
 # ---------------------------------------------------------------------------
 
 class TestScaffolderProfile:
-    """The scaffolder profile must be read-only inside the repo only."""
+    """The scaffolder role must be read-only."""
 
-    def test_read_inside_allowed(self):
-        assert scaffolder.get_read_permission(True) == "allow"
+    def test_read_allowed(self):
+        assert scaffolder_role().permission_for("read") == "yes"
 
-    def test_read_outside_denied(self):
-        assert scaffolder.get_read_permission(False) == "deny"
+    def test_write_denied(self):
+        assert scaffolder_role().permission_for("write") == "no"
 
-    def test_write_denied_everywhere(self):
-        assert scaffolder.get_write_permission(True) == "deny"
-        assert scaffolder.get_write_permission(False) == "deny"
+    def test_patch_denied(self):
+        assert scaffolder_role().permission_for("patch") == "no"
 
-    def test_patch_denied_everywhere(self):
-        assert scaffolder.get_patch_permission(True) == "deny"
-        assert scaffolder.get_patch_permission(False) == "deny"
+    def test_run_denied(self):
+        assert scaffolder_role().permission_for("run_command") == "no"
 
-    def test_run_others_denied(self):
-        assert scaffolder.get_run_permission().others == "deny"
+    def test_delegation_allowed(self):
+        role = scaffolder_role()
+        assert role.permission_for("subagent") == "yes"
+        assert role.permission_for("wait_for_subagents") == "yes"
 
-    def test_run_allow_list_empty(self):
-        assert len(scaffolder.get_run_permission().allow) == 0
-
-    def test_profile_name(self):
-        assert scaffolder.name == "scaffolder"
+    def test_role_name(self):
+        assert scaffolder_role().name == "scaffolder"
 
 
 # ---------------------------------------------------------------------------
@@ -341,8 +338,8 @@ class TestHarnessSubagentIntegration:
             h = Harness(workspace_path=str(tmp_path), depth=1)
 
         assert h.role.name == "scaffolder"
-        assert h.role.policy_for("write").enabled is False
-        assert h.role.policy_for("run_command").enabled is False
+        assert h.role.permission_for("write") == "no"
+        assert h.role.permission_for("run_command") == "no"
 
     def test_clear_history_resets_provider_usage(self, tmp_path):
         """/clear must drop the accumulated provider usage so the status bar
@@ -419,22 +416,22 @@ class TestHarnessSubagentIntegration:
     def test_subagent_role_isolated_from_parent_role(self, tmp_path):
         """A child harness keeps scaffolder policy even when a parent role is supplied."""
         from pico_chat.harness.harness import Harness
-        from pico_chat.harness.roles import default_role
+        from pico_chat.harness.roles import agent_role
 
-        parent_role = default_role()
+        parent_role = agent_role()
         with patch("pico_chat.harness.harness.get_active_endpoint", return_value=Endpoint(name="test", type="llamacpp")):
             h = Harness(workspace_path=str(tmp_path), depth=1, role=parent_role)
 
         assert h.role.name == "scaffolder"
 
     def test_root_harness_uses_default_role(self, tmp_path):
-        """A Harness at depth 0 defaults to the permissive default role."""
+        """A Harness at depth 0 defaults to the permissive agent role."""
         from pico_chat.harness.harness import Harness
 
         with patch("pico_chat.harness.harness.get_active_endpoint", return_value=Endpoint(name="test", type="llamacpp")):
             h = Harness(workspace_path=str(tmp_path), depth=0)
 
-        assert h.role.name == "default"
+        assert h.role.name == "agent"
 
     def test_abort_subagents_sets_event(self, tmp_path):
         from pico_chat.harness.harness import Harness
@@ -446,15 +443,15 @@ class TestHarnessSubagentIntegration:
         h.abort_subagents()
         assert h._abort_subagents_event.is_set()
 
-    def test_subagent_tools_require_approval(self, tmp_path):
-        """Delegation must honor the main harness permission gate."""
+    def test_subagent_tools_auto_approved_by_agent_role(self, tmp_path):
+        """The permissive agent role auto-approves delegation."""
         from pico_chat.harness.harness import Harness
 
         with patch("pico_chat.harness.harness.get_active_endpoint", return_value=Endpoint(name="test", type="llamacpp")):
             h = Harness(workspace_path=str(tmp_path), depth=0)
 
-        assert h._check_tool_permission("subagent", {}) == "ask"
-        assert h._check_tool_permission("wait_for_subagents", {}) == "ask"
+        assert h._check_tool_permission("subagent", {}) == "allow"
+        assert h._check_tool_permission("wait_for_subagents", {}) == "allow"
 
     def test_subagent_write_denied_by_scaffolder(self, tmp_path):
         """A depth>0 Harness should deny write requests via the scaffolder profile."""

@@ -21,23 +21,13 @@ Subagents: instantiated with `depth > 0`; use the `scaffolder` built-in role aut
 See [notes/subagents.md](../notes/subagents.md) for the full subagent lifecycle.
 
 ### `permissions.py`
-The single "may I run this?" decision point. Merges the former `security.py`,
-`tool_permissions.py` and `permission_gate.py`.
-- `PermissionGate` — extracted from `Harness`. Resolves file-path inside/outside
-  workspace, checks the active `Role` (or a low-level `ToolPermissionsProfile`
-  fallback), builds permission prompts (`build_prompt()`), and owns the async
-  user-response queue. The active `Role` is authoritative; no Role↔profile
-  translation layer exists.
-- `SecurityChecker` — quote-aware command-chain parsing and allowlist checks.
-  `classify(command)` returns a typed `CommandAction` (used by the gate), while
-  `check_chain()` keeps the interactive-confirmation path for direct execution.
-- Policy primitives: `Permission`, `FilePermissions`, `RunPermissions`,
-  `ToolPermissionsProfile`, command lists (`CMD_DEFAULT_*`,
-  `CMD_DANGEROUS_PATTERNS`) and predefined low-level profiles (`strict`,
-  `permissive`, `unrestricted`, `locked`, `TESTING`, `scaffolder`).
-- Adapters (`file_permission`, `resolve_run_permissions`, `search_permission`)
-  let tools and the gate consume either a `Role` or a profile without a
-  Role↔profile conversion method.
+The single "may I run this?" decision point, and nothing more.
+- `PermissionGate` — reads the active `Role`'s per-tool value (`no` / `ask` /
+  `yes`) and returns the harness decision (`deny` / `ask` / `allow`). Builds
+  permission prompts (`build_prompt()`) and owns the async user-response queue.
+- There is no permission engine: no `SecurityChecker`, no command lists, no
+  chain policy, no predefined profiles, no path confinement. Isolation is the
+  user's responsibility (see `plans/containerization.md`).
 See [notes/security.md](../notes/security.md) and
 [notes/tools-and-permissions.md](../notes/tools-and-permissions.md).
 
@@ -89,16 +79,17 @@ Low-level tool implementations plus the tool registry.
 limits with an explicit truncation marker, and source line-number prefixes.
 
 **Tool registry** — each tool is declared once with the `@tool` decorator,
-which carries its name, LLM-facing schema, `ToolPolicySpec` (permission +
-settings) and handler. There is no separate `tool_wrappers.py`.
+which carries its name, LLM-facing schema and handler. There is no separate
+`tool_wrappers.py`.
 - `ToolDefinition` / `ToolContext` / `RegisteredTool` — registry records and
 	bound instances. `get_schema()` returns the OpenAI function schema;
 	`execute()` / `execute_async()` dispatch to the handler.
-- `registered_tool_specs()` — canonical policy registry view consumed when role
-	policy entries are created.
-- `create_toolset(depth)` — factory that binds registered tools to a context.
-	Registers: `read`, `write`, `patch`, `run_command` (LLM name `run`),
-	`subagent` (depth-permitting), `wait_for_subagents`.
+- `registered_tool_names()` — the list of registry keys, used to generate role
+	files.
+- `create_toolset(workspace_path, depth, pending_subagents)` — factory that
+	binds registered tools to a context. Registers: `read`, `write`, `patch`,
+	`run_command` (LLM name `run`), `subagent` (depth-permitting),
+	`wait_for_subagents`.
 - Public factories `RunTool`, `SubagentTool`, `WaitForSubagentsTool` remain
 	for direct construction/tests.
 
@@ -110,21 +101,21 @@ Search tools: main agent 3 results/search, unlimited searches. Subagents
 See [notes/tools-and-permissions.md](../notes/tools-and-permissions.md).
 
 ### `roles.py`
-`Role` — the single source of truth for a conversation's operating mode:
-enabled tools, tool policies, and role-specific prompt. Built-in roles include
-`default`, `reviewer`, `researcher`, and the read-only `scaffolder` used by
-subagents; saved roles use one file per role at `~/.config/pico-chat/roles/<name>.toml`.
-- Consecutive role changes are represented by one system history notice; a new
-	role notice replaces the previous one until another conversation message is added.
-- Role policy entries are derived from registered tool metadata rather than a
-	hard-coded list; newly registered tools receive a disabled policy entry with
-	metadata-owned default settings.
-- No `from_permission_profile` / `to_permission_profile` translation layer
-	exists; the permission primitives adapt to a `Role` directly.
-Saved definitions with a built-in name override that built-in in place, while
-rename and delete operations still reject built-in names.
-`ToolPolicy` describes one tool's availability, default permission, and
-tool-specific settings.
+`Role` — the single source of truth for a conversation's operating mode: a
+`description`, a `prompt`, and a `tools: dict[str, str]` mapping each registered
+tool to exactly one of `no` / `ask` / `yes`. There is no permission engine.
+- Built-in roles `agent` (all tools `yes`) and `chat` (all tools `no`) are
+	seeded as files by `ensure_roles_dir()`; a code fallback exists for both.
+	The read-only `scaffolder` role is used by subagents and is not selectable.
+- `create_role(name)` writes a template listing every registered tool with
+	value `no` (all disabled); `delete_role(name)` unlinks, refusing to remove
+	the last role. `load_role` / `list_roles` read one file per role at
+	`~/.config/pico-chat/roles/<name>.toml`.
+- `validate_roles()` reports unknown tool names and values other than
+	`no`/`ask`/`yes` as `roles/<name>.toml: ...`, surfaced by `/reload` and
+	`/config role`.
+- Built-in `agent`/`chat` files override the code fallback. A role change is
+	represented by one system history notice; consecutive notices are collapsed.
 
 ### `context_builder.py`
 `build_harness_context()` — constructs the context injected alongside the system prompt.

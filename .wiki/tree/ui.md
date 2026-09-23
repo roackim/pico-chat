@@ -83,7 +83,7 @@ Slash command system with generic parameter schema. The `commands/` package
 replaces the legacy single `commands.py`:
 
 - `commands/__init__.py` — public API re-exports (`Command`, `Param`, `COMMANDS`, `handle_command`, etc.) and preserves the historical `pico_chat.ui.commands` import path
-- `commands/builtins.py` — the canonical `COMMANDS` registry dict and top-level commands (help, clear, compact, exit, stop, resume, status, server, model, tools, debug, permissions, etc.)
+- `commands/registry.py` — the single `COMMANDS` assembly point (help, clear, reload, config, edit, export, import, compact, exit, stop, status, activity, server, model, role, debug, openrouter, cd, pwd). Leaf commands are plain handler functions; only real subcommand trees are classes.
 - `commands/base.py` — `Param` and `Command` base classes plus completion helpers
 - `commands/server.py` — `ServerAddCommand`, `ServerListCommand`, `ServerInfoCommand`, `ServerRemoveCommand`, `ServerDiagnoseCommand`
 - `commands/models.py` — `known_model_ids`, `model_command` (`/model` leaf: picker or `<model>` selection)
@@ -103,13 +103,12 @@ Base contracts:
 The input layer's `ArgumentCompletion` reads `Param.completions` to drive
 fuzzy argument completion for `/model <model>`. See [notes/ui.md](../notes/ui.md) for how to add a new command.
 
-### `role_editor_model.py` / `role_editor_form.py`
-`RoleEditorModel` — UI-independent state and persistence boundary for the
-interactive role editor (the single policy surface). It isolates the active
-draft, applies role selection immediately, and exposes create, rename,
-duplicate, remove, and update operations without requiring a rendered form.
-`RoleEditorForm` wires the model to the form fields. There is no separate
-permission-profile editor.
+### Role commands (`commands/roles.py`, `commands/core.py`)
+There is no role editor form. `/role` lists roles or switches the active one
+(`commands/roles.py`); `/config role <name>` creates/opens
+`roles/<name>.toml` in `$EDITOR` and reloads, and
+`/config role delete <name> confirm` removes it (`_config_role` in
+`commands/core.py`). See [notes/tools-and-permissions.md](../notes/tools-and-permissions.md).
 
 ### Shell Commands (`$` prefix)
 - `$ <command>` — Execute shell command directly (not visible to LLM)

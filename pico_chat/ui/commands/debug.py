@@ -51,7 +51,7 @@ async def debug_system_prompt(ui: ChatUIProtocol, args: List[str]):
         ui.chat_history_panel.add_message(
             f"Failed to get system prompt: {exc}", msg_type=SysMsgError())
         return
-    role = getattr(getattr(agent, "role", None), "name", "default")
+    role = getattr(getattr(agent, "role", None), "name", "agent")
     ui.chat_history_panel.add_message(
         f"System prompt (role: {role})\n{'-' * 80}\n{prompt}",
         msg_type=SysMsg(), title="system prompt")

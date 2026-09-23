@@ -24,7 +24,8 @@ project-local config** and no trust model.
 
 Missing files are created from fully commented templates
 (`pico_cfg.DEFAULT_CONFIG_TEMPLATES`) by `Config.ensure_section_file()` /
-`ensure_config_files()`, and `roles/_example.toml` by `ensure_roles_dir()`.
+`ensure_config_files()`. The built-in role files (`agent.toml`, `chat.toml`)
+are seeded by `roles.ensure_roles_dir()` on startup.
 
 ## Loader (`pico_cfg.py`)
 
@@ -39,7 +40,8 @@ into the `markdown_styles` / `syntax_highlight_styles` / `servers` tables.
   apply. Errors are prefixed with the file name (`ui.toml: ...`).
 - Unknown keys/sections/servers/types are reported rather than swallowed.
 - After editing with `/config <section>`, the command reloads; `/reload` also
-  reloads explicitly. Nothing is watched.
+  reloads explicitly. Nothing is watched. `/reload` additionally runs
+  `roles.validate_roles()` and reports role-file errors.
 
 ### Intent vs state
 
@@ -57,17 +59,17 @@ into the `markdown_styles` / `syntax_highlight_styles` / `servers` tables.
   on exit; no argument lists the sections. `section` is one of `ui`, `context`,
   `subagents`, `debug`, `styles`, `servers`.
 - `/edit <path>` opens any file. `/server edit` opens `servers.toml`.
-- `/roles edit [name]` opens `roles/<name>.toml` (or `_example.toml`).
+- `/config role <name>` opens (creating if needed) `roles/<name>.toml`;
+  `/config role delete <name> confirm` removes it.
 - The TUI suspends/resumes around the editor (`ui/external_editor.py`,
   `ui/tui/terminal.py`).
 
 ## Roles
 
-Tool policies (ALLOW/ASK/DENY) are a separate system: a `Role` owns enabled
-tools, per-tool policies and the role prompt, stored one file per role under
-`roles/<name>.toml`. `PermissionGate` (`harness/permissions.py`) is the single
-decision point. See [security.md](./security.md) and
-[tools-and-permissions.md](./tools-and-permissions.md).
+A `Role` is a prompt plus a per-tool approval setting (`no` / `ask` / `yes`),
+stored one file per role under `roles/<name>.toml`. `PermissionGate`
+(`harness/permissions.py`) is the single decision point. See
+[security.md](./security.md) and [tools-and-permissions.md](./tools-and-permissions.md).
 
 ## Key settings
 

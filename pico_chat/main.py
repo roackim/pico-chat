@@ -17,6 +17,9 @@ def main():
     """
     # Initialize harness first
     print("Initializing Pico-Chat Harness...")
+    from pico_chat.harness import roles
+
+    roles.ensure_roles_dir()
     harness = get_harness()
     print() 
 

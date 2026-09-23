@@ -1,6 +1,6 @@
 # Roles Rework — Plan
 
-**Status:** proposed (no code yet) · **Owner:** Joackim · **Created:** 2026-09-22
+**Status:** done (W1–W4 implemented 2026-09-23) · **Owner:** Joackim · **Created:** 2026-09-22
 **Companion docs:** `.wiki/notes/principles.md`, `plans/containerization.md`,
 `SIMPLIFICATION.md` (R11).
 

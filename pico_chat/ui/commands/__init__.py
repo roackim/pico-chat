@@ -1,9 +1,9 @@
 """Command package public API.
 
 Handler functions live in per-domain modules (``core``, ``server``, ``models``,
-``roles``, ``debug``, ``conversation``, ``tools``, ``openrouter``). The registry
-in :mod:`pico_chat.ui.commands.registry` assembles them; this module is the
-public import path.
+``roles``, ``debug``, ``conversation``, ``openrouter``). The registry in
+:mod:`pico_chat.ui.commands.registry` assembles them; this module is the public
+import path.
 """
 
 from .base import ChatUIProtocol, Command, Param

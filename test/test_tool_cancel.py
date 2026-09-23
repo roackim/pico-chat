@@ -3,36 +3,20 @@
 import asyncio
 import pytest
 from pico_chat.harness.tools import ShellTool, MinimalToolset, ToolError
-from pico_chat.harness.permissions import (
-    ToolPermissionsProfile, FilePermissions, RunPermissions,
-)
-
-def _permissive_permissions():
-    """Permissive profile running commands directly."""
-    return ToolPermissionsProfile(
-        name="test",
-        read=FilePermissions("allow", "allow"),
-        write=FilePermissions("allow", "allow"),
-        patch=FilePermissions("allow", "allow"),
-        run=RunPermissions(
-            allow=set(), ask=set(), deny=set(), others="allow",
-            chain_policy="ask",
-        ),
-    )
 
 def asyncio_run(coro):
     return asyncio.run(coro)
 
 
 def test_run_async_returns_formatted_output(tmp_path):
-    tool = ShellTool(tmp_path, permissions=_permissive_permissions())
+    tool = ShellTool(tmp_path)
     out = asyncio_run(tool.run_async("echo hello"))
     assert "hello" in out
     assert "[exit:0]" in out
 
 
 def test_cancel_active_run_kills_command(tmp_path):
-    tool = ShellTool(tmp_path, permissions=_permissive_permissions())
+    tool = ShellTool(tmp_path)
 
     async def scenario():
         # Launch a long-running command.
@@ -51,7 +35,7 @@ def test_cancel_active_run_kills_command(tmp_path):
 
 
 def test_run_async_no_active_proc_when_cancelled(tmp_path):
-    tool = ShellTool(tmp_path, permissions=_permissive_permissions())
+    tool = ShellTool(tmp_path)
 
     async def scenario():
         task = asyncio.create_task(tool.run_async("sleep 30"))
@@ -67,7 +51,7 @@ def test_run_async_no_active_proc_when_cancelled(tmp_path):
 
 
 def test_minimal_toolset_run_async_and_cancel(tmp_path):
-    ts = MinimalToolset(tmp_path, permissions=_permissive_permissions())
+    ts = MinimalToolset(tmp_path)
     out = asyncio_run(ts.run_async("echo hi"))
     assert "hi" in out
 
@@ -84,7 +68,7 @@ def test_minimal_toolset_run_async_and_cancel(tmp_path):
 
 
 def test_run_async_timeout_cleans_up(tmp_path):
-    tool = ShellTool(tmp_path, permissions=_permissive_permissions())
+    tool = ShellTool(tmp_path)
     with pytest.raises(ToolError):
         asyncio_run(tool.run_async("sleep 30", timeout=1))
     assert tool._active_proc is None

@@ -1,35 +1,29 @@
-"""Conversation roles combining tool availability, policies, and instructions.
+"""Conversation roles: a prompt plus a per-tool approval setting.
 
 ``Role`` is the single source of truth for a conversation's operating mode:
-which tools are enabled, what each tool's permission policy is, and the
-role-specific prompt.  There is no parallel permission-profile model; the
-low-level policy primitives live in :mod:`pico_chat.harness.permissions`.
+which tools are enabled, what each tool's approval setting is, and the
+role-specific prompt.  There is no permission engine and no container code in
+pico; isolation is the user's responsibility (see
+``plans/containerization.md`` and ``plans/roles_rework.md``).
+
+One role per file at ``<config>/roles/<name>.toml``.  The file name is the role
+name; the body is ``description`` / ``prompt`` and one ``<tool> = "no" | "ask"
+| "yes"`` entry per registered tool.
 """
 
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import toml
 
-from pico_chat.harness.permissions import (
-    CMD_DEFAULT_ALLOW,
-    CMD_DEFAULT_ASK,
-    CMD_DEFAULT_DENY,
-    Permission,
-)
+#: The only valid per-tool values.
+TOOL_VALUES = ("no", "ask", "yes")
 
-
-@dataclass
-class ToolPolicy:
-    """Availability and permission settings for one registered tool."""
-
-    enabled: bool = True
-    permission: Permission = "ask"
-    settings: dict[str, Any] = field(default_factory=dict)
+#: Files whose stem starts with ``_`` or ``.`` are ignored.
+_HIDDEN_PREFIXES = ("_", ".")
 
 
 @dataclass
@@ -39,195 +33,69 @@ class Role:
     name: str
     description: str = ""
     prompt: str = ""
-    tools: dict[str, ToolPolicy] = field(default_factory=dict)
+    tools: dict[str, str] = field(default_factory=dict)
 
     def enabled_tool_names(self) -> set[str]:
-        return {name for name, policy in self.tools.items() if policy.enabled}
+        """Tool names the model is allowed to see (anything but ``no``)."""
+        return {name for name, value in self.tools.items() if value != "no"}
 
-    def policy_for(self, tool_name: str) -> ToolPolicy:
-        return self.tools.get(tool_name, ToolPolicy(enabled=False, permission="deny"))
-
-
-def _build_role(
-    name: str,
-    description: str,
-    prompt: str,
-    enabled_tools: set[str],
-    policies: dict[str, tuple[Permission, dict[str, Any]]],
-) -> Role:
-    """Construct a role from explicit policies, filling defaults for any
-    registered tool that is not listed."""
-    from pico_chat.harness.tools import registered_tool_specs
-
-    tools = {
-        tool_name: ToolPolicy(
-            enabled=tool_name in enabled_tools,
-            permission=permission,
-            settings=deepcopy(settings),
-        )
-        for tool_name, (permission, settings) in policies.items()
-    }
-    for tool_name, spec in registered_tool_specs().items():
-        tools.setdefault(
-            tool_name,
-            ToolPolicy(
-                enabled=tool_name in enabled_tools,
-                permission=spec.default_permission,
-                settings=deepcopy(spec.default_settings),
-            ),
-        )
-    return Role(name=name, description=description, prompt=prompt, tools=tools)
+    def permission_for(self, tool_name: str) -> str:
+        """Approval setting for ``tool_name`` (``no`` when unlisted)."""
+        return self.tools.get(tool_name, "no")
 
 
-def default_role() -> Role:
-    """The permissive default role: all tools, safe defaults."""
-    return _build_role(
-        name="default",
-        description="General coding assistant",
+def _all_tools_no() -> dict[str, str]:
+    from pico_chat.harness.tools import registered_tool_names
+
+    return {name: "no" for name in registered_tool_names()}
+
+
+def _with_tools(**values: str) -> dict[str, str]:
+    tools = _all_tools_no()
+    tools.update(values)
+    return tools
+
+
+def agent_role() -> Role:
+    """The permissive built-in role: every tool auto-approved."""
+    return Role(
+        name="agent",
+        description="General coding agent (all tools auto-approved)",
         prompt="",
-        enabled_tools={
-            "read", "write", "patch", "run_command",
-            "subagent", "wait_for_subagents",
-        },
-        policies={
-            "read": ("allow", {"inside_repo": "allow", "outside_repo": "ask"}),
-            "write": ("allow", {"inside_repo": "allow", "outside_repo": "deny"}),
-            "patch": ("allow", {"inside_repo": "allow", "outside_repo": "deny"}),
-            "run_command": (
-                "deny",
-                {
-                    "allow": sorted(CMD_DEFAULT_ALLOW),
-                    "ask": sorted(CMD_DEFAULT_ASK),
-                    "deny": sorted(CMD_DEFAULT_DENY),
-                    "others": "deny",
-                    "chain_policy": "ask",
-                },
-            ),
-            "subagent": ("ask", {}),
-            "wait_for_subagents": ("ask", {}),
-        },
+        tools={name: "yes" for name in _all_tools_no()},
     )
 
 
-def builtin_roles() -> dict[str, Role]:
-    """The built-in roles shipped with pico-chat."""
-    reviewer = _build_role(
-        name="reviewer",
-        description="Read-only code review",
-        prompt="Review code carefully. Do not modify files. Prioritize defects, regressions, and missing tests.",
-        enabled_tools={"read", "subagent", "wait_for_subagents"},
-        policies={
-            "read": ("allow", {"inside_repo": "allow", "outside_repo": "deny"}),
-            "write": ("deny", {"inside_repo": "deny", "outside_repo": "deny"}),
-            "patch": ("deny", {"inside_repo": "deny", "outside_repo": "deny"}),
-            "run_command": (
-                "deny",
-                {
-                    "allow": [],
-                    "ask": [],
-                    "deny": [],
-                    "others": "deny",
-                    "chain_policy": "ask",
-                },
-            ),
-            "subagent": ("ask", {}),
-            "wait_for_subagents": ("ask", {}),
-        },
+def chat_role() -> Role:
+    """The pure-chat built-in role: no tools at all."""
+    return Role(
+        name="chat",
+        description="Pure chat (no tools)",
+        prompt="",
+        tools=_all_tools_no(),
     )
-    researcher = _build_role(
-        name="researcher",
-        description="Research and summarize without making changes",
-        prompt="Investigate the request, gather evidence, and report precise findings without modifying files.",
-        enabled_tools={"read"},
-        policies={
-            "read": ("ask", {"inside_repo": "ask", "outside_repo": "deny"}),
-            "write": ("ask", {"inside_repo": "ask", "outside_repo": "deny"}),
-            "patch": ("ask", {"inside_repo": "ask", "outside_repo": "deny"}),
-            "run_command": (
-                "ask",
-                {
-                    "allow": [],
-                    "ask": [],
-                    "deny": [],
-                    "others": "ask",
-                    "chain_policy": "ask",
-                },
-            ),
-            "subagent": ("ask", {}),
-            "wait_for_subagents": ("ask", {}),
-        },
-    )
-    return {
-        "default": default_role(),
-        "reviewer": reviewer,
-        "researcher": researcher,
-    }
 
 
 def scaffolder_role() -> Role:
     """Read-only role used by subagents to explore without side effects."""
-    return _build_role(
+    return Role(
         name="scaffolder",
         description="Read-only scaffolding subagent",
         prompt="",
-        enabled_tools={"read", "subagent", "wait_for_subagents"},
-        policies={
-            "read": ("allow", {"inside_repo": "allow", "outside_repo": "deny"}),
-            "write": ("deny", {"inside_repo": "deny", "outside_repo": "deny"}),
-            "patch": ("deny", {"inside_repo": "deny", "outside_repo": "deny"}),
-            "run_command": (
-                "deny",
-                {
-                    "allow": [],
-                    "ask": [],
-                    "deny": [],
-                    "others": "deny",
-                    "chain_policy": "ask",
-                },
-            ),
-            "subagent": ("ask", {}),
-            "wait_for_subagents": ("ask", {}),
-        },
+        tools=_with_tools(
+            read="yes",
+            subagent="yes",
+            wait_for_subagents="yes",
+        ),
     )
 
 
-def _policy_to_dict(policy: ToolPolicy) -> dict[str, Any]:
+def builtin_roles() -> dict[str, Role]:
+    """The built-in roles, used as code fallbacks when files are absent."""
     return {
-        "enabled": policy.enabled,
-        "permission": policy.permission,
-        "settings": policy.settings,
+        "agent": agent_role(),
+        "chat": chat_role(),
     }
-
-
-def _role_to_dict(role: Role) -> dict[str, Any]:
-    return {
-        "description": role.description,
-        "prompt": role.prompt,
-        "tools": {name: _policy_to_dict(policy) for name, policy in role.tools.items()},
-    }
-
-
-def _role_from_dict(name: str, data: dict[str, Any]) -> Role:
-    from pico_chat.harness.tools import registered_tool_specs
-
-    tools = {}
-    for tool_name, values in data.get("tools", {}).items():
-        tools[tool_name] = ToolPolicy(
-            enabled=bool(values.get("enabled", False)),
-            permission=values.get("permission", "deny"),
-            settings=dict(values.get("settings", {})),
-        )
-    for tool_name, spec in registered_tool_specs().items():
-        tools.setdefault(
-            tool_name,
-            ToolPolicy(False, spec.default_permission, deepcopy(spec.default_settings)),
-        )
-    return Role(
-        name=name,
-        description=data.get("description", ""),
-        prompt=data.get("prompt", ""),
-        tools=tools,
-    )
 
 
 def _default_roles_dir() -> Path:
@@ -236,10 +104,7 @@ def _default_roles_dir() -> Path:
     return pico_cfg.get_roles_dir()
 
 
-# One role per file: ``<config>/roles/<name>.toml``. The file body is the role
-# itself (``description``/``prompt``/``[tools.<tool>]``), and the stem is the
-# role name. Files whose stem starts with ``_`` or ``.`` are ignored, which is
-# where the shipped example lives.
+# Resolved at import; tests monkeypatch this symbol directly.
 _ROLES_DIR = _default_roles_dir()
 
 
@@ -259,7 +124,7 @@ def _iter_role_files():
         return []
     return sorted(
         path for path in _ROLES_DIR.glob("*.toml")
-        if not path.stem.startswith(("_", "."))
+        if not path.stem.startswith(_HIDDEN_PREFIXES)
     )
 
 
@@ -267,30 +132,99 @@ def _read_role_file(path: Path) -> dict[str, Any]:
     try:
         return toml.load(path)
     except (toml.TomlDecodeError, OSError) as exc:
-        raise ValueError(f"Invalid role file {path.name}: {exc}") from exc
+        raise ValueError(f"{path.name}: {exc}") from exc
 
 
-def save_role(role: Role) -> None:
-    name = _validate_name(role.name)
+def _role_from_dict(name: str, data: dict[str, Any]) -> Role:
+    """Build a validated role from a parsed file body."""
+    from pico_chat.harness.tools import registered_tool_names
+
+    registered = set(registered_tool_names())
+    tools: dict[str, str] = {}
+    for key, value in data.items():
+        if key in ("description", "prompt", "disabled"):
+            continue
+        if key not in registered:
+            raise ValueError(f"roles/{name}.toml: unknown tool '{key}'")
+        if value not in TOOL_VALUES:
+            raise ValueError(
+                f"roles/{name}.toml: {key} must be one of "
+                + " / ".join(TOOL_VALUES)
+            )
+        tools[key] = value
+    return Role(
+        name=name,
+        description=str(data.get("description", "")),
+        prompt=str(data.get("prompt", "")),
+        tools=tools,
+    )
+
+
+def _role_to_dict(role: Role) -> dict[str, Any]:
+    return {
+        "description": role.description,
+        "prompt": role.prompt,
+        **role.tools,
+    }
+
+
+def ensure_roles_dir() -> Path:
+    """Create the roles directory and seed the built-in role files."""
     _ROLES_DIR.mkdir(parents=True, exist_ok=True)
-    _role_file(name).write_text(toml.dumps(_role_to_dict(role)), encoding="utf-8")
+    for name, role in builtin_roles().items():
+        path = _role_file(name)
+        if not path.exists():
+            path.write_text(_role_template(role), encoding="utf-8")
+    return _ROLES_DIR
 
 
-def rename_role(old_name: str, new_name: str) -> None:
-    """Rename a saved role; built-in roles must be copied first."""
-    new_name = _validate_name(new_name)
-    if old_name in builtin_roles():
-        raise ValueError(f"Built-in role cannot be renamed: {old_name}")
-    source = _role_file(old_name)
-    if not source.exists():
-        raise KeyError(f"Role not found: {old_name}")
-    if new_name in builtin_roles() or _role_file(new_name).exists():
-        raise ValueError(f"Role already exists: {new_name}")
-    source.rename(_role_file(new_name))
+def _role_template(role: Role) -> str:
+    """Render a role file with a short header and one line per tool."""
+    import json
+
+    header = (
+        f"# Pico role: {role.name}\n"
+        f"#   The file name is the role name.\n"
+        f"#   Select with: /role {role.name}\n"
+        f"#   Edit with:   /config role {role.name}\n"
+        f"#\n"
+        f"# Tools: no = disabled (hidden from the model) · ask = confirm · yes = auto\n\n"
+        f"description = {json.dumps(role.description)}\n"
+        f"prompt = {json.dumps(role.prompt)}\n\n"
+        f"# All available tools:\n"
+    )
+    body = "".join(f'{name} = "{value}"\n' for name, value in role.tools.items())
+    return header + body
+
+
+def create_role(name: str) -> Role:
+    """Create a role file from the tool registry (the only programmatic writer).
+
+    A new role has every tool disabled; the user opts tools in explicitly.
+    """
+    name = _validate_name(name)
+    if name in list_roles() or _role_file(name).exists():
+        raise ValueError(f"Role already exists: {name}")
+    role = Role(name=name, description="", prompt="", tools=_all_tools_no())
+    _ROLES_DIR.mkdir(parents=True, exist_ok=True)
+    _role_file(name).write_text(_role_template(role), encoding="utf-8")
+    return role
+
+
+def ensure_role_file(name: str) -> Path:
+    """Create the role's file if missing (built-ins included); return its path."""
+    name = _validate_name(name)
+    path = _role_file(name)
+    if path.exists():
+        return path
+    _ROLES_DIR.mkdir(parents=True, exist_ok=True)
+    role = builtin_roles().get(name) or Role(name=name, tools=_all_tools_no())
+    path.write_text(_role_template(role), encoding="utf-8")
+    return path
 
 
 def delete_role(name: str) -> None:
-    """Delete a role file; a deleted built-in is hidden by a tombstone file."""
+    """Delete a role file; built-ins are hidden with a tombstone."""
     if name not in list_roles():
         raise KeyError(f"Role not found: {name}")
     if len(list_roles()) <= 1:
@@ -302,23 +236,6 @@ def delete_role(name: str) -> None:
         path.write_text("disabled = true\n", encoding="utf-8")
     elif path.exists():
         path.unlink()
-
-
-def duplicate_role(name: str, new_name: str | None = None) -> Role:
-    """Copy a built-in or saved role into a new saved role."""
-    source = load_role(name)
-    target_name = _validate_name(new_name or f"{name}-copy")
-    existing = set(list_roles())
-    if target_name in existing:
-        suffix = 2
-        base = target_name
-        while f"{base}-{suffix}" in existing:
-            suffix += 1
-        target_name = f"{base}-{suffix}"
-    copy = deepcopy(source)
-    copy.name = target_name
-    save_role(copy)
-    return copy
 
 
 def load_role(name: str) -> Role:
@@ -343,3 +260,21 @@ def list_roles() -> list[str]:
         else:
             names.add(path.stem)
     return sorted(names)
+
+
+def validate_roles() -> list[str]:
+    """Return validation errors for every role file (surfaced by /reload)."""
+    errors: list[str] = []
+    for path in _iter_role_files():
+        try:
+            data = _read_role_file(path)
+        except ValueError as exc:
+            errors.append(str(exc))
+            continue
+        if data.get("disabled"):
+            continue
+        try:
+            _role_from_dict(path.stem, data)
+        except ValueError as exc:
+            errors.append(str(exc))
+    return errors

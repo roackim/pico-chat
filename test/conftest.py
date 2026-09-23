@@ -115,8 +115,9 @@ def harness_stub(tmp_path, stub_read_tool):
     harness.history = []
     harness.workspace = str(tmp_path)
     harness.tools_map = {"read": stub_read_tool}
-    harness._permission_gate = PermissionGate(workspace=str(tmp_path), permissions=None)
-    harness._tool_permissions = None
+    from pico_chat.harness.roles import Role
+
+    harness._permission_gate = PermissionGate(role=Role(name="test", tools={"read": "yes"}))
     return harness
 
 

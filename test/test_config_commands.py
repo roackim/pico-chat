@@ -70,9 +70,11 @@ def test_edit_file_invokes_editor(monkeypatch, tmp_path):
 
 def test_config_command_opens_section_and_reloads(monkeypatch, tmp_path):
     import pico_chat.pico_cfg as cfg_mod
+    import pico_chat.harness.roles as roles_mod
 
     monkeypatch.setattr(cfg_mod, "get_config_dir", lambda: tmp_path)
     monkeypatch.setattr(cfg_mod, "get_state_path", lambda: tmp_path / "state.toml")
+    monkeypatch.setattr(roles_mod, "_ROLES_DIR", tmp_path / "roles")
     monkeypatch.setenv("EDITOR", "my-editor")
     ui = _UI()
 
@@ -136,9 +138,11 @@ def test_edit_command_opens_requested_file(monkeypatch, tmp_path):
 
 def test_reload_command_success(monkeypatch, tmp_path):
     import pico_chat.pico_cfg as cfg_mod
+    import pico_chat.harness.roles as roles_mod
 
     monkeypatch.setattr(cfg_mod, "get_config_dir", lambda: tmp_path)
     monkeypatch.setattr(cfg_mod, "get_state_path", lambda: tmp_path / "state.toml")
+    monkeypatch.setattr(roles_mod, "_ROLES_DIR", tmp_path / "roles")
     ui = _UI()
 
     asyncio.run(cmd_reload(ui, []))

@@ -186,7 +186,7 @@ class chatTUI(ChatActionHandlers):
         """Apply a role and show a role-change notice."""
         if self.is_generating():
             raise RuntimeError("Role changes apply after the current response finishes.")
-        previous_name = getattr(getattr(self.agent, "role", None), "name", "default")
+        previous_name = getattr(getattr(self.agent, "role", None), "name", "agent")
         self.agent.set_role(role)
         _show_role_change(self.chat_history_panel, previous_name, role.name)
         return self.agent.role

@@ -1,6 +1,6 @@
 """Open files in the user's editor, suspending the TUI while it runs.
 
-Configuration is edited as files: ``/config``, ``/edit`` and ``/role edit``
+Configuration is edited as files: ``/config``, ``/edit`` and ``/config role``
 shell out to ``$VISUAL``/``$EDITOR`` (falling back to nano/vim/vi) rather than
 building in-TUI forms.
 """

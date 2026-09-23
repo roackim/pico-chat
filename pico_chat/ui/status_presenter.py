@@ -65,7 +65,7 @@ def refresh_status_bar(app) -> None:
             if model.endswith(suffix):
                 model = model[: -len(suffix)]
                 break
-    role = getattr(getattr(agent, "role", None), "name", "default")
+    role = getattr(getattr(agent, "role", None), "name", "agent")
     state = getattr(getattr(agent, "state", None), "name", "IDLE").lower()
 
     # Show an animated spinner while .local hostname resolution or model

@@ -89,7 +89,7 @@ def format_system_prompt(
 
     if role_name or role_prompt:
         prompt += ROLE_PROMPT_TEMPLATE.format(
-            role_name=role_name or "default",
+            role_name=role_name or "agent",
             role_prompt=role_prompt or "Follow the general Pico operating instructions.",
         )
     

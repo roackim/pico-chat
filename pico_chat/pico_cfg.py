@@ -58,7 +58,6 @@ DEFAULT_SYNTAX_HIGHLIGHT_STYLES: Dict[str, Dict[str, str]] = {
 
 CONFIG_DIR_ENV = "PICO_CONFIG_DIR"
 ROLES_DIRNAME = "roles"
-ROLE_EXAMPLE_FILENAME = "_example.toml"
 STATE_FILENAME = "state.toml"
 
 #: Config section -> file name. The section is what ``/config <section>`` takes.
@@ -218,58 +217,6 @@ DEFAULT_CONFIG_TEMPLATES = {
     "styles": DEFAULT_STYLES_TOML,
     "servers": DEFAULT_SERVERS_TOML,
 }
-
-
-# Example role file, written as ``roles/_example.toml`` on first use. Copy it
-# to ``roles/<name>.toml`` (the file name is the role name) and edit. A file
-# overrides a built-in role of the same name. ``disabled = true`` keeps this
-# example out of /role list.
-DEFAULT_ROLE_TOML = """\
-# Pico-Chat role: copy this file to <name>.toml (e.g. architect.toml) and edit.
-# The file name is the role name. Defining a role that matches a built-in
-# (default, reviewer, researcher, scaffolder) overrides it. Select a role with
-# /role use <name>.
-#
-# Tools: read, write, patch, run_command, subagent, wait_for_subagents.
-# `permission` is the fallback decision:
-# "allow" | "ask" | "deny".
-#
-# `disabled = true` hides this role; remove the line to enable it.
-disabled = true
-description = "Example role (copy me)"
-prompt = ""
-
-[tools.read]
-enabled = true
-permission = "allow"
-[tools.read.settings]
-inside_repo = "allow"
-outside_repo = "ask"
-
-[tools.write]
-enabled = true
-permission = "ask"
-[tools.write.settings]
-inside_repo = "allow"
-outside_repo = "deny"
-
-[tools.patch]
-enabled = true
-permission = "ask"
-[tools.patch.settings]
-inside_repo = "allow"
-outside_repo = "deny"
-
-[tools.run_command]
-enabled = true
-permission = "ask"
-[tools.run_command.settings]
-allow = ["ls", "cat", "grep"]
-ask = ["git", "python3"]
-deny = ["sudo", "rm"]
-others = "deny"        # fallback for commands not listed
-chain_policy = "ask"   # decision for chained commands (a && b)
-"""
 
 
 # --- config schema ----------------------------------------------------------
@@ -746,16 +693,6 @@ def _load_state_file(path: Path, config: Config, errors: list[str]) -> None:
 
 # Global config instance, reloadable via reload_config().
 config: Config = Config()
-
-
-def ensure_roles_dir() -> Path:
-    """Create the roles directory with the example file if it is missing."""
-    directory = get_roles_dir()
-    directory.mkdir(parents=True, exist_ok=True)
-    example = directory / ROLE_EXAMPLE_FILENAME
-    if not example.exists():
-        example.write_text(DEFAULT_ROLE_TOML, encoding="utf-8")
-    return directory
 
 
 def reload_config() -> list[str]:

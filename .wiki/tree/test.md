@@ -15,10 +15,8 @@ All tests use pytest. See [notes/testing.md](../notes/testing.md) for run instru
 
 | File | Module Under Test | What It Covers |
 |------|-------------------|----------------|
-| `test_permissions.py` | `permissions.py`, `tools.py`, `harness.py` | Read/write/patch/run permission enforcement |
-| `test_dangerous_patterns.py` | `permissions.py` | Escalation from ALLOW→ASK for dangerous shell patterns |
-| `test_benign_dangerous_commands.py` | `permissions.py` | Safe usages that match dangerous patterns on the surface |
-| `test_permission_chain_policy.py` | `permissions.py` | Quote-aware chain operator detection and chain_policy |
+| `test_permissions.py` | `permissions.py`, `tools.py`, `harness.py` | Gate decisions, prompt text, ask/deny/allow flow |
+| `test_roles.py` | `roles.py` | Role model, files, seeding, validation |
 | `test_buffer.py` | `ui/tui/buffer.py` | Cell operations, ANSI-aware text writing, SubBuffer |
 | `test_forms.py` | `ui/tui/components/form.py` | Form fields, dynamic profile-list composition, layout, and input routing |
 | `test_tui_form_actions.py` | `ui/tui/components/form_popup.py`, `ui/tui/components/form.py` | Shared keyboard/mouse actions, modal submit/cancel, focus, and typed events |

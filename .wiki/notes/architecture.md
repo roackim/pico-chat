@@ -51,7 +51,7 @@ User types → InputComponent
            → Harness.chat()
            → Endpoint.create_completion()
            → events yielded → UI renders streaming tokens
-           → tool call detected → PermissionGate checks the active Role policy
+           → tool call detected → PermissionGate checks the active role's per-tool setting
            → tool executed → result appended to history
            → next iteration until IDLE
 ```
@@ -67,7 +67,7 @@ file at `roles/<name>.toml`, and a disposable `state.toml`; loaded by
 
 - **Custom TUI** — no curses or third-party TUI library; full control over rendering pipeline
 - **Streaming-first** — LLM output streams token-by-token to the buffer; no waiting for full response
-- **Permission gate** — every tool call goes through `PermissionGate` (`permissions.py`), which checks the active `Role` policy before execution; the UI can pause to ask the user
+- **Approval gate** — every tool call goes through `PermissionGate` (`permissions.py`), which maps the active role's per-tool setting (`no`/`ask`/`yes`) to a decision before execution; the UI can pause to ask the user
 - **Stateless tools** — tools are pure functions; harness owns all state
 - **Service layer** — server management and OpenRouter API calls are in `harness/server_service.py`; UI commands are thin adapters- **Model selection is `(server, model)`** — the unit of selection is a server/model pair. `/model <model>` refreshes discovery live, resolves a model across all servers, verifies the chosen server serves it, then switches the harness and selects it. Per-server model choices persist in `[model_selection]` and are reapplied by `get_server_config_by_name`, so switching back restores the last model used on that server. The discovery catalog persists in `[model_catalog]` and is pruned when a server is removed. OpenRouter models are disabled by default unless listed in `enabled_models`. The status bar shows the model that will actually be sent (`_cached_model_name`, reconciled with single-model endpoints such as llama.cpp), not merely the requested selection.- **Thinking-tag parsing** — the thinking-tag state machine is in `harness/thinking_parser.py` for testability; handles both `<think>`/`</think>` and `<thinking>`/`</thinking>` across chunk boundaries;
 
@@ -77,11 +77,11 @@ file at `roles/<name>.toml`, and a disposable `state.toml`; loaded by
 pico_chat/
   harness/
     harness.py           ← Orchestrator (delegates to modules below)
-    permissions.py       ← Single decision point: PermissionGate, SecurityChecker, policy primitives
+    permissions.py       ← Single decision point: PermissionGate (role no/ask/yes → deny/ask/allow)
     thinking_parser.py   ← Thinking-tag state machine + metrics emission
     server_service.py    ← Server config CRUD + model discovery/selection + OpenRouter API (used by commands/)
-    tools.py             ← Tool implementations + @tool registry (read/write/patch/run/search/subagent)
-    roles.py             ← Role/ToolPolicy (single source of truth for tool policy)
+    tools.py             ← Tool implementations + @tool registry (read/write/patch/run/subagent)
+    roles.py             ← Role (prompt + per-tool no/ask/yes; single source of truth)
     llm_server.py        ← LLMServer ABC + concrete impls (llama.cpp, OpenRouter, OpenAI)
     llm_server_config.py ← LLMServerConfig dataclass + config loading
     ...

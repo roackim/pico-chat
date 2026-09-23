@@ -46,8 +46,9 @@ async def cmd_clear(ui: ChatUIProtocol, args: List[str]):
 async def cmd_reload(ui: ChatUIProtocol, args: List[str]):
     """Reload hand-edited configuration from disk (explicit, no watcher)."""
     from pico_chat import pico_cfg
+    from pico_chat.harness import roles
 
-    errors = pico_cfg.reload_config()
+    errors = pico_cfg.reload_config() + roles.validate_roles()
 
     try:
         from pico_chat.ui.tui.colors import set_theme
@@ -76,10 +77,14 @@ async def cmd_config(ui: ChatUIProtocol, args: List[str]):
     if not args:
         lines = [f"{section.ljust(10)} {pico_cfg.CONFIG_FILES[section]}"
                  for section in pico_cfg.CONFIG_FILES]
+        lines.append(f"{'role'.ljust(10)} roles/<name>.toml  (create/edit a role)")
         ui.show_popup("config", "Sections:\n" + "\n".join(lines))
         return
 
     section = args[0].lower()
+    if section == "role":
+        await _config_role(ui, args[1:])
+        return
     if section not in pico_cfg.CONFIG_FILES:
         ui.chat_history_panel.add_message(
             f"Unknown section '{section}'. Valid: "
@@ -95,6 +100,66 @@ async def cmd_config(ui: ChatUIProtocol, args: List[str]):
     path = pico_cfg.config.ensure_section_file(section)
     open_editor(ui, path)
     errors = pico_cfg.reload_config()
+    if errors:
+        ui.chat_history_panel.add_message(
+            "Config reloaded with errors:\n" + "\n".join(errors),
+            msg_type=SysMsgError(), title="config")
+    else:
+        ui.chat_history_panel.add_message("Config reloaded.", msg_type=SysMsg(), title="config")
+    if hasattr(ui, "refresh_status_bar"):
+        ui.refresh_status_bar()
+
+
+async def _config_role(ui: ChatUIProtocol, args: List[str]):
+    """Create/edit a role file, then reload. ``delete`` requires confirmation."""
+    from pico_chat import pico_cfg
+    from pico_chat.harness import roles
+    from pico_chat.ui.external_editor import open_editor, resolve_editor
+
+    if not args:
+        names = ", ".join(roles.list_roles())
+        ui.chat_history_panel.add_message(
+            f"Usage: /config role <name>  |  /config role delete <name>\n"
+            f"Roles: {names}",
+            msg_type=SysMsg(), title="config")
+        return
+
+    if args[0] == "delete":
+        if len(args) < 2:
+            ui.chat_history_panel.add_message(
+                "Usage: /config role delete <name>", msg_type=SysMsgError(), title="config")
+            return
+        name = args[1]
+        if len(args) == 2:
+            ui.chat_history_panel.add_message(
+                f"This deletes roles/{name}.toml. Re-run to confirm:\n"
+                f"/config role delete {name} confirm",
+                msg_type=SysMsgWarning(), title="config")
+            return
+        if args[2] != "confirm":
+            ui.chat_history_panel.add_message(
+                "Confirmation token must be 'confirm'.", msg_type=SysMsgError(), title="config")
+            return
+        try:
+            roles.delete_role(name)
+        except (KeyError, OSError, ValueError) as exc:
+            ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError(), title="config")
+            return
+        ui.chat_history_panel.add_message(f"Deleted role: {name}", msg_type=SysMsg(), title="config")
+        return
+
+    if not resolve_editor():
+        ui.chat_history_panel.add_message(
+            "No editor found. Set $VISUAL or $EDITOR.",
+            msg_type=SysMsgError(), title="config")
+        return
+    try:
+        path = roles.ensure_role_file(args[0])
+    except (OSError, ValueError) as exc:
+        ui.chat_history_panel.add_message(str(exc), msg_type=SysMsgError(), title="config")
+        return
+    open_editor(ui, path)
+    errors = pico_cfg.reload_config() + roles.validate_roles()
     if errors:
         ui.chat_history_panel.add_message(
             "Config reloaded with errors:\n" + "\n".join(errors),

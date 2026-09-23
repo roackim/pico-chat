@@ -139,32 +139,14 @@ def test_default_templates_are_valid_and_error_free(tmp_path):
     assert config.ui_theme == "terminal"
 
 
-def test_default_role_template_is_valid_toml():
-    from pico_chat.pico_cfg import DEFAULT_ROLE_TOML
-
-    data = toml.loads(DEFAULT_ROLE_TOML)
-    # The example is a single role body, disabled so it is not listed.
-    assert data["disabled"] is True
-    assert "roles" not in data
-    assert data["tools"]["read"]["enabled"] is True
-
-
-def test_ensure_files_write_templates(tmp_path, monkeypatch):
-    import pico_chat.pico_cfg as cfg_mod
-
-    monkeypatch.setattr(cfg_mod, "get_roles_dir", lambda: tmp_path / "roles")
+def test_ensure_files_write_templates(tmp_path):
     config = Config(config_dir=tmp_path, state_path=tmp_path / "state.toml")
 
     created = config.ensure_config_files()
     config.ensure_config_files()  # idempotent, does not clobber
-    roles_dir = cfg_mod.ensure_roles_dir()
 
-    assert {path.name for path in created} == set(cfg_mod.CONFIG_FILES.values())
+    assert {path.name for path in created} == set(pico_cfg.CONFIG_FILES.values())
     assert (tmp_path / "ui.toml").exists()
-    assert roles_dir == tmp_path / "roles"
-    example = roles_dir / cfg_mod.ROLE_EXAMPLE_FILENAME
-    assert example.exists()
-    assert "[tools.read]" in example.read_text(encoding="utf-8")
 
 
 def test_reload_picks_up_edits(tmp_path):

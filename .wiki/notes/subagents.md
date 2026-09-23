@@ -21,23 +21,24 @@ The child `Harness` is created inside `_run_subagent()` with `depth=ctx.depth + 
 
 ## Permissions
 
-Subagents always use the **`scaffolder`** built-in role (defined in `roles.py`; a matching low-level `scaffolder` profile exists in `permissions.py`):
+Subagents always use the **`scaffolder`** built-in role (defined in `roles.py`;
+`read`, `subagent` and `wait_for_subagents` are `yes`, everything else `no`):
 
-| Operation | Inside repo | Outside repo |
-|-----------|-------------|--------------|
-| read      | allow       | deny         |
-| write     | deny        | deny         |
-| patch     | deny        | deny         |
-| run       | deny (others=deny, allow=∅) | deny |
-| memory    | deny        | —            |
+| Tool | Value |
+|------|-------|
+| read | yes |
+| write | no |
+| patch | no |
+| run_command | no |
+| subagent | yes |
+| wait_for_subagents | yes |
 
 The parent harness detects `depth > 0` at construction time and assigns
-`self.role = scaffolder_role()`. This also means no `confirmation_callback` is
-wired up — subagents never prompt the user.
+`self.role = scaffolder_role()`.
 
-`subagent` and `wait_for_subagents` tool calls use the active role's delegation
-policy. The default role asks for approval, while a child harness remains
-isolated under the `scaffolder` role and cannot modify files or run commands.
+`subagent` and `wait_for_subagents` tool calls use the active role's per-tool
+setting. The `agent` role auto-approves them; a child harness remains isolated
+under the `scaffolder` role and cannot modify files or run commands.
 
 ---
 

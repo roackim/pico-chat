@@ -46,7 +46,7 @@ async def conversation_export(ui: ChatUIProtocol, args: List[str]):
                 "No conversation history to export.", msg_type=SysMsgError())
             return
 
-        active_role = getattr(getattr(ui.agent, "role", None), "name", "default")
+        active_role = getattr(getattr(ui.agent, "role", None), "name", "agent")
         with open(filename, "w", encoding="utf-8") as stream:
             json.dump({"role": active_role, "history": history}, stream,
                       indent=2, ensure_ascii=False)
@@ -102,13 +102,12 @@ async def conversation_import(ui: ChatUIProtocol, args: List[str]):
             from pico_chat.harness import roles
             try:
                 role = roles.load_role(role_name)
-                ui.switch_role(role)
             except KeyError:
-                default_role = roles.load_role("default")
-                ui.switch_role(default_role)
+                role = roles.agent_role()
                 role_warning = (
-                    f"Role '{role_name}' no longer exists — defaulted to 'default'."
+                    f"Role '{role_name}' no longer exists — defaulted to 'agent'."
                 )
+            ui.switch_role(role)
 
         ui.agent.history = history
         ui.chat_history_panel.clear()

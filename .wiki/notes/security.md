@@ -1,55 +1,59 @@
 # Security
 
-Pico runs shell commands and reads/writes files on behalf of an LLM agent. The security layer prevents accidental or malicious escalation.
+Pico runs shell commands and reads/writes files on behalf of an LLM agent.
+There is **no security layer inside pico**: no command parsing, no allowlist,
+no path confinement, no container runtime. The safety model is deliberately
+minimal and explicit.
 
 ---
 
-## Threat Model
+## Threat model
 
-- The LLM may generate tool calls that modify or delete files outside the project root
-- Shell commands may contain dangerous operators (pipes, `&&`, `;`) or escalation patterns (`find -exec`, `awk system()`, `sed /e`)
-- Chained commands can smuggle privileged operations inside benign-looking calls
+- The LLM may generate tool calls that read, write, or delete anything the
+  process can reach, and shell commands with any operators it likes.
+- pico does not try to tell safe commands from dangerous ones. Chained-command
+  splitting cannot be done reliably (command substitution, `bash -c`, `xargs`,
+  interpreters, obfuscation), so allowlists are a security illusion and
+  deny-lists fail open to obfuscation.
+- The boundary belongs to the environment: a container, VM, `bubblewrap`, or
+  the user watching the prompt.
 
-## SecurityChecker (`permissions.py`)
+## Two modes, declared by the user
 
-`SecurityChecker` evaluates a shell command before execution:
-1. Parses operator structure — detects `;`, `&&`, `||`, `|` chains
-2. Matches against known dangerous pattern list
-3. `classify(cmd)` returns a typed `CommandAction` (`ALLOW` / `ASK` / `DENY`)
-   without prompting; `check_chain(cmd)` keeps the interactive confirmation path
+The whole safety story is the per-tool approval setting (`roles.py`): each tool
+is `no` / `ask` / `yes`, and the user picks it explicitly — nothing is inferred.
 
-Dangerous patterns include (non-exhaustive):
-- `find -exec` / `find -execdir`
-- `awk` with `system()` or `|` pipe
-- `sed` with `/e` flag (execute)
-- `eval`, `exec`, backtick substitution in specific contexts
-- Commands writing outside the repo root
+| Situation | Boundary | Tool settings |
+|---|---|---|
+| pico run inside the user's container | the container | `yes` (the mount is the wall) |
+| pico run bare on the host | none | `ask` on `write` / `patch` / `run_command` |
 
-## Policy primitives (`permissions.py`)
+See `plans/containerization.md` for the full decision record and the
+recommended (not shipped) `podman run` posture.
 
-`Role` is the source of truth for a conversation's tool policies. Low-level
-`ToolPermissionsProfile` / `FilePermissions` / `RunPermissions` remain as
-execution helpers and defaults. Policies are `ALLOW` / `ASK` / `DENY`.
+## Permission gate (`permissions.py`)
 
-- `ASK` — the UI pauses and shows a permission prompt to the user before executing
-- `ALLOW` — executes without prompting
-- `DENY` — always blocked, no prompt
+`PermissionGate` is the single decision point. It reads the active role's
+per-tool value and returns the harness decision:
 
-Dangerous pattern detection can **escalate** an `ALLOW` policy to `ASK` (never downgrades `DENY`).
+- `no` → `deny` — blocked, no prompt. The tool is not exposed to the model.
+- `ask` → `ask` — the UI pauses and prompts the user before executing.
+- `yes` → `allow` — executes without prompting.
 
-## Chain Policy
+It also builds the prompt text (`build_prompt()`) and owns the async
+user-response queue. There is no `SecurityChecker`, no dangerous-pattern list,
+and no chain policy.
 
-`chain_policy` in the permissions profile controls how chained commands (`&&`, `||`, `;`, `|`) are handled. Behavior depends on the operators present and the policy for each segment.
+## Path restrictions
 
-## Path Restrictions
-
-File read/write tools validate paths against the repo root. Operations outside the working directory are blocked or escalated to `ASK` depending on policy.
+None. File tools resolve relative paths against the workspace and otherwise
+operate wherever the process can. Running bare, the user relies on `ask`.
+Running in a container, the mount is the boundary.
 
 ## Tests
 
 | Test | Coverage |
 |------|----------|
-| `test_permissions.py` | Read/write/patch/run policies inside/outside repo |
-| `test_dangerous_patterns.py` | Escalation from ALLOW→ASK for dangerous patterns |
-| `test_benign_dangerous_commands.py` | Safe usages of potentially dangerous commands |
-| `test_permission_chain_policy.py` | Chain operator detection and chain_policy enforcement |
+| `test_permissions.py` | Gate decisions, prompt text, ask/deny/allow harness flow |
+| `test_roles.py` | Role model, files, seeding, validation |
+| `test_subagents.py` | Scaffolder role, depth/timeout/context limits |

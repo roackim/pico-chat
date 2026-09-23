@@ -1,9 +1,9 @@
 """Command registry: the single assembly point for all slash commands.
 
 Handlers live in per-domain modules (``core``, ``server``, ``models``,
-``roles``, ``debug``, ``conversation``, ``tools``, ``openrouter``). Those
-modules depend only on :mod:`pico_chat.ui.commands.base`; this module is the
-only place that knows about all of them, which keeps the import graph acyclic.
+``roles``, ``debug``, ``conversation``, ``openrouter``). Those modules depend
+only on :mod:`pico_chat.ui.commands.base`; this module is the only place that
+knows about all of them, which keeps the import graph acyclic.
 
 Most commands are plain handler functions with metadata. ``Command`` classes
 are reserved for commands that own a subcommand tree (server/debug/openrouter).
@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-from .base import ChatUIProtocol, Command, Param, config_section_completions
+from .base import ChatUIProtocol, Command, Param, config_section_completions, role_name_completions
 from .conversation import conversation_export, conversation_import, json_file_completions
 from .core import (
     cmd_activity,
@@ -32,9 +32,8 @@ from .core import (
 from .debug import DebugCommand
 from .models import known_model_ids, model_command
 from .openrouter import OpenRouterCommand
-from .roles import cmd_roles
+from .roles import cmd_role
 from .server import ServerCommand
-from .tools import cmd_tools
 
 # Help needs the whole registry, so its handler is assembled here.
 async def _help(ui: ChatUIProtocol, args: List[str]):
@@ -45,7 +44,7 @@ async def _help(ui: ChatUIProtocol, args: List[str]):
 COMMANDS: Dict[str, Command] = {
     "help":         Command("help", "Show available commands", handler=_help),
     "clear":        Command("clear", "Clear chat history", handler=cmd_clear),
-    "reload":       Command("reload", "Reload config files and the roles directory from disk",
+    "reload":       Command("reload", "Reload config files and validate role files from disk",
                             handler=cmd_reload),
     "config":       Command("config", "Edit a config file in $EDITOR and reload it",
                             handler=cmd_config,
@@ -70,10 +69,10 @@ COMMANDS: Dict[str, Command] = {
     "model":        Command("model", "Change the active model (opens a picker)",
                             handler=model_command,
                             params=[Param("MODEL", completions=known_model_ids)]),
-    "tools":        Command("tools", "Show available tools and their permissions",
-                            handler=cmd_tools),
+    "role":         Command("role", "List roles or switch the active one",
+                            handler=cmd_role,
+                            params=[Param("NAME", completions=role_name_completions)]),
     "debug":        DebugCommand(),
-    "roles":        Command("roles", "Select and inspect conversation roles", handler=cmd_roles),
     "openrouter":   OpenRouterCommand(),
     "cd":           Command("cd", "Change workspace directory and rebuild context",
                             handler=cmd_cd, params=[Param("DIR", path=True)]),

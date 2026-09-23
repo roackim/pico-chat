@@ -104,12 +104,12 @@ def test_conversation_import_defaults_role_when_missing(tmp_path, monkeypatch):
 
     asyncio.run(conversation_import(ui, [str(filename)]))
 
-    # Defaulted to 'default' and warned in the chat.
-    assert ui.agent.role.name == "default"
+    # Defaulted to 'agent' and warned in the chat.
+    assert ui.agent.role.name == "agent"
     assert ui.agent.history == history
     all_text = "\n".join(m.text for m in ui.chat_history_panel.messages)
     assert "ghost-role" in all_text
-    assert "default" in all_text
+    assert "agent" in all_text
 
 
 def test_conversation_import_handles_tool_call_only_assistant(tmp_path):

@@ -43,23 +43,16 @@ class Harness:
         self.workspace = workspace_path or os.getcwd()
 
         # Subagents use a read-only scaffolder role
-        from pico_chat.harness.roles import default_role, scaffolder_role
+        from pico_chat.harness.roles import agent_role, scaffolder_role
         if depth > 0:
             role = scaffolder_role()
-        self.role = role or default_role()
+        self.role = role or agent_role()
 
-        # Permission gate owns the user-response queue and path resolution
-        self._permission_gate = PermissionGate(
-            workspace=self.workspace,
-            enabled_tools=self.role.enabled_tool_names(),
-            role=self.role,
-        )
+        # Permission gate turns the role's per-tool setting into a decision.
+        self._permission_gate = PermissionGate(role=self.role)
 
         self.tools_map = create_toolset(
             workspace_path=self.workspace,
-            # Subagents are read-only; they never need to ask the user for approval.
-            confirmation_callback=None if depth > 0 else self._request_user_confirmation,
-            permissions=self.role,
             depth=depth,
             pending_subagents=self._pending_subagents,
         )
@@ -110,15 +103,9 @@ class Harness:
             raise TypeError("role must be a Role")
         previous_name = getattr(self, "role", role).name
         self.role = role
-        self._permission_gate.set_policy(
-            None,
-            role.enabled_tool_names(),
-            role=role,
-        )
+        self._permission_gate.set_role(role)
         self.tools_map = create_toolset(
             workspace_path=self.workspace,
-            confirmation_callback=None if self.depth > 0 else self._request_user_confirmation,
-            permissions=role,
             depth=self.depth,
             pending_subagents=self._pending_subagents,
         )
@@ -290,17 +277,6 @@ class Harness:
     def _build_permission_prompt(self, tool_name: str, args: dict) -> str:
         """Build a human-readable permission prompt for a tool call."""
         return PermissionGate.build_prompt(tool_name, args)
-
-    def _request_user_confirmation(self, command: str) -> bool:
-        """
-        Synchronous callback used by the security checker.
-
-        Since we handle permissions asynchronously via ToolWaitInput chunks,
-        we return True here to pass the security check, and handle the actual
-        user confirmation in the async tool execution flow.
-        """
-        return True
-
 
     def get_state(self) -> AgentState:
         return self.state

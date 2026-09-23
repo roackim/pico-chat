@@ -96,22 +96,10 @@ def test_harness_stop_tool_kills_run(tmp_path):
     """Harness.stop_tool() terminates the active command."""
     import asyncio
     from pico_chat.harness.harness import Harness
-    from pico_chat.harness.tools import MinimalToolset, ShellTool
-    from pico_chat.harness.permissions import (
-        ToolPermissionsProfile, FilePermissions, RunPermissions,
-    )
-
-    perms = ToolPermissionsProfile(
-        name="test",
-        read=FilePermissions("allow", "allow"),
-        write=FilePermissions("allow", "allow"),
-        patch=FilePermissions("allow", "allow"),
-        run=RunPermissions(allow=set(), ask=set(), deny=set(),
-                           others="allow", chain_policy="ask"),
-    )
+    from pico_chat.harness.tools import MinimalToolset
 
     h = Harness.__new__(Harness)
-    ts = MinimalToolset(tmp_path, permissions=perms)
+    ts = MinimalToolset(tmp_path)
     run_tool = _StubRunTool(ts)
     h.tools_map = {"run_command": run_tool, "run": run_tool}
 
@@ -134,7 +122,7 @@ def test_run_tool_schema_name_is_run():
     import tempfile, os
 
     tmp = tempfile.mkdtemp()
-    tool = RunTool(MinimalToolset(tmp, permissions=None))
+    tool = RunTool(MinimalToolset(tmp))
     assert tool.get_schema()["function"]["name"] == "run"
 
 

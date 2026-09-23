@@ -15,13 +15,6 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from pico_chat.harness.patch_parser import parse_patch, apply_patch, PatchParseError
-from pico_chat.harness.permissions import (
-    SecurityChecker,
-    ToolPermissionsProfile,
-    file_permission,
-    resolve_run_permissions,
-    permissions as default_permissions,
-)
 
 
 class ToolError(Exception):
@@ -35,59 +28,30 @@ class FileTools:
     MAX_PATCH_REPLACEMENT_CHARS = 100_000
     MAX_PATCH_LINE_DELTA = 500
     
-    def __init__(
-        self,
-        workspace_path: str | Path,
-        permissions: Optional[ToolPermissionsProfile] = None
-    ):
+    def __init__(self, workspace_path: str | Path):
         """
         Args:
             workspace_path: Root directory for file operations
-            permissions: Tool permissions profile (uses default if not provided)
         """
         self.workspace = Path(workspace_path).resolve()
-        self.permissions = permissions or default_permissions
-    
-    def _is_inside_repo(self, target: Path) -> bool:
-        """
-        Check if a path is inside the workspace/repo.
-        
-        Args:
-            target: Resolved absolute path
-            
-        Returns:
-            True if path is inside workspace, False otherwise
-        """
-        try:
-            target.relative_to(self.workspace)
-            return True
-        except ValueError:
-            return False
-    
-    def _validate_path(self, path: str) -> tuple[Path, bool]:
+
+    def _validate_path(self, path: str) -> Path:
         """
         Validate and resolve path.
-        
+
         Args:
             path: File path (relative to workspace or absolute)
-            
+
         Returns:
-            Tuple of (absolute resolved path, is_inside_repo)
-            
+            Absolute resolved path
+
         Raises:
             ToolError: If path is invalid
         """
         try:
-            # Convert to Path and resolve
             if Path(path).is_absolute():
-                target = Path(path).resolve()
-            else:
-                target = (self.workspace / path).resolve()
-            
-            # Check if inside repo
-            is_inside = self._is_inside_repo(target)
-            
-            return target, is_inside
+                return Path(path).resolve()
+            return (self.workspace / path).resolve()
         except Exception as e:
             raise ToolError(f"Invalid path '{path}': {e}")
     
@@ -126,15 +90,8 @@ class FileTools:
                 expectation = "a non-negative integer" if name == "offset" else "a positive integer"
                 raise ToolError(f"Invalid {name}: expected {expectation}")
 
-        target, is_inside = self._validate_path(path)
-        
-        # Check permissions
-        permission = file_permission(self.permissions, "read", is_inside)
-        if permission == "deny":
-            location = "inside repo" if is_inside else "outside repo"
-            raise ToolError(f"Permission denied: read {location} is not allowed")
-        # Note: "ask" permission is handled by harness before calling tool
-        
+        target = self._validate_path(path)
+
         if not target.exists():
             raise ToolError(f"File not found: {path}")
         
@@ -181,15 +138,8 @@ class FileTools:
             >>> tools.write("script.py", "print('hello')")
             '[OK] Wrote 14 bytes to script.py'
         """
-        target, is_inside = self._validate_path(path)
-        
-        # Check permissions
-        permission = file_permission(self.permissions, "write", is_inside)
-        if permission == "deny":
-            location = "inside repo" if is_inside else "outside repo"
-            raise ToolError(f"Permission denied: write {location} is not allowed")
-        # Note: "ask" permission is handled by harness before calling tool
-        
+        target = self._validate_path(path)
+
         # Create parent directories if needed
         target.parent.mkdir(parents=True, exist_ok=True)
         
@@ -274,20 +224,12 @@ class FileTools:
                 f"Patch rejected: line delta too large ({line_delta} lines > {self.MAX_PATCH_LINE_DELTA})"
             )
         
-        # Check permissions before reading
-        target, is_inside = self._validate_path(patch.filename)
-        permission = file_permission(self.permissions, "patch", is_inside)
-        if permission == "deny":
-            location = "inside repo" if is_inside else "outside repo"
-            raise ToolError(f"Permission denied: patch {location} is not allowed")
-        # Note: "ask" permission is handled by harness before calling tool
-        
         # Read current file
         try:
             current_content = self.read(patch.filename)
         except ToolError as e:
             raise ToolError(f"Cannot read file for patching: {e}")
-        
+
         # Apply patch
         new_content, message = apply_patch(current_content, patch)
         
@@ -299,35 +241,15 @@ class FileTools:
 
 
 class ShellTool:
-    """Execute shell commands with security checks"""
+    """Execute shell commands in the workspace."""
     
-    def __init__(
-        self,
-        workspace_path: str | Path,
-        security_checker: Optional[SecurityChecker] = None,
-        permissions: Optional[ToolPermissionsProfile] = None,
-        confirmation_callback: Optional[Callable[[str], bool]] = None
-    ):
+    def __init__(self, workspace_path: str | Path):
         """
         Args:
             workspace_path: Working directory for command execution
-            security_checker: Security checker for command validation (deprecated, will be created from permissions)
-            permissions: Tool permissions profile (uses default if not provided)
-            confirmation_callback: Callback for user confirmation
         """
         self.workspace = Path(workspace_path).resolve()
-        self.permissions = permissions or default_permissions
-        self.run_permissions = resolve_run_permissions(self.permissions)
 
-        # Create security checker with permissions if not provided
-        if security_checker:
-            self.security_checker = security_checker
-        else:
-            self.security_checker = SecurityChecker(
-                permissions=self.run_permissions,
-                confirmation_callback=confirmation_callback
-            )
-        
         # Handle to the currently-running command (for stop/cancellation).
         self._active_proc: Optional["asyncio.subprocess.Process"] = None
 
@@ -349,11 +271,6 @@ class ShellTool:
             >>> tool.run("ls -la")
             '[stdout]\\nfile.txt\\n[exit:0 | 0.1ms]'
         """
-        # Security check (now handles all permission logic)
-        allowed, message = self.security_checker.check_chain(command)
-        if not allowed:
-            raise ToolError(message)
-
         # Execute command
         try:
             result = subprocess.run(
@@ -392,10 +309,6 @@ class ShellTool:
         mid-flight. Returns the same formatted output as :meth:`run`.
         """
         import asyncio
-
-        allowed, message = self.security_checker.check_chain(command)
-        if not allowed:
-            raise ToolError(message)
 
         try:
             proc = await asyncio.create_subprocess_shell(
@@ -468,29 +381,15 @@ class MinimalToolset:
     Provides read, write, patch, and run tools with configurable permissions.
     """
     
-    def __init__(
-        self,
-        workspace_path: str | Path,
-        confirmation_callback: Optional[Callable[[str], bool]] = None,
-        permissions: Optional[ToolPermissionsProfile] = None
-    ):
+    def __init__(self, workspace_path: str | Path):
         """
         Args:
             workspace_path: Root directory for all operations
-            confirmation_callback: Function to prompt user for command confirmation
-            permissions: Tool permissions profile (uses default if not provided)
         """
         workspace = Path(workspace_path).resolve()
-        perms = permissions or default_permissions
-        
-        self.file_tools = FileTools(workspace, permissions=perms)
-        self.shell_tool = ShellTool(
-            workspace,
-            permissions=perms,
-            confirmation_callback=confirmation_callback
-        )
-        
-        self.permissions = perms
+
+        self.file_tools = FileTools(workspace)
+        self.shell_tool = ShellTool(workspace)
     
     def read(
         self,
@@ -545,28 +444,17 @@ class MinimalToolset:
 # Tool registry
 #
 # Each tool is declared once with the ``@tool`` decorator, which carries its
-# name, LLM-facing schema, permission policy and handler.  ``create_toolset``
-# binds those definitions to a :class:`ToolContext` and returns the
-# harness-facing objects.  There is no separate wrapper module anymore.
+# name, LLM-facing schema and handler.  ``create_toolset`` binds those
+# definitions to a :class:`ToolContext` and returns the harness-facing objects.
 # ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class ToolPolicySpec:
-    """Policy metadata owned by a registered tool."""
-
-    profile_kind: str = "simple"
-    default_permission: str = "ask"
-    default_settings: dict[str, Any] = field(default_factory=dict)
-
 
 @dataclass
 class ToolDefinition:
-    """A registered tool: schema, policy metadata and handler(s)."""
+    """A registered tool: schema and handler(s)."""
 
     name: str
     description: str
     parameters: dict
-    policy: ToolPolicySpec
     handler: Callable[["ToolContext", Any], Any]
     async_handler: Optional[Callable[["ToolContext", Any], Any]] = None
     is_blocking: bool = False
@@ -591,14 +479,13 @@ def tool(
     name: str,
     description: str,
     parameters: dict,
-    policy: Optional[ToolPolicySpec] = None,
     async_handler: Optional[Callable] = None,
     is_blocking: bool = False,
     include: Optional[Callable[[ToolContext], bool]] = None,
     key: Optional[str] = None,
 ):
     """Register a tool definition.  One decorator per tool — the single
-    definition site for its name, schema, permission and settings.
+    definition site for its name and schema.
 
     ``key`` lets the registry key differ from the LLM-facing ``name`` (e.g.
     the ``run`` tool is registered as ``run_command``).
@@ -609,7 +496,6 @@ def tool(
             name=name,
             description=description,
             parameters=parameters,
-            policy=policy or ToolPolicySpec(),
             handler=handler,
             async_handler=async_handler,
             is_blocking=is_blocking,
@@ -630,7 +516,6 @@ class RegisteredTool:
         self.description = definition.description
         self.parameters = definition.parameters
         self.is_blocking = definition.is_blocking
-        self.policy_spec = definition.policy
         self.toolset = context.toolset
 
     @property
@@ -682,9 +567,9 @@ def _build_tool(name: str, context: ToolContext) -> RegisteredTool:
     return _SyncTool(definition, context)
 
 
-def registered_tool_specs() -> dict[str, ToolPolicySpec]:
-    """Return policy metadata for every registered tool."""
-    return {name: definition.policy for name, definition in _REGISTRY.items()}
+def registered_tool_names() -> list[str]:
+    """Return every registered tool name (the key the role file uses)."""
+    return list(_REGISTRY.keys())
 
 
 # --- Tool handlers ---------------------------------------------------------
@@ -726,7 +611,6 @@ def registered_tool_specs() -> dict[str, ToolPolicySpec]:
         },
         "required": ["path"],
     },
-    policy=ToolPolicySpec("file", "allow", {"outside_repo": "deny"}),
 )
 def _read_tool(
     ctx: ToolContext,
@@ -759,7 +643,6 @@ def _read_tool(
         },
         "required": ["path", "content"],
     },
-    policy=ToolPolicySpec("file", "allow", {"outside_repo": "deny"}),
 )
 def _write_tool(ctx: ToolContext, path: str, content: str) -> str:
     try:
@@ -791,7 +674,6 @@ def _write_tool(ctx: ToolContext, path: str, content: str) -> str:
         },
         "required": ["path", "search", "replace"],
     },
-    policy=ToolPolicySpec("file", "allow", {"outside_repo": "deny"}),
 )
 def _patch_tool(
     ctx: ToolContext,
@@ -817,9 +699,7 @@ async def _run_tool_async(ctx: ToolContext, command: str) -> str:
     name="run",
     description=(
         "Execute a shell command in the workspace. "
-        "Supports pipes (|), command chaining (&&, ||, ;). "
-        "Safe commands are auto-allowed. Some commands require user confirmation. "
-        "Blocked commands will be rejected."
+        "Supports pipes (|), command chaining (&&, ||, ;)."
     ),
     parameters={
         "type": "object",
@@ -831,11 +711,6 @@ async def _run_tool_async(ctx: ToolContext, command: str) -> str:
         },
         "required": ["command"],
     },
-    policy=ToolPolicySpec(
-        "run",
-        "deny",
-        {"others": "deny", "chain_policy": "ask"},
-    ),
     async_handler=_run_tool_async,
     key="run_command",
 )
@@ -921,7 +796,6 @@ def _subagent_available(ctx: ToolContext) -> bool:
         },
         "required": ["task"],
     },
-    policy=ToolPolicySpec("simple", "ask"),
     include=_subagent_available,
 )
 async def _subagent_tool(ctx: ToolContext, task: str, background: bool = False) -> str:
@@ -946,7 +820,6 @@ async def _subagent_tool(ctx: ToolContext, task: str, background: bool = False) 
         "Call this after launching subagents with background=true."
     ),
     parameters={"type": "object", "properties": {}, "required": []},
-    policy=ToolPolicySpec("simple", "ask"),
 )
 async def _wait_for_subagents_tool(ctx: ToolContext) -> str:
     if not ctx.pending_subagents:
@@ -992,25 +865,21 @@ def WaitForSubagentsTool(pending_subagents: Optional[list] = None) -> Registered
 
 def create_toolset(
     workspace_path: str | Path,
-    confirmation_callback: Optional[Callable[[str], bool]] = None,
-    permissions=None,
     depth: int = 0,
     pending_subagents: Optional[list] = None,
 ) -> dict[str, RegisteredTool]:
     """
-    Create the registered toolset with harness-compatible wrappers.
+    Create the registered toolset.
 
     Args:
         workspace_path: Root directory for all operations
-        confirmation_callback: Function to prompt user for command confirmation
-        permissions: Role or ToolPermissionsProfile to use (defaults to global)
         depth: Current subagent depth (0 = top-level harness)
         pending_subagents: Shared list for background subagent tracking
 
     Returns:
         Dict of tool name to registered tool
     """
-    toolset = MinimalToolset(workspace_path, confirmation_callback, permissions=permissions)
+    toolset = MinimalToolset(workspace_path)
 
     context = ToolContext(
         toolset=toolset,
@@ -1031,11 +900,10 @@ __all__ = [
     "FileTools",
     "ShellTool",
     "MinimalToolset",
-    "ToolPolicySpec",
     "ToolContext",
     "RegisteredTool",
     "tool",
-    "registered_tool_specs",
+    "registered_tool_names",
     "create_toolset",
     "RunTool",
     "SubagentTool",

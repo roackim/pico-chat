@@ -106,5 +106,12 @@ def server_name_completions() -> List[str]:
 
 
 def config_section_completions() -> List[str]:
-    """Return the editable config sections (for ``/config <section>``)."""
-    return list(pico_cfg.CONFIG_FILES)
+    """Return the editable config targets (for ``/config <section>``)."""
+    return [*pico_cfg.CONFIG_FILES, "role"]
+
+
+def role_name_completions() -> List[str]:
+    """Return the available role names (for ``/role <name>``)."""
+    from pico_chat.harness import roles
+
+    return roles.list_roles()
