@@ -26,7 +26,7 @@ def main():
     # Apply theme from config
     from pico_chat.ui.tui.colors import set_theme
     from pico_chat import pico_cfg
-    set_theme(pico_cfg.config.ui_theme)
+    set_theme(pico_cfg.config.get_active_theme())
 
     tui = chatTUI(harness)
     try:

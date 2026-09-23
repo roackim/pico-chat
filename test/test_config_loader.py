@@ -149,6 +149,42 @@ def test_ensure_files_write_templates(tmp_path):
     assert (tmp_path / "ui.toml").exists()
 
 
+def test_themes_parse_and_active_theme_is_state(tmp_path):
+    _write(tmp_path / "themes.toml", {
+        "themes": {"mine": {"USER": "#ABCDEF", "MUTED": {"ansi": 90}}},
+    })
+    state = _write(tmp_path / "state.toml", {"active_theme": "mine"})
+
+    config = Config(config_dir=tmp_path, state_path=state)
+
+    assert config.load_errors == []
+    assert config.themes["mine"]["USER"] == "#ABCDEF"
+    assert config.themes["mine"]["MUTED"] == {"ansi": 90}
+    assert config.active_theme == "mine"
+    assert config.get_active_theme() == "mine"
+
+
+def test_invalid_theme_values_are_reported(tmp_path):
+    _write(tmp_path / "themes.toml", {
+        "themes": {"bad": {"USER": "notacolor", "BOGUS": "#000000"}},
+    })
+
+    config = Config(config_dir=tmp_path, state_path=tmp_path / "state.toml")
+
+    joined = "\n".join(config.load_errors)
+    assert "[themes.bad].USER must be a" in joined
+    assert "unknown color 'BOGUS'" in joined
+    assert "USER" not in config.themes.get("bad", {})
+
+
+def test_active_theme_falls_back_to_ui_setting(tmp_path):
+    _write(tmp_path / "ui.toml", {"theme": "pastel"})
+    config = Config(config_dir=tmp_path, state_path=tmp_path / "state.toml")
+
+    assert config.active_theme is None
+    assert config.get_active_theme() == "pastel"
+
+
 def test_reload_picks_up_edits(tmp_path):
     _write(tmp_path / "ui.toml", {"theme": "pastel"})
     config = Config(config_dir=tmp_path, state_path=tmp_path / "state.toml")

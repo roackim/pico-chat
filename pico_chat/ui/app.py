@@ -205,6 +205,49 @@ class chatTUI(ChatActionHandlers):
         """Refresh local status fields (see ``ui/status_presenter.py``)."""
         refresh_status_bar(self)
 
+    def refresh_theme(self) -> None:
+        """Re-apply the active theme everywhere and force a full repaint.
+
+        Colors are resolved when components are built, so a theme switch must
+        re-resolve the chrome and every existing message, then ask the
+        compositor to repaint every cell (cached frame content is stale).
+        """
+        self.input_component.frame_color = theme.USER
+        self.input_component.bg = theme.get_bg()
+        self.input_box.fg = theme.USER
+        self.input_box.bg = theme.get_bg()
+
+        self.debug_panel.frame_color = theme.ERROR
+        self.debug_panel.content_color = theme.MUTED
+        self.debug_panel.fg = theme.MUTED
+        self.debug_panel.bg = theme.get_bg()
+
+        self.activity_panel.frame_color = theme.WARNING
+        self.activity_panel.content_color = theme.MUTED
+        self.activity_panel.fg = theme.MUTED
+        self.activity_panel.bg = theme.get_bg()
+
+        self.chat_history_panel.fg = theme.DEFAULT
+        self.chat_history_panel.bg = theme.get_bg()
+
+        self.status_bar.style = BarStyle(theme.DEFAULT, theme.get_bg(), theme.FOCUSED, padding=1)
+        self.action_bar.style = BarStyle(theme.MUTED, theme.get_bg(), theme.MUTED, padding=1)
+
+        # Modals/overlays cache their colors at construction too.
+        self.input_component.refresh_theme()
+        self.popup.refresh_theme()
+        self.debug_popup.refresh_theme()
+        self.activity_popup.refresh_theme()
+
+        self.chat_history_panel.refresh_theme()
+
+        # Field values/colors (e.g. the server:model tint) are computed from
+        # ``theme`` by the presenter, so re-run it to recolor them.
+        refresh_status_bar(self)
+
+        if self.compositor is not None:
+            self.compositor.request_full_redraw()
+
     def _emergency_cleanup(self):
         """Emergency cleanup handler called by atexit."""
         terminal = getattr(self.compositor, "terminal", None)
@@ -431,11 +474,13 @@ class chatTUI(ChatActionHandlers):
         self.modal_host.present_screen(self.popup_screen)
 
     def show_search_modal(self, title, items, descriptions=None, footers=None,
-                          on_accept=None, on_cancel=None, initial_index=0):
+                          on_accept=None, on_cancel=None, on_highlight=None,
+                          initial_index=0):
         """Present a centered, type-to-filter selection overlay.
 
-        Returns the modal (so callers can ``refresh`` it) or None when there is
-        no compositor (headless).
+        ``on_highlight`` fires with the selected item whenever the highlight
+        moves (preview hook). Returns the modal (so callers can ``refresh`` it)
+        or None when there is no compositor (headless).
         """
         from pico_chat.ui.tui.components.search_modal import SearchModal
 
@@ -448,7 +493,7 @@ class chatTUI(ChatActionHandlers):
         modal.anchor = lambda: self.input_component.place_menu_above_input(modal)
         modal.open(items, descriptions=descriptions, footers=footers,
                    on_accept=on_accept, on_cancel=on_cancel,
-                   initial_index=initial_index)
+                   on_highlight=on_highlight, initial_index=initial_index)
         return modal
 
     def on_user_submit(self, text: str):
@@ -468,7 +513,7 @@ class chatTUI(ChatActionHandlers):
 
         if self.pending_permission_prompt:
             self.chat_history_panel.add_message(
-                "Permission required for pending tool call. Use [a] allow or [x] deny first. Commands like /status are still available.",
+                "Permission required for pending tool call. Use [a] allow or [x] deny first. Slash commands are still available.",
                 msg_type=SysMsg()
             )
             return

@@ -29,10 +29,10 @@ class TestPermissionPendingSubmit:
         ui = chatTUI(StubAgent())
         ui.pending_permission_prompt = "Allow reading file: secret.txt?"
 
-        ui.on_user_submit("/status")
+        ui.on_user_submit("/help")
 
         assert ui.command_queue.qsize() == 1
-        assert ui.command_queue.get_nowait() == "/status"
+        assert ui.command_queue.get_nowait() == "/help"
         assert ui.message_queue.qsize() == 0
 
 
@@ -45,8 +45,8 @@ class TestCommandMenuNavigation:
         ui.chat_history_panel.add_message("first")
         ui.chat_history_panel.add_message("second")
         ui.input_component.set_focused(True)
-        ui.input_component.buffer.text = "/s"
-        ui.input_component.buffer.cursor_pos = len("/s")
+        ui.input_component.buffer.text = "/c"
+        ui.input_component.buffer.cursor_pos = len("/c")
         ui.input_component._on_text_changed()
         ui._last_focus_id = "input"
 
@@ -73,10 +73,10 @@ class TestCommandWorker:
             ui.shutdown_event.set()
 
         monkeypatch.setattr(app_module, "handle_command", fake_handle_command)
-        ui.on_command_submit("/status")
+        ui.on_command_submit("/help")
         asyncio.run(ui.command_worker())
 
-        assert dispatched == ["/status"]
+        assert dispatched == ["/help"]
 
 
 class TestPendingPermissionPromptClearing:

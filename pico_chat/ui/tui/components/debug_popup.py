@@ -37,6 +37,12 @@ class DebugPopup(Component):
     
     def set_compositor(self, compositor):
         self.compositor = compositor
+
+    def refresh_theme(self) -> None:
+        """Re-resolve theme-derived colors after a theme switch."""
+        self._box.fg = self.debug_panel.frame_color
+        self._box.bg = theme.get_bg()
+        self._box.mark_changed()
     
     def _update_compositor_registration(self):
         if not self.compositor:

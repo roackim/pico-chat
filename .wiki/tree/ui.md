@@ -48,25 +48,24 @@ Slash command system. Leaf commands are plain `async def` handlers wrapped in
 | File | Purpose |
 |------|---------|
 | `registry.py` | The single `COMMANDS` assembly point; `handle_command`, description/completion helpers |
-| `base.py` | `Command`, `Param`, `ChatUIProtocol`, `config_section_completions`, `role_name_completions` |
-| `core.py` | Core commands: help, clear, reload, config, edit, compact, exit, stop, status, activity, cd, pwd |
+| `base.py` | `Command`, `Param`, `ChatUIProtocol`, completion helpers (`config_section_completions`, `role_*`) |
+| `core.py` | Core commands: help, clear, reload, config, edit, compact, exit, stop, activity |
 | `conversation.py` | `/import`, `/export` |
 | `models.py` | `/model` leaf (picker or direct selection) |
-| `server.py` | `ServerCommand` subcommand tree |
-| `debug.py` | `DebugCommand` subcommand tree |
-| `openrouter.py` | `OpenRouterCommand` subcommand tree |
 | `roles.py` | `/role` — list roles or switch the active one |
+| `themes.py` | `/theme` — picker or direct color-theme selection |
 
 Registered commands: `help`, `clear`, `reload`, `config`, `edit`, `export`,
-`import`, `compact`, `exit`, `stop`, `status`, `activity`, `server`, `model`,
-`role`, `debug`, `openrouter`, `cd`, `pwd`.
+`import`, `compact`, `exit`, `stop`, `activity`, `model`, `role`, `theme`.
 
-- `/config <section>` opens a section file in `$EDITOR` and reloads.
+- `/config <section>` opens a section file in `$EDITOR` and reloads (sections:
+  `ui`, `context`, `subagents`, `debug`, `styles`, `servers`, `theme`).
   `/config role <name>` creates/opens `roles/<name>.toml`;
   `/config role delete <name> confirm` removes it (`_config_role` in `core.py`).
 - Domain modules import **only** `base`; `registry.py` is the assembler
   (enforced by `test/test_command_import_graph.py`).
-- See [notes/tools-and-permissions.md](../notes/tools-and-permissions.md) for the role model.
+- See [notes/tools-and-permissions.md](../notes/tools-and-permissions.md) for the role model and
+  [notes/config.md](../notes/config.md) for themes.
 
 ---
 

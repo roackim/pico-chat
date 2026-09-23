@@ -116,7 +116,7 @@ Fix: `get_context_window()` now caches the **fallback** value (`max_context` or
 and later messages use the cached default. (The message-build path no longer
 fetches the context window at all — the system prompt is the role's `prompt`.)
 
-## Connection diagnostics — `/server diagnose`
+## Connection diagnostics
 
 `check_connection()` historically swallowed the real error and returned a bare
 bool, hiding *why* a connect failed. Now:
@@ -124,5 +124,5 @@ bool, hiding *why* a connect failed. Now:
 - `Endpoint.diagnose_connection()` → `ConnectionDiagnosis` — returns the
   underlying exception, the resolved URL (vs original), and builds a hint-rich
   report mentioning active proxy env vars and DNS resolution.
-- UI: `/server diagnose <name>` prints the report. Run it when a server that
-  `curl`/`ping` can reach is unreachable from pico.
+- There is no `/server diagnose` command (the `/server` command was removed);
+  server configuration is edited via `/config servers`.

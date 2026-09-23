@@ -180,6 +180,38 @@ class Message:
         self.box.fg = color
         self.box.mark_changed()  # Color changed
 
+    def refresh_theme(self) -> None:
+        """Re-resolve this message's colors from the active theme.
+
+        Called on a theme switch so already-rendered messages repaint with the
+        new palette (colors are resolved at construction, not render time).
+        """
+        if self.is_queued:
+            frame_color = theme.MUTED
+            content_color = theme.MUTED
+        else:
+            frame_color = getattr(theme, self.type.frame_color, theme.DEFAULT)
+            content_color = None
+            if self.type.content_color:
+                content_color = getattr(theme, self.type.content_color, None)
+
+        self.frame_color = frame_color
+        if hasattr(self.component, "fg"):
+            self.component.fg = content_color
+        if hasattr(self.component, "bg"):
+            self.component.bg = theme.get_bg()
+
+        gutter_color = getattr(self.type, "gutter_color", None)
+        if gutter_color is None:
+            gutter_color = frame_color
+        elif isinstance(gutter_color, str):
+            gutter_color = getattr(theme, gutter_color, frame_color)
+
+        self.box.fg = frame_color
+        self.box.bg = theme.get_bg()
+        self.box.gutter_color = gutter_color
+        self.box.mark_changed()
+
 
     def _is_markdown(self) -> bool:
         """Check if this message uses markdown rendering."""

@@ -114,9 +114,16 @@ class Completer:
         their menu in isolation — see ``.wiki/notes/ui.md``
         ("Completion menu styling").
         """
+        apply_theme = getattr(self.menu, "apply_theme", None)
+        if callable(apply_theme):
+            apply_theme()
         self.menu.set_fill_width(True)
         self.menu.frame_color = theme.USER
         self.menu.content_color = theme.DEFAULT
+
+    def refresh_theme(self) -> None:
+        """Re-apply the shared selector style after a theme switch."""
+        self._apply_selector_style()
 
 
 # ---------------------------------------------------------------------------

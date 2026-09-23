@@ -11,9 +11,8 @@ commands that own a subcommand tree.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import List
 
-from pico_chat.ui.tui.colors import theme
 from pico_chat.ui.tui.msg_types import SysMsg, SysMsgError, SysMsgWarning
 
 from .base import (
@@ -50,19 +49,27 @@ async def cmd_clear(ui: ChatUIProtocol, args: List[str]):
         ui.refresh_status_bar()
 
 
+def _apply_theme(ui=None) -> None:
+    """Apply the effective theme after a config reload (best effort)."""
+    from pico_chat import pico_cfg
+    from pico_chat.ui.tui.colors import set_theme
+
+    try:
+        set_theme(pico_cfg.config.get_active_theme())
+        refresh = getattr(ui, "refresh_theme", None)
+        if callable(refresh):
+            refresh()
+    except Exception:  # pragma: no cover - theme application is best effort
+        logger.warning("Failed to apply theme after reload", exc_info=True)
+
+
 async def cmd_reload(ui: ChatUIProtocol, args: List[str]):
     """Reload hand-edited configuration from disk (explicit, no watcher)."""
     from pico_chat import pico_cfg
     from pico_chat.harness import roles
 
     errors = pico_cfg.reload_config() + roles.validate_roles()
-
-    try:
-        from pico_chat.ui.tui.colors import set_theme
-
-        set_theme(pico_cfg.config.ui_theme)
-    except Exception:  # pragma: no cover - theme application is best effort
-        logger.warning("Failed to apply theme after reload", exc_info=True)
+    _apply_theme(ui)
 
     if errors:
         ui.chat_history_panel.add_message(
@@ -107,6 +114,7 @@ async def cmd_config(ui: ChatUIProtocol, args: List[str]):
     path = pico_cfg.config.ensure_section_file(section)
     open_editor(ui, path)
     errors = pico_cfg.reload_config()
+    _apply_theme(ui)
     if errors:
         ui.chat_history_panel.add_message(
             "Config reloaded with errors:\n" + "\n".join(errors),
@@ -278,80 +286,7 @@ async def cmd_activity(ui: ChatUIProtocol, args: List[str]):
             "Activity overlay not supported by this UI.", msg_type=SysMsg())
 
 
-async def cmd_status(ui: ChatUIProtocol, args: List[str]):
-    # Show placeholder popup while checking status
-    ui.show_popup("status", "Checking server status...")
-
-    # Get actual status (may take time if server is unreachable)
-    status = await ui.agent.get_status()
-
-    # Update popup with actual status
-    ui.show_popup("status", format_status(status))
-
-    logger.info("Server status online: %s", status["online"])
-
-
-def format_status(status: Dict[str, Any]) -> str:
-    status_color = theme.SUCCESS if status["online"] else theme.ERROR
-    status_text = "online" if status["online"] else "offline"
-
-    color = str(theme.WARNING)
-    reset = theme.reset()
-    msg = color + f"Server           : {reset}{status['server_name']} ({status['server_type']})\n"
-    msg += color + f"URL              : {reset}{status['base_url']}\n"
-    msg += color + f"Status           : {reset}{status_color}{status_text}{reset}\n"
-
-    if status_text == "online":
-        msg += color + f"Model            : {reset}{status['model']}\n"
-        msg += color + f"Context Window   : {reset}{status['context_window']}\n"
-
-        # Add context pressure info if available
-        if status.get('context_used') is not None and status.get('context_max') is not None:
-            used = status['context_used']
-            max_tokens = status['context_max']
-            percentage = status.get('context_percentage', 0.0)
-
-            # Color code the percentage based on pressure
-            if percentage < 50:
-                pressure_color = theme.SUCCESS
-            elif percentage < 75:
-                pressure_color = theme.WARNING
-            else:
-                pressure_color = theme.ERROR
-
-            msg += color + f"Context Usage    : {reset}{used:,} / {max_tokens:,} tokens "
-            msg += f"({pressure_color}{percentage:.1f}%{reset})\n"
-
-    return msg
-
-
-async def cmd_pwd(ui: ChatUIProtocol, args: List[str]):
-    workspace = ui.agent.workspace if hasattr(ui.agent, 'workspace') else "unknown"
-    ui.chat_history_panel.add_message(workspace, msg_type=SysMsg(), title="pwd")
-
-
-async def cmd_cd(ui: ChatUIProtocol, args: List[str]):
-    if not args:
-        ui.chat_history_panel.add_message("Usage: /cd <path>", msg_type=SysMsgError())
-        return
-
-    path = " ".join(args)
-
-    try:
-        warnings = ui.agent.switch_workspace(path)
-        workspace = ui.agent.workspace
-
-        ui.chat_history_panel.add_message(workspace, msg_type=SysMsg(), title="cd")
-
-        for warning in warnings:
-            ui.chat_history_panel.add_message(warning, msg_type=SysMsgWarning())
-
-    except (ValueError, OSError, PermissionError) as e:
-        ui.chat_history_panel.add_message(str(e), msg_type=SysMsgError())
-
-
 __all__ = [
     "cmd_help", "cmd_clear", "cmd_reload", "cmd_config", "cmd_edit",
-    "cmd_compact", "cmd_exit", "cmd_stop", "cmd_activity", "cmd_status",
-    "cmd_pwd", "cmd_cd", "format_status", "ConfigCommand",
+    "cmd_compact", "cmd_exit", "cmd_stop", "cmd_activity", "ConfigCommand",
 ]

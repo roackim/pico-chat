@@ -1,7 +1,7 @@
 """Command package public API.
 
-Handler functions live in per-domain modules (``core``, ``server``, ``models``,
-``roles``, ``debug``, ``conversation``, ``openrouter``). The registry in
+Handler functions live in per-domain modules (``core``, ``models``, ``roles``,
+``themes``, ``conversation``). The registry in
 :mod:`pico_chat.ui.commands.registry` assembles them; this module is the public
 import path.
 """

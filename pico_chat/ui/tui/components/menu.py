@@ -67,6 +67,15 @@ class SelectionMenu(Component):
             self.fill_width = fill_width
             self.mark_changed()
 
+    def apply_theme(self) -> None:
+        """Re-resolve theme-derived colors after a theme switch."""
+        self.frame_color = theme.DEFAULT
+        self.content_color = self.frame_color
+        self.highlight_color = theme.USER
+        self.footer_color = theme.SUCCESS
+        self.bg = theme.get_bg()
+        self.mark_changed()
+
     def set_compositor(self, compositor):
         """Set compositor for auto-registration when menu is shown/hidden."""
         self.compositor = compositor

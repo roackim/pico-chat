@@ -74,6 +74,16 @@ class Popup(Component):
     def set_compositor(self, compositor):
         """Set compositor for auto-registration when popup is shown/hidden."""
         self.compositor = compositor
+
+    def refresh_theme(self) -> None:
+        """Re-resolve theme-derived colors after a theme switch."""
+        self.frame_color = theme.DEFAULT
+        self.content_color = self.frame_color
+        self._text.fg = self.content_color
+        self._text.bg = theme.get_bg()
+        self._box.fg = self.frame_color
+        self._box.bg = theme.get_bg()
+        self._box.mark_changed()
     
     def _update_compositor_registration(self):
         """Auto-register/unregister with compositor based on visibility."""

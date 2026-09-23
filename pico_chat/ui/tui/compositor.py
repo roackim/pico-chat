@@ -90,6 +90,15 @@ class Compositor:
         self._render_requested = True
         self._wake_event.set()
 
+    def request_full_redraw(self):
+        """Discard cached frame content and repaint every component.
+
+        Use after a global visual change (e.g. a theme switch) so components
+        that cache their painted cells are re-rendered with the new colors.
+        """
+        self._full_redraw = True
+        self.request_render()
+
     def set_streaming_active(self, active: bool):
         """Mark whether high-frequency LLM streaming is in progress."""
         self.streaming_active = active

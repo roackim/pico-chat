@@ -1,39 +1,40 @@
 """Command registry: the single assembly point for all slash commands.
 
-Handlers live in per-domain modules (``core``, ``server``, ``models``,
-``roles``, ``debug``, ``conversation``, ``openrouter``). Those modules depend
-only on :mod:`pico_chat.ui.commands.base`; this module is the only place that
-knows about all of them, which keeps the import graph acyclic.
+Handlers live in per-domain modules (``core``, ``models``, ``roles``,
+``themes``, ``conversation``). Those modules depend only on
+:mod:`pico_chat.ui.commands.base`; this module is the only place that knows
+about all of them, which keeps the import graph acyclic.
 
-Most commands are plain handler functions with metadata. ``Command`` classes
-are reserved for commands that own a subcommand tree (server/debug/openrouter).
+Most commands are plain handler functions with metadata; only the ``config``
+command is a small ``Command`` subclass (for contextual role completions).
 """
 
 from __future__ import annotations
 
 from typing import Dict, List
 
-from .base import ChatUIProtocol, Command, Param, role_descriptions, role_name_completions
+from .base import (
+    ChatUIProtocol,
+    Command,
+    Param,
+    role_descriptions,
+    role_name_completions,
+)
 from .conversation import conversation_export, conversation_import, json_file_completions
 from .core import (
     ConfigCommand,
     cmd_activity,
-    cmd_cd,
     cmd_clear,
     cmd_compact,
     cmd_edit,
     cmd_exit,
     cmd_help,
-    cmd_pwd,
     cmd_reload,
-    cmd_status,
     cmd_stop,
 )
-from .debug import DebugCommand
 from .models import known_model_ids, model_command
-from .openrouter import OpenRouterCommand
 from .roles import cmd_role
-from .server import ServerCommand
+from .themes import theme_command
 
 # Help needs the whole registry, so its handler is assembled here.
 async def _help(ui: ChatUIProtocol, args: List[str]):
@@ -60,10 +61,8 @@ COMMANDS: Dict[str, Command] = {
                             handler=cmd_compact),
     "exit":         Command("exit", "Close the application", handler=cmd_exit),
     "stop":         Command("stop", "Stop current generation", handler=cmd_stop),
-    "status":       Command("status", "Show system and connection status", handler=cmd_status),
     "activity":     Command("activity", "Toggle the activity overlay (shell/status output)",
                             handler=cmd_activity),
-    "server":       ServerCommand(),
     "model":        Command("model", "Change the active model (opens a picker)",
                             handler=model_command,
                             params=[Param("MODEL", completions=known_model_ids)]),
@@ -71,11 +70,9 @@ COMMANDS: Dict[str, Command] = {
                             handler=cmd_role,
                             params=[Param("NAME", completions=role_name_completions,
                                           descriptions=role_descriptions)]),
-    "debug":        DebugCommand(),
-    "openrouter":   OpenRouterCommand(),
-    "cd":           Command("cd", "Change workspace directory and rebuild context",
-                            handler=cmd_cd, params=[Param("DIR", path=True)]),
-    "pwd":          Command("pwd", "Show current workspace directory", handler=cmd_pwd),
+    "theme":        Command("theme", "Select the color theme (opens a picker)",
+                            handler=theme_command,
+                            params=[Param("THEME", required=False)]),
 }
 
 

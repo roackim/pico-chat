@@ -15,8 +15,9 @@ project-local config** and no trust model.
 | `debug.toml` | debug logging | flat keys |
 | `styles.toml` | `[markdown_styles.*]` / `[syntax_highlight.*]` | tables |
 | `servers.toml` | one `[servers.<name>]` table per server | tables |
+| `themes.toml` | one `[themes.<name>]` palette per theme | tables |
 | `roles/<name>.toml` | one role per file; file name is the role name | role body |
-| `state.toml` | last server/model, discovery catalog | machine-written |
+| `state.toml` | last server/model, active theme, discovery catalog | machine-written |
 
 `state.toml` is disposable: deleting it only loses cached selections.
 `roles/` mirrors the same one-thing-per-file idea (see
@@ -33,7 +34,8 @@ are seeded by `roles.ensure_roles_dir()` on startup.
 instantiated once at module load as `config`. The split files map onto flat
 attributes via per-section specs (`_UI_SPEC`, `_CONTEXT_SPEC`,
 `_SUBAGENT_SPEC`, `_DEBUG_SPEC`); `styles.toml` and `servers.toml` are merged
-into the `markdown_styles` / `syntax_highlight_styles` / `servers` tables.
+into the `markdown_styles` / `syntax_highlight_styles` / `servers` tables, and
+`themes.toml` into `config.themes`.
 
 - `reload()` re-reads every section file plus `state.toml` and returns a list of
   validation errors. Invalid entries keep their defaults; valid ones still
@@ -48,21 +50,44 @@ into the `markdown_styles` / `syntax_highlight_styles` / `servers` tables.
 - **Intent** (hand-edited): the section files above. `save_server()` writes
   `servers.toml`; `remove_server()` deletes from it.
 - **State** (machine-written, disposable): `state.toml` holds `last_server`,
-  `active_model`, `[last_model]` (per-server selection) and `[model_catalog]`
-  (discovery cache). Written by `save_active_model` / `save_model_selection` /
-  `save_model_catalog`. The catalog is only a completion/offline cache — model
-  selection is live discovery.
+  `active_model`, `[last_model]` (per-server selection), `active_theme`, and
+  `[model_catalog]` (discovery cache). Written by `save_active_model` /
+  `save_model_selection` / `save_active_theme` / `save_model_catalog`. The
+  catalog is only a completion/offline cache — model selection is live
+  discovery.
 
 ## Editing
 
 - `/config <section>` opens the section file in `$VISUAL`/`$EDITOR` and reloads
   on exit; no argument lists the sections. `section` is one of `ui`, `context`,
-  `subagents`, `debug`, `styles`, `servers`.
-- `/edit <path>` opens any file. `/server edit` opens `servers.toml`.
+  `subagents`, `debug`, `styles`, `servers`, `theme`.
+- `/edit <path>` opens any file.
 - `/config role <name>` opens (creating if needed) `roles/<name>.toml`;
   `/config role delete <name> confirm` removes it.
+- `/theme` opens a picker; `/theme <name>` selects directly. The choice is
+  persisted in `state.toml` (`active_theme`), falling back to `ui.toml`'s
+  `theme` when unset.
 - The TUI suspends/resumes around the editor (`ui/external_editor.py`,
   `ui/tui/terminal.py`).
+
+## Themes
+
+A theme is a palette (`themes.toml`, `[themes.<name>]`) mapping the ten
+`_theme` fields (`BACKGROUND`, `DEFAULT`, `MUTED`, `ERROR`, `WARNING`,
+`SUCCESS`, `PERMISSION`, `USER`, `PICO`, `FOCUSED`) to either a `"#RRGGBB"`
+hex string or an ANSI table (`{ ansi = 90 }`, `{ ansi = 39, bg = 49 }`).
+Missing entries inherit the built-in base of the same name (or `terminal`).
+Built-ins are always available and are listed by `/theme` (or
+`colors.theme_names()`): `terminal` (default), `pastel`, `nord`, `dracula`,
+`gruvbox`, `solarized`, `one-dark`, `catppuccin`, `tokyo-night`, `rose-pine`,
+`everforest`, `monokai`, `ayu-dark`, `kanagawa`.
+`colors.available_themes()` merges them with the user definitions and
+`set_theme()` applies one in place. Markdown/syntax styles remain a separate
+global layer in `styles.toml`.
+
+The `/theme` picker previews a theme as the highlight moves (`on_highlight`),
+persists only on accept, and on cancel reloads the configured theme
+(`reload_config()` + re-apply).
 
 ## Roles
 
@@ -85,4 +110,6 @@ stored one file per role under `roles/<name>.toml`. `PermissionGate`
 `ui_status_bar_fields`, `ui_max_input_height` (input box caps + scrolls past
 this many wrapped lines), `target_fps`, and the rest of the `ui_*` attrs.
 
-**Styles:** `config.markdown_styles`, `config.syntax_highlight_styles`.
+**Styles / themes:** `config.markdown_styles`, `config.syntax_highlight_styles`;
+`config.themes`, `config.active_theme`, `config.get_active_theme()`,
+`config.save_active_theme(name)`.

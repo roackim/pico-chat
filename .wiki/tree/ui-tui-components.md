@@ -20,7 +20,8 @@ See [notes/ui.md](../notes/ui.md) for the component model overview.
 | `layout.py` | `EmptyLine`, `SeparatorLine` — spacing primitives |
 | `bars.py` | `BarStyle`, `StatusBar` (fields + transient `set_toast()`), `ActionBar` (actions, `set_hint`, `set_expanded`) |
 | `menu.py` | `SelectionMenu` — floating dropdown with fuzzy filtering, item descriptions/footers, `measure_width()`, `title`/`status_text` |
-| `search_modal.py` | `SearchModal(SelectionMenu)` — type-to-filter picker (used by `/model`), anchored above the input |
+| `search_modal.py` | `SearchModal(SelectionMenu)` — type-to-filter picker (used by `/model`, `/theme`), anchored above the input; fires `on_highlight` as the selection moves |
+| `theme_preview.py` | `ThemePreview` — top-center overlay showing the live palette as swatches while picking a theme |
 | `popup.py` | `Popup` + `PopupScreen` — centered overlay popup on `Box` + `TextComponent` |
 | `debug_panel.py` | `DebugLogPanel` — capped, auto-scrolling log display |
 | `debug_popup.py` | `DebugPopup` — compositor overlay for the debug console and activity surface |

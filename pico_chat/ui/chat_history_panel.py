@@ -813,6 +813,14 @@ class ChatHistoryPanel(TextComponent):
         self.selection.clear()
         self._request_repaint()
 
+    def refresh_theme(self) -> None:
+        """Re-resolve every message's colors after a theme switch."""
+        for message in self.messages:
+            refresh = getattr(message, "refresh_theme", None)
+            if callable(refresh):
+                refresh()
+        self._request_repaint()
+
     def restore_messages(self, messages: list) -> None:
         """Restore message objects and rebuild the panel's layout state."""
         self.messages = list(messages)

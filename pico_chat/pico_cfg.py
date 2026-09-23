@@ -10,8 +10,9 @@ Configuration is split into small, single-concern files under
 - ``debug.toml`` — debug logging (flat keys)
 - ``styles.toml`` — ``[markdown_styles.*]`` / ``[syntax_highlight.*]``
 - ``servers.toml`` — one ``[servers.<name>]`` table per server
+- ``themes.toml`` — one ``[themes.<name>]`` palette table per theme
 - ``roles/<name>.toml`` — one file per role
-- ``state.toml`` — machine-written, disposable (last server/model, catalog)
+- ``state.toml`` — machine-written, disposable (last server/model, theme, catalog)
 
 Each file is validated independently; errors are collected and reported as
 ``<file>: ...`` instead of being silently swallowed. There are no
@@ -68,6 +69,7 @@ CONFIG_FILES = {
     "debug": "debug.toml",
     "styles": "styles.toml",
     "servers": "servers.toml",
+    "theme": "themes.toml",
 }
 
 
@@ -209,6 +211,32 @@ DEFAULT_SERVERS_TOML = """\
 # model = "gpt-4o"
 """
 
+DEFAULT_THEMES_TOML = """\
+# Color themes. One [themes.<name>] table per theme; select with /theme.
+# Each palette entry is either a hex RGB string or an ANSI slot table:
+#   USER       = "#4EC9B0"
+#   MUTED      = { ansi = 90 }            # standard ANSI fg code
+#   BACKGROUND = { ansi = 39, bg = 49 }   # fg and/or bg codes
+# Missing entries inherit from the built-in base of the same name (or terminal).
+# Several built-ins ship (terminal is the default; run /theme to list them);
+# they are always available and can be overridden here.
+#
+# Palette keys: BACKGROUND, DEFAULT, MUTED, ERROR, WARNING, SUCCESS,
+#               PERMISSION, USER, PICO, FOCUSED
+
+# [themes.pastel]
+# BACKGROUND = "#1E1E1E"
+# DEFAULT    = "#D4D4D4"
+# MUTED      = "#808080"
+# ERROR      = "#F48771"
+# WARNING    = "#CCA700"
+# SUCCESS    = "#89D185"
+# PERMISSION = "#C586C0"
+# USER       = "#4EC9B0"
+# PICO       = "#569CD6"
+# FOCUSED    = "#DCDCAA"
+"""
+
 DEFAULT_CONFIG_TEMPLATES = {
     "ui": DEFAULT_UI_TOML,
     "context": DEFAULT_CONTEXT_TOML,
@@ -216,6 +244,7 @@ DEFAULT_CONFIG_TEMPLATES = {
     "debug": DEFAULT_DEBUG_TOML,
     "styles": DEFAULT_STYLES_TOML,
     "servers": DEFAULT_SERVERS_TOML,
+    "theme": DEFAULT_THEMES_TOML,
 }
 
 
@@ -278,7 +307,41 @@ _SERVER_STR_KEYS = {"type", "base_url", "api_key", "api_key_env", "model", "prov
 _SERVER_INT_KEYS = {"max_context", "retry_attempts"}
 _SERVER_FLOAT_KEYS = {"timeout", "retry_delay"}
 
-_STATE_SECTIONS = {"last_server", "active_model", "last_model", "model_catalog"}
+_STATE_SECTIONS = {"last_server", "active_model", "last_model", "model_catalog", "active_theme"}
+
+# Palette keys a ``[themes.<name>]`` table may define.
+_THEME_PALETTE = {
+    "BACKGROUND", "DEFAULT", "MUTED", "ERROR", "WARNING", "SUCCESS",
+    "PERMISSION", "USER", "PICO", "FOCUSED",
+}
+
+
+def _coerce_theme_color(value: Any) -> Optional[str]:
+    """Validate one palette value; return an error string or None.
+
+    Accepted: ``"#RRGGBB"``; an integer ANSI fg code; or a table
+    ``{ ansi = <fg>, bg = <bg> }``.
+    """
+    if isinstance(value, str):
+        hex_str = value.lstrip("#")
+        if len(hex_str) != 6 or any(c not in "0123456789abcdefABCDEF" for c in hex_str):
+            return "must be a '#RRGGBB' hex string, an ANSI code, or a table"
+        return None
+    if isinstance(value, bool):
+        return "must be a hex string, an ANSI code, or a table"
+    if isinstance(value, int):
+        return None
+    if isinstance(value, dict):
+        for key in value:
+            if key not in ("ansi", "bg"):
+                return f"unknown color key '{key}'"
+        for key in ("ansi", "bg"):
+            if key in value and (isinstance(value[key], bool) or not isinstance(value[key], int)):
+                return f"{key} must be an integer"
+        if not value:
+            return "empty color table"
+        return None
+    return "must be a hex string, an ANSI code, or a table"
 
 
 def _coerce(kind: str, value: Any) -> tuple[Any, Optional[str]]:
@@ -341,6 +404,10 @@ class Config:
         self.active_model: Optional[str] = None
         self.model_selection: Dict[str, str] = {}
         self.models_by_server: Dict[str, list] = {}
+
+        # User color theme definitions (intent) and active selection (state).
+        self.themes: Dict[str, Dict[str, Any]] = {}
+        self.active_theme: Optional[str] = None
 
         # UI settings.
         self.ui_debug_console_height: int = 10
@@ -414,6 +481,7 @@ class Config:
         _load_flat_file(self.section_file("debug"), _DEBUG_SPEC, self, self.load_errors)
         _load_styles_file(self.section_file("styles"), self, self.load_errors)
         _load_servers_file(self.section_file("servers"), self, self.load_errors)
+        _load_themes_file(self.section_file("theme"), self, self.load_errors)
         _load_state_file(self._state_file(), self, self.load_errors)
         return self.load_errors
 
@@ -452,6 +520,15 @@ class Config:
         """Persist the discovery catalog so /model completion works on restart."""
         self._save_state()
 
+    def save_active_theme(self, name: str) -> None:
+        """Persist the selected color theme (state, not intent)."""
+        self.active_theme = name
+        self._save_state()
+
+    def get_active_theme(self) -> str:
+        """Effective theme name: state selection, then ``ui.toml``, else terminal."""
+        return self.active_theme or self.ui_theme or "terminal"
+
     def _save_state(self) -> None:
         path = self._state_file()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -462,6 +539,8 @@ class Config:
             data["active_model"] = self.active_model
         if self.model_selection:
             data["last_model"] = dict(self.model_selection)
+        if self.active_theme:
+            data["active_theme"] = self.active_theme
         if self.models_by_server:
             data["model_catalog"] = {
                 server: [dict(m) for m in models]
@@ -623,6 +702,39 @@ def _load_servers(config: Config, data: dict, filename: str,
         config.servers[name] = dict(server)
 
 
+def _load_themes_file(path: Path, config: Config, errors: list[str]) -> None:
+    """Load ``themes.toml`` (one ``[themes.<name>]`` palette table per theme)."""
+    data = _read_toml(path, errors)
+    if data is None:
+        return
+    for section in data:
+        if section != "themes":
+            errors.append(f"{path.name}: unknown section [{section}]")
+    table = data.get("themes")
+    if table is None:
+        return
+    if not isinstance(table, dict):
+        errors.append(f"{path.name}: [themes] must be a table")
+        return
+    for name, palette in table.items():
+        where = f"{path.name}: [themes.{name}]"
+        if not isinstance(palette, dict):
+            errors.append(f"{where} must be a table")
+            continue
+        normalized: Dict[str, Any] = {}
+        for key, value in palette.items():
+            palette_key = key.upper()
+            if palette_key not in _THEME_PALETTE:
+                errors.append(f"{where} unknown color '{key}'")
+                continue
+            error = _coerce_theme_color(value)
+            if error:
+                errors.append(f"{where}.{key} {error}")
+                continue
+            normalized[palette_key] = value
+        config.themes[name] = normalized
+
+
 def _merge_style_table(config: Config, data: dict, filename: str, section: str,
                        target: Dict[str, Dict[str, Any]], errors: list[str]) -> None:
     table = data.get(section)
@@ -670,6 +782,13 @@ def _load_state_file(path: Path, config: Config, errors: list[str]) -> None:
             config.active_model = active_model
         else:
             errors.append(f"{path.name}: active_model must be a string")
+
+    active_theme = data.get("active_theme")
+    if active_theme is not None:
+        if isinstance(active_theme, str):
+            config.active_theme = active_theme
+        else:
+            errors.append(f"{path.name}: active_theme must be a string")
 
     last_model = data.get("last_model")
     if last_model is not None:

@@ -15,7 +15,7 @@ chatTUI (app.py)
        │    └─ DebugLogPanel (optional)   ← dev logging
        └─ Overlays (floating, on top)
             ├─ SelectionMenu              ← autocomplete dropdowns
-            └─ Popup                      ← centered text popups (/help, /status)
+            └─ Popup                      ← centered text popups (/help, /config)
 ```
 
 Typed event dataclasses are defined in `tui/events.py`. Shared focus ownership
@@ -148,7 +148,7 @@ Centered overlay popups for commands that benefit from floating display rather t
 - Input interception: when popup is visible, the `EventRouter` overlay-priority
     path routes input to the popup before normal focus handling
 - Auto-sizing: `max_width_ratio` / `max_height_ratio` control popup dimensions relative to terminal
-- Currently used by: `/help` (command list), `/status` (async with placeholder), `/debug` help
+- Currently used by: `/help` (command list)
 
 ## No In-App Forms
 
@@ -178,13 +178,10 @@ mis-timed interrupt never prints a traceback.
 ## Debug Panel
 
 The debug console is a `DebugLogPanel` (extends `TextComponent`) wrapped in a
-`DebugPopup` compositor overlay.
-
-- `DebugLogPanel` receives log entries via `TuiLogHandler`
-- `/debug panel` calls `toggle_debug_console()`, which shows/hides the overlay
-- The overlay occupies the bottom ~30% of the terminal, closes on Escape, and
-  passes unhandled input through to the chat
-- Auto-scrolls to bottom on new log entries
+`DebugPopup` compositor overlay. `TuiLogHandler` feeds it log entries and
+`ChatHistoryPanel.activity_sink` routes `SysMsg*` to the activity overlay
+(`/activity`). There is no user-facing debug-panel command; logging is enabled
+via `debug.toml` (`log_enabled`).
 
 ## Buffer (`tui/buffer.py`)
 
@@ -389,28 +386,28 @@ layout, selection, scrolling, and width-change reformatting.
 
 ## Commands (`commands/` package)
 
-Slash commands typed by the user (e.g. `/server`, `/model`, `/status`, `/help`).
+Slash commands typed by the user (e.g. `/model`, `/theme`, `/help`).
 The package lives in `pico_chat/ui/commands/`:
 
 - `registry.py` — the single `COMMANDS` assembly point and `handle_command()`.
 - `base.py` — `Param`, `Command`, `ChatUIProtocol`, completion helpers.
-- Domain modules (`core`, `conversation`, `models`, `server`, `debug`,
-  `openrouter`, `roles`) import **only** `base`; `registry.py` assembles them.
-  This shape is enforced by `test/test_command_import_graph.py`.
+- Domain modules (`core`, `conversation`, `models`, `roles`, `themes`) import
+  **only** `base`; `registry.py` assembles them. This shape is enforced by
+  `test/test_command_import_graph.py`.
 - Leaf commands are plain `async def` handlers wrapped in
-  `Command(name, description, handler=..., params=[...])`. Only commands with a
-  real subcommand tree are classes (`ServerCommand`, `DebugCommand`,
-  `OpenRouterCommand`).
+  `Command(name, description, handler=..., params=[...])`. Only commands that
+  need contextual completion subclass `Command` (currently `ConfigCommand`);
+  subcommand-tree classes remain supported.
 
 ### Registered Commands
 
 `help`, `clear`, `reload`, `config`, `edit`, `export`, `import`, `compact`,
-`exit`, `stop`, `status`, `activity`, `server`, `model`, `role`, `debug`,
-`openrouter`, `cd`, `pwd`
+`exit`, `stop`, `activity`, `model`, `role`, `theme`
 
 ### Server & model selection
 
-- `/server` — add, list, info, diagnose, remove. The `use`/switch subcommand was removed; switching is implicit via model selection.
+- Servers are configured by editing `servers.toml` (`/config servers`); there is
+  no `/server` command.
 - `/model` — opens a searchable picker; `/model <model>` selects directly. Refreshes discovery live, resolves a model across servers, switches the harness, and selects it. The picker (`SearchModal`) shows the cached catalog instantly, refreshes in the background, tags the current model with a green `active`, and supports type-to-filter.
 
 ### Roles
@@ -419,10 +416,16 @@ The package lives in `pico_chat/ui/commands/`:
 - `/config role <name>` creates/opens `roles/<name>.toml` in `$EDITOR` and reloads;
   `/config role delete <name> confirm` removes it.
 
+### Themes
+
+- `/theme` opens a searchable picker (built-ins plus `themes.toml` definitions);
+  `/theme <name>` selects directly and persists it in `state.toml`.
+- `/config theme` edits `themes.toml`.
+
 ### Structure
 
-- `Param` dataclass — a command argument: `name`, `completions` (static list or callable), `path` (filesystem scan), `required`.
-- `Command` — `name`, `description`, `handler` or `subcommands`, `params`. `resolve_command()`, `get_completions(arg_index)`, `execute(ui, args)`.
+- `Param` dataclass — a command argument: `name`, `completions` (static list or callable), `descriptions`, `path` (filesystem scan), `required`.
+- `Command` — `name`, `description`, `handler` or `subcommands`, `params`. `resolve_command()`, `get_completions(arg_index, prior_args)`, `get_descriptions(...)`, `execute(ui, args)`.
 - `COMMANDS: Dict[str, Command]` — registry.
 - `handle_command(ui, text)` — strips the leading `/`, looks up `COMMANDS`, calls `execute`.
 
@@ -442,8 +445,9 @@ The package lives in `pico_chat/ui/commands/`:
    `path=True` adds filesystem scanning.
 3. It is now callable as `/mycommand`, listed by `/help`, and offered by the input autocomplete.
 
-Subcommand trees subclass `Command` and pass a `subcommands` dict; see
-`ServerCommand` in `commands/server.py`.
+For contextual completion (decide candidates from earlier args), subclass
+`Command` and override `get_completions` / `get_descriptions`; see
+`ConfigCommand` in `commands/core.py`.
 
 ### Hiding a Command from `/help`
 
@@ -460,6 +464,29 @@ Prefix the registry key with `_`; `cmd_help` / `get_command_descriptions` skip s
 - `tui/colors.py` — `RGB` class, theme dictionary, hex parsing
 - `tui/layout_utils.py` — `wrap_text()`, `display_width()` (wcwidth-aware for Unicode), `strip_ansi()`
 - `tui/container.py` — explicit layout pass; `Vsplit`/`Hsplit` support fixed, percentage, content, and fill policies, with `Padding`, `Align`, `Stack`/`Overlay`, and `ScrollView`
+
+### Theme switching
+
+Components resolve theme colors when they are **constructed**, not per render
+(the `theme` singleton is mutated in place by `set_theme()`, so re-render alone
+does not recolor cached fg/bg). A theme change therefore must:
+
+1. `set_theme(name)` — mutate the palette in place;
+2. `chatTUI.refresh_theme()` — re-resolve the chrome (input, bars, debug/activity
+   panels), the long-lived overlays (`Popup`, `DebugPopup`), the cached
+   completion menus (`InputComponent.refresh_theme()` →
+   `Completer.refresh_theme()` → `SelectionMenu.apply_theme()`), and every
+   transcript message (`Message.refresh_theme()`), then call
+   `Compositor.request_full_redraw()` so cached frame cells are discarded.
+
+Anything that stores a `theme.*` color at construction and lives across a theme
+switch must expose a `refresh_theme()` (or `apply_theme()`) and be called from
+`chatTUI.refresh_theme()`. `/theme` and `_apply_theme()` (called by `/reload`
+and `/config`) do this. `/theme` additionally registers a `ThemePreview` overlay
+(a compact top-strip palette overview) while you move through the list and
+previews each theme live via `SearchModal.on_highlight`; cancelling restores the
+previous theme. The picker is kept short (`max_height = 8`) so the top overview
+and the input-anchored picker don't overlap. The default theme is `terminal`.
 
 ## Markdown Rendering
 

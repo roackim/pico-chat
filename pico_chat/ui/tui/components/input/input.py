@@ -177,6 +177,18 @@ class InputComponent(Component):
     def set_compositor(self, compositor):
         """Set compositor reference for overlay rendering."""
         self.compositor_ref = compositor
+
+    def refresh_theme(self) -> None:
+        """Re-apply the active theme to the (cached) completion menus."""
+        self.bg = theme.get_bg()
+        for completion in (
+            self.command_completion,
+            self.subcommand_completion,
+            self.argument_completion,
+            self.context_completion,
+        ):
+            if completion is not None:
+                completion.refresh_theme()
     
     def _on_text_changed(self):
         """Called whenever text changes - updates completion menus and marks parent for re-render."""

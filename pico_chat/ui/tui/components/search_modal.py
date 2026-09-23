@@ -28,6 +28,7 @@ class SearchModal(SelectionMenu):
         self._search = ""
         self._on_accept: Optional[Callable[[str], None]] = None
         self._on_cancel: Optional[Callable[[], None]] = None
+        self._on_highlight: Optional[Callable[[str], None]] = None
 
         # Same look as the /cmd and @ popups.
         self.frame_color = theme.USER
@@ -46,10 +47,12 @@ class SearchModal(SelectionMenu):
              footers: Optional[dict] = None,
              on_accept: Optional[Callable[[str], None]] = None,
              on_cancel: Optional[Callable[[], None]] = None,
+             on_highlight: Optional[Callable[[str], None]] = None,
              initial_index: int = 0) -> None:
         self._base_items = list(items)
         self._on_accept = on_accept
         self._on_cancel = on_cancel
+        self._on_highlight = on_highlight
         self._search = ""
         if descriptions is not None:
             self.item_descriptions = dict(descriptions)
@@ -59,6 +62,7 @@ class SearchModal(SelectionMenu):
             self.selected_index = max(0, min(initial_index, len(self.items) - 1))
         self.is_visible = True
         self._update_compositor_registration()
+        self._notify_highlight()
         self._request_render()
 
     def refresh(self, items: List[str], descriptions: Optional[dict] = None,
@@ -83,7 +87,23 @@ class SearchModal(SelectionMenu):
     def close(self) -> None:
         self._on_accept = None
         self._on_cancel = None
+        self._on_highlight = None
         self.hide()
+
+    def _notify_highlight(self) -> None:
+        """Fire the highlight callback for the currently selected item."""
+        callback = self._on_highlight
+        item = self.get_selected()
+        if callback and item is not None:
+            callback(item)
+
+    def action_up(self):
+        super().action_up()
+        self._notify_highlight()
+
+    def action_down(self):
+        super().action_down()
+        self._notify_highlight()
 
     # -- filtering -----------------------------------------------------
 
@@ -107,6 +127,7 @@ class SearchModal(SelectionMenu):
         self._apply_filter()
         if current in self.items:
             self.selected_index = self.items.index(current)
+        self._notify_highlight()
         self._request_render()
 
     def _request_render(self) -> None:
