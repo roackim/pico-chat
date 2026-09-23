@@ -27,6 +27,7 @@ class FakePanel:
             tool_name=None, tool_args=None, tool_output=None,
             tool_status=None, show_output=True,
             rebuild_tool_display=lambda: None, finalize=lambda: None,
+            set_collapsed=lambda *a, **k: None,
         )
         self.messages.append(msg)
         return msg
@@ -157,6 +158,31 @@ def test_conversation_import_keeps_assistant_reply_in_one_message(tmp_path):
                  if isinstance(m.type, PicoMsg)]
     assert len(assistant) == 1
     assert assistant[0].text == content
+
+
+def test_conversation_import_restores_stored_reasoning(tmp_path):
+    """The explicit ``reasoning`` field survives export/import as a ThinkingMsg."""
+    from pico_chat.ui.tui.msg_types import PicoMsg, ThinkingMsg
+
+    ui = FakeUI()
+    history = [
+        {"role": "user", "content": "hi"},
+        {"id": "a1", "role": "assistant", "content": "answer",
+         "reasoning": "deep thought", "reasoning_tag": "<think>"},
+    ]
+    filename = tmp_path / "thoughts.json"
+    filename.write_text(json.dumps({"role": "default", "history": history}))
+
+    asyncio.run(conversation_import(ui, [str(filename)]))
+
+    # History keeps the reasoning field verbatim (nothing lost).
+    assert ui.agent.history == history
+    thinking = [m for m in ui.chat_history_panel.messages
+                if isinstance(m.type, ThinkingMsg)]
+    answers = [m for m in ui.chat_history_panel.messages
+               if type(m.type) is PicoMsg]
+    assert len(thinking) == 1 and thinking[0].text == "deep thought"
+    assert len(answers) == 1 and answers[0].text == "answer"
 
 
 def test_conversation_import_rejects_malformed_envelope(tmp_path):

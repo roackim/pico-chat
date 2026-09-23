@@ -82,7 +82,8 @@ class ThinkingMsg(PicoMsg):
     frame_color = "MUTED"
     content_color = "MUTED"
     actions = [MsgAction.COPY]
-    gutter = "…"
+    # Same prefix bar as user/pico so the thought line reads like any message.
+    gutter = "▌"
 
 class ToolCallMsg(MsgType):
     name = "tool"

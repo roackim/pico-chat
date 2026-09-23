@@ -80,6 +80,25 @@ def test_advance_spinner_rebuilds_tool_display():
     assert before != after
 
 
+def test_spinner_cadence_is_decoupled_from_render_fps(monkeypatch):
+    """Tick events fire every frame; the glyph only advances at ui.spinner_fps."""
+    from pico_chat import pico_cfg
+    from pico_chat.ui.chat_history_panel import ChatHistoryPanel
+    from pico_chat.ui.tui.events import TickEvent
+    from pico_chat.ui.tui.msg_types import ThinkingMsg
+
+    monkeypatch.setattr(pico_cfg.config, "ui_spinner_fps", 10)
+    panel = ChatHistoryPanel()
+    msg = panel.add_message("", msg_type=ThinkingMsg())
+
+    panel.handle_input(TickEvent(0.0))
+    first = msg.spinner_frame
+    panel.handle_input(TickEvent(0.05))  # still inside the 100ms gate
+    assert msg.spinner_frame == first
+    panel.handle_input(TickEvent(0.11))  # gate elapsed: advances
+    assert msg.spinner_frame != first
+
+
 def test_tool_message_exposes_only_non_destructive_actions():
     """Tool messages expose output/copy; state-changing actions are commands."""
     from pico_chat.ui.tui.msg_types import MsgAction

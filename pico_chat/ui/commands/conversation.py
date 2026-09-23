@@ -145,36 +145,51 @@ def _rebuild_ui_from_history(ui: ChatUIProtocol, history: List[Dict[str, Any]]):
             ui.chat_history_panel.add_message(content or "", msg_type=UserMsg(),
                                               harness_message_ids=ids)
         elif role == "assistant":
-            # Split thinking/content using the same tag parser the harness
-            # uses, so imported reasoning renders as a ThinkingMsg.
             # content may be None for tool-call-only assistant messages.
             content = content or ""
-            parser = ThinkingTagParser()
-            raw_segments = parser.feed(content) + parser.flush()
-            # ``feed`` holds back up to _MAX_TAG_LEN characters (a possible
-            # partial thinking tag) and ``flush`` emits them as a separate
-            # segment. Coalesce adjacent same-kind segments so import does
-            # not split one assistant reply into multiple messages (which
-            # showed up as a mid-word split separated by the inter-message
-            # gap, e.g. "narro" / "w it down.").
-            segments = []
-            for segment in raw_segments:
-                if not segment.text:
-                    continue
-                if segments and segments[-1].is_thinking == segment.is_thinking:
-                    segments[-1].text += segment.text
-                else:
-                    segments.append(segment)
-            for segment in segments:
-                if segment.is_thinking:
+            reasoning = message.get("reasoning")
+            if reasoning:
+                # Current format: reasoning is stored verbatim in its own
+                # field, so restore it exactly and keep the answer separate.
+                think = ui.chat_history_panel.add_message(
+                    reasoning, msg_type=ThinkingMsg(), harness_message_ids=ids)
+                think.set_collapsed(True)
+                think.finalize()
+                if content:
                     ui.chat_history_panel.add_message(
-                        segment.text, msg_type=ThinkingMsg(), harness_message_ids=ids)
-                else:
+                        content, msg_type=PicoMsg(), harness_message_ids=ids)
+            else:
+                # Older exports (or preserve_reasoning_traces): reasoning is
+                # inline in content as thinking tags. Split it with the same
+                # parser the harness uses so it renders as a ThinkingMsg.
+                parser = ThinkingTagParser()
+                raw_segments = parser.feed(content) + parser.flush()
+                # ``feed`` holds back up to _MAX_TAG_LEN characters (a possible
+                # partial thinking tag) and ``flush`` emits them as a separate
+                # segment. Coalesce adjacent same-kind segments so import does
+                # not split one assistant reply into multiple messages (which
+                # showed up as a mid-word split separated by the inter-message
+                # gap, e.g. "narro" / "w it down.").
+                segments = []
+                for segment in raw_segments:
+                    if not segment.text:
+                        continue
+                    if segments and segments[-1].is_thinking == segment.is_thinking:
+                        segments[-1].text += segment.text
+                    else:
+                        segments.append(segment)
+                for segment in segments:
+                    if segment.is_thinking:
+                        think = ui.chat_history_panel.add_message(
+                            segment.text, msg_type=ThinkingMsg(), harness_message_ids=ids)
+                        think.set_collapsed(True)
+                        think.finalize()
+                    else:
+                        ui.chat_history_panel.add_message(
+                            segment.text, msg_type=PicoMsg(), harness_message_ids=ids)
+                if not segments and content:
                     ui.chat_history_panel.add_message(
-                        segment.text, msg_type=PicoMsg(), harness_message_ids=ids)
-            if not segments and content:
-                ui.chat_history_panel.add_message(
-                    content, msg_type=PicoMsg(), harness_message_ids=ids)
+                        content, msg_type=PicoMsg(), harness_message_ids=ids)
             for tool_call in message.get("tool_calls", []):
                 if not isinstance(tool_call, dict) or "function" not in tool_call:
                     continue

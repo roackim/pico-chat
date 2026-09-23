@@ -5,7 +5,7 @@ import logging
 import time
 import uuid
 from pathlib import Path
-from typing import AsyncGenerator, Any, Dict, List, Optional
+from typing import AsyncGenerator, Any, Dict, List, Optional, Tuple
 
 from pico_chat.harness.llm_status import AgentState
 from pico_chat.harness.debug import get_debug_stream
@@ -188,6 +188,33 @@ class Harness:
         if last_compaction_idx is None:
             return self.history
         return self.history[last_compaction_idx:]
+
+    @staticmethod
+    def _reasoning_tag_pair(tag: Optional[str]) -> Tuple[str, str]:
+        """Resolve a stored reasoning tag to its ``(open, close)`` pair."""
+        for open_tag, close_tag in THINKING_TAGS:
+            if open_tag == tag:
+                return open_tag, close_tag
+        return THINKING_TAGS[0]
+
+    def _to_api_message(self, entry: Dict[str, Any]) -> Dict[str, Any]:
+        """Project a stored history entry onto the API message shape.
+
+        Stored history keeps ``reasoning``/``reasoning_tag`` for persistence and
+        the transcript; they are not valid API fields. When
+        ``preserve_reasoning_traces`` is enabled the reasoning is folded back
+        into ``content`` using the model's own thinking tag so the model sees
+        its prior chain-of-thought.
+        """
+        from pico_chat import pico_cfg
+
+        msg = {key: value for key, value in entry.items()
+               if key not in ("reasoning", "reasoning_tag")}
+        reasoning = entry.get("reasoning")
+        if reasoning and pico_cfg.config.preserve_reasoning_traces:
+            open_tag, close_tag = self._reasoning_tag_pair(entry.get("reasoning_tag"))
+            msg["content"] = f"{open_tag}\n{reasoning}\n{close_tag}\n\n{msg.get('content') or ''}"
+        return msg
 
     def _get_tool_output(self, ref: str) -> Optional[str]:
         """
@@ -445,7 +472,7 @@ class Harness:
         self._last_user_message_id = user_msg_id
 
         messages = self._system_messages()
-        messages.extend(self._get_effective_history())
+        messages.extend(self._to_api_message(m) for m in self._get_effective_history())
         # Log how much reasoning context is in history
         think_msgs = [m for m in messages if isinstance(m.get('content'), str) and '<think>' in m.get('content', '')]
         if think_msgs:
@@ -461,7 +488,7 @@ class Harness:
         Useful for debugging and inspecting what the model sees.
         """
         messages = self._system_messages()
-        messages.extend(self._get_effective_history())
+        messages.extend(self._to_api_message(m) for m in self._get_effective_history())
         return messages
 
     async def get_system_prompt(self) -> str:
@@ -673,9 +700,11 @@ class Harness:
         if tool_calls_buffer:
             tool_calls_list = self._assemble_tool_calls(tool_calls_buffer)
 
-        # Log results
+        # Log results. Reasoning must include BOTH streaming paths — the
+        # ``reasoning_content`` API field and inline thinking tags — so use the
+        # live accumulator (``parser.full_reasoning`` only sees tags).
         full_content = parser.full_content
-        full_reasoning = parser.full_reasoning
+        full_reasoning = self._current_reasoning
         if full_content and not tool_calls_list:
             self.debug_stream.log("RESPONSE", full_content)
         if tool_calls_list:
@@ -957,8 +986,6 @@ class Harness:
         # Agent Loop (Handle Multi-step Tool Calls)
         while True:
             try:
-                from pico_chat import pico_cfg
-                
                 # Generate assistant message ID upfront so UI can track it
                 assistant_msg_id = str(uuid.uuid4())
                 yield events.Start(message_id=assistant_msg_id, role="assistant")
@@ -1015,38 +1042,26 @@ class Harness:
                 
                 logger.debug(f"LLM response complete. Content length: {len(full_content) if full_content else 0}, Reasoning length: {len(full_reasoning) if full_reasoning else 0}, Tool calls: {len(tool_calls_list) if tool_calls_list else 0}")
                 
-                # Optionally reconstruct full output with thinking tags for multi-turn reasoning
-                if pico_cfg.config.preserve_reasoning_traces and full_reasoning:
-                    # Use the tag the model produced this turn; fall back to THINKING_TAGS[0]
-                    # (<think>) when reasoning arrived via the reasoning_content API field.
-                    open_tag = detected_tag or THINKING_TAGS[0][0]
-                    close_tag = next(c for o, c in THINKING_TAGS if o == open_tag)
-                    full_content_for_history = f"{open_tag}\n{full_reasoning}\n{close_tag}\n\n{full_content}"
-                    logger.info(f"[reasoning] Stored {len(full_reasoning)} chars of reasoning in history (tag={open_tag!r})")
-                else:
-                    full_content_for_history = full_content if full_content else None
-                    if full_reasoning:
-                        logger.warning(f"[reasoning] preserve_reasoning_traces=False, dropping {len(full_reasoning)} chars of reasoning")
-                    else:
-                        logger.debug("[reasoning] No reasoning to preserve this turn")
-                
-                # Add assistant message to history with pre-generated ID
+                # Persist the raw reasoning separately so export/import and the
+                # transcript never lose it. ``preserve_reasoning_traces`` now
+                # only controls whether it is folded back into the request sent
+                # to the model (see ``_to_api_message``), not whether it is kept.
                 msg = {
                     "id": assistant_msg_id,
                     "role": "assistant",
-                    "content": full_content_for_history
+                    "content": full_content if full_content else None,
                 }
-                if tool_calls_list:
-                    msg["tool_calls"] = tool_calls_list
+                if full_reasoning:
+                    msg["reasoning"] = full_reasoning
+                    if detected_tag:
+                        msg["reasoning_tag"] = detected_tag
+                    logger.info(f"[reasoning] Stored {len(full_reasoning)} chars of reasoning in history (tag={detected_tag!r})")
                 self.history.append(msg)
                 self._last_assistant_message_id = assistant_msg_id
-                
-                # Also add to messages for current request (without ID for API call)
-                messages.append({
-                    "role": "assistant",
-                    "content": full_content_for_history,
-                    "tool_calls": tool_calls_list if tool_calls_list else None
-                })
+
+                # The API message for this turn is projected from the stored
+                # entry (reasoning re-sent only when configured).
+                messages.append(self._to_api_message(msg))
                 
                 # If no tools, we're done
                 if not tool_calls_list:

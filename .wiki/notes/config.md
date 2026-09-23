@@ -123,7 +123,8 @@ stored one file per role under `roles/<name>.toml`. `PermissionGate`
 `subagent_max_context`; `ui_theme`, `ui_box_style`, `ui_show_metrics`,
 `ui_status_bar_fields`, `ui_max_input_height` (input box caps + scrolls past
 this many wrapped lines), `ui_stream_smoothing` / `ui_smooth_target_fps`
-(streamed-text reveal smoothing), `target_fps`, and the rest of the `ui_*` attrs.
+(streamed-text reveal smoothing), `ui_spinner_fps` (braille spinner cadence,
+independent of render fps), `target_fps`, and the rest of the `ui_*` attrs.
 
 **Styles / themes:** `config.markdown_styles`, `config.syntax_highlight_styles`;
 `config.themes`, `config.active_theme`, `config.get_active_theme()`,

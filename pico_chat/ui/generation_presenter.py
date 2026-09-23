@@ -44,13 +44,14 @@ async def process_generation(app, user_input, user_msg) -> None:
         app.reset_stream_revealer()
     smoothing = getattr(app, "stream_revealer", None) is not None
 
-    # No placeholder status message: the first real chunk creates its own
-    # message. This keeps the conversation free of transient "Sending
-    # request..." / "Processing results..." clutter.
+    # The wait-phase message: "processing" while context is ingested, then
+    # "thinking" once the request is in flight. It is kept and settles into a
+    # collapsed "thought for Xs" summary above the answer.
     current_msg = None
     current_msg_type = None
     current_harness_ids = []
     natural_done = False
+    status_is_processing = False
 
     def ensure_tool_message_type(msg: Message, target_type: MsgType) -> Message:
         if isinstance(msg.type, type(target_type)):
@@ -83,6 +84,31 @@ async def process_generation(app, user_input, user_msg) -> None:
         if smoothing:
             app.flush_stream()
 
+    def end_status_message() -> None:
+        """Finalize the current text/status message at a hard boundary.
+
+        The wait-phase message is always kept: it settles into a collapsed
+        "thought for Xs" summary above the answer, even when the model exposed
+        no reasoning.
+        """
+        nonlocal current_msg, current_msg_type
+        if current_msg is None:
+            return
+        flush_text()
+        current_msg.finalize()
+        current_msg.update_actions()
+        current_msg = None
+        current_msg_type = None
+
+    # Context ingestion happens before the first harness event, so open the
+    # placeholder now: otherwise the UI looks frozen during that work.
+    current_msg = chat.add_message("", msg_type=ThinkingMsg())
+    current_msg.set_collapsed(True)
+    current_msg.begin_phase("processing")
+    current_msg_type = ThinkingMsg
+    status_is_processing = True
+    begin_text_message(current_msg)
+
     # Process streaming events from Harness
     try:
         async for event in agent.chat(user_input):
@@ -95,29 +121,40 @@ async def process_generation(app, user_input, user_msg) -> None:
                     if not user_msg.harness_message_ids:
                         user_msg.harness_message_ids = [event.message_id]
                         logger.debug(f"Linked user message to harness ID {event.message_id}")
+                else:
+                    if status_is_processing and current_msg_type is ThinkingMsg:
+                        # Context is ingested and the request is in flight.
+                        status_is_processing = False
+                        current_msg.harness_message_ids = current_harness_ids
+                        current_msg.begin_phase("thinking")
+                    else:
+                        # A later turn (after tool calls) opens a fresh one.
+                        end_status_message()
+                        current_msg = chat.add_message(
+                            "", msg_type=ThinkingMsg(), harness_message_ids=current_harness_ids
+                        )
+                        current_msg.set_collapsed(True)
+                        current_msg.begin_phase("thinking")
+                        current_msg_type = ThinkingMsg
+                        begin_text_message(current_msg)
 
             elif isinstance(event, events.Reasoning):
                 # If not currently in a thinking message, create one
                 if current_msg_type != ThinkingMsg:
-                    if current_msg is not None:
-                        # Flush previous and create new
-                        flush_text()
-                        current_msg.finalize()
+                    end_status_message()
                     current_msg = chat.add_message("", msg_type=ThinkingMsg(), harness_message_ids=current_harness_ids)
                     # Thinking folds to a single line by default; expand on focus.
                     current_msg.set_collapsed(True)
                     current_msg_type = ThinkingMsg
                     begin_text_message(current_msg)
 
+                current_msg.begin_phase("thinking")
                 emit_text(event.text)
 
             elif isinstance(event, events.Token):
                 # If not currently in a content message, create one
                 if current_msg_type != PicoMsg:
-                    if current_msg is not None:
-                        # Flush previous and create new
-                        flush_text()
-                        current_msg.finalize()
+                    end_status_message()
                     current_msg = chat.add_message("", msg_type=PicoMsg(), harness_message_ids=current_harness_ids)
                     current_msg_type = PicoMsg
                     begin_text_message(current_msg)
@@ -131,8 +168,7 @@ async def process_generation(app, user_input, user_msg) -> None:
 
                 # Flush any incomplete text message before showing tool draft
                 if current_msg_type in (ThinkingMsg, PicoMsg) and current_msg:
-                    flush_text()
-                    current_msg.finalize()
+                    end_status_message()
 
                 if not msg:
                     msg = chat.add_message("", msg_type=ToolDraftMsg(), harness_message_ids=current_harness_ids)
@@ -154,8 +190,7 @@ async def process_generation(app, user_input, user_msg) -> None:
 
                 # Flush any incomplete text message before showing tool request
                 if current_msg_type in (ThinkingMsg, PicoMsg) and current_msg:
-                    flush_text()
-                    current_msg.finalize()
+                    end_status_message()
 
                 msg = app.active_tool_messages.get(tool_id)
 
@@ -247,19 +282,16 @@ async def process_generation(app, user_input, user_msg) -> None:
                 app.refresh_status_bar()
 
             elif isinstance(event, events.Error):
-                if current_msg is not None:
-                    flush_text()
-                    current_msg.finalize()
-                    current_msg = None
-                    current_msg_type = None
+                end_status_message()
                 if smoothing:
                     app.disengage_stream()
                 chat.add_message(event.message, msg_type=SysMsgError())
 
             elif isinstance(event, events.Done):
-                # Natural completion: let the revealer drain over its remaining
-                # window; the frame callback finalizes once it is empty.
-                if smoothing:
+                # Let the revealer drain over its remaining window; the frame
+                # callback finalizes once it is empty. The wait-phase message
+                # stays and reads "thought for Xs".
+                if smoothing and current_msg_type in (ThinkingMsg, PicoMsg):
                     app.defer_stream_finalize()
                 natural_done = True
 
@@ -278,9 +310,7 @@ async def process_generation(app, user_input, user_msg) -> None:
         # Finalize current message and add a plain SysMsg notification.
         # Avoid appending ANSI codes to a MarkdownComponent message (PicoMsg)
         # since the component would render the escape sequences as literal text.
-        if current_msg is not None:
-            flush_text()
-            current_msg.finalize()
+        end_status_message()
         if smoothing:
             app.disengage_stream()
         chat.add_message("[Generation stopped]", msg_type=SysMsg())
@@ -294,9 +324,6 @@ async def process_generation(app, user_input, user_msg) -> None:
         # smoothing on, the frame callback owns finalization so the reveal can
         # finish animating; otherwise finalize now.
         if not natural_done or not smoothing:
-            flush_text()
-            if current_msg is not None:
-                current_msg.finalize()
-                current_msg.update_actions()
+            end_status_message()
             if smoothing:
                 app.disengage_stream()

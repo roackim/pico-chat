@@ -385,6 +385,28 @@ Messages are separated by `ui_msg_v_margin` blank lines (default `1`; set it in
 `ui.toml`). `ChatHistoryPanel` is the owner of the message list — it handles
 layout, selection, scrolling, and width-change reformatting.
 
+### Wait-phase feedback
+
+Each generation opens a collapsed `ThinkingMsg` wait line so it never looks
+frozen:
+
+- `process_generation` creates it *before* consuming the harness stream,
+  labelled `processing` (context ingestion); `Message.begin_phase` starts the
+  clock;
+- at `Start(assistant)` (request in flight) it is relabelled `thinking`, still
+  collapsed, spinner animating via the panel's `TickEvent` path gated to
+  `ui.spinner_fps` (independent of the render fps);
+- at the first content/tool boundary it is finalized and **kept**: its collapsed
+  summary reads a muted `thought for Xs` (`Message.done_label`, from
+  `phase_seconds`) with the normal `▌` message prefix and no done glyph, whether
+  or not the model exposed reasoning. It can be focused to expand the reasoning
+  text.
+
+`generation_presenter.end_status_message()` always finalizes (never drops) the
+wait line and is used at every hard boundary (Token, ToolCall,
+PermissionRequest, Error, cancel, and non-deferred Done). A later turn after
+tool calls opens a fresh wait line.
+
 ---
 
 ## Commands (`commands/` package)

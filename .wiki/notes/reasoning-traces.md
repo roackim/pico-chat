@@ -1,10 +1,14 @@
 # Reasoning Trace Handling in pico-chat
 
-*Investigates whether pico-chat preserves model reasoning/thinking traces across multi-turn conversations.*
+*How pico-chat preserves model reasoning/thinking traces across turns, export and import.*
 
-> **Status**: Reasoning traces are now preserved via the `preserve_reasoning_traces` config flag (default: `off`).
-> When enabled, thinking content accumulated during streaming is folded back into the assistant message
-> as `  thinking...  response` blocks before saving to history.
+> **Status**: Reasoning is **always stored** in history under the assistant entry's
+> `reasoning` field (with the open tag in `reasoning_tag`), so it survives
+> multi-turn context, `/export`, `/import` and the transcript — nothing is lost.
+> The `preserve_reasoning_traces` config flag (default: `off`) now controls only
+> whether that stored reasoning is folded back into the request sent to the
+> model as a `<think>...</think>` block; it no longer controls whether reasoning
+> is kept.
 
 ---
 
@@ -24,6 +28,20 @@ if reasoning:
 
 This handles the non-standard `reasoning_content` field that local inference servers (llama.cpp, vLLM) and some cloud APIs (DeepSeek) use to deliver chain-of-thought traces. The reasoning is accumulated into `full_reasoning` **and** yielded to the UI.
 
+Provider field names differ and are normalized by the transport adapters:
+
+| Provider | Field |
+|---|---|
+| DeepSeek / vLLM / llama.cpp | `delta.reasoning_content` |
+| OpenRouter (and others) | `delta.reasoning` |
+| OpenRouter structured | `delta.reasoning_details[].text` |
+| Ollama native | `message.thinking` |
+
+`endpoint_openai._extract_reasoning()` reads the OpenAI-compatible aliases;
+`endpoint_ollama` maps `thinking`. If a provider's field is not listed here it
+will be silently dropped before the harness sees it — a missing reasoning field
+in an export usually means the adapter, not the harness.
+
 ### 2. Inline thinking tags in `content` field
 
 The code parses content for embedded thinking tags:
@@ -39,38 +57,49 @@ When an opening tag is found in the content stream, content before the tag goes 
 
 ---
 
-## How the Assistant Message is Saved (with `preserve_reasoning_traces`)
+## How the Assistant Message is Saved
 
-After the stream ends, the assistant message is saved to history. When the flag is enabled:
+After the stream ends, the assistant message is saved to history with its raw
+reasoning kept in a dedicated field:
 
 ```python
-if pico_cfg.config.preserve_reasoning_traces and full_reasoning:
-    reconstructed = f"  thinking\n{full_reasoning}\n  \n\n{full_content}"
-    full_content_for_history = reconstructed
-else:
-    full_content_for_history = full_content if full_content else None
-
-msg = {
-    "id": assistant_msg_id,
-    "role": "assistant",
-    "content": full_content_for_history
-}
+msg = {"id": assistant_msg_id, "role": "assistant", "content": full_content or None}
+if full_reasoning:
+    msg["reasoning"] = full_reasoning
+    if detected_tag:
+        msg["reasoning_tag"] = detected_tag   # e.g. "<think>"
+if tool_calls_list:
+    msg["tool_calls"] = tool_calls_list
+self.history.append(msg)
 ```
 
-The reasoning content is folded back into the `content` field using DeepSeek-R1-style `  thinking...  response` tags — the de facto standard format understood by most reasoning models. This reconstructed message is what gets saved to `self.history` and re-sent on subsequent turns.
+`content` is always the raw answer; reasoning is never folded into it at write
+time, so it can be restored exactly.
 
 ---
 
 ## How History is Re-sent to the LLM
 
-On subsequent turns, `_build_messages()` builds the API request:
+On subsequent turns, `_build_messages()` projects each stored entry through
+`Harness._to_api_message()`, which strips `reasoning`/`reasoning_tag` (not valid
+API fields) and — only when `preserve_reasoning_traces` is enabled — folds the
+reasoning back into `content` using the model's own tag:
 
 ```python
 messages = [system_msg]
-messages.extend(self._get_effective_history())  # returns self.history[...]
+messages.extend(self._to_api_message(m) for m in self._get_effective_history())
+
+def _to_api_message(self, entry):
+    msg = {k: v for k, v in entry.items() if k not in ("reasoning", "reasoning_tag")}
+    reasoning = entry.get("reasoning")
+    if reasoning and pico_cfg.config.preserve_reasoning_traces:
+        open_tag, close_tag = self._reasoning_tag_pair(entry.get("reasoning_tag"))
+        msg["content"] = f"{open_tag}\n{reasoning}\n{close_tag}\n\n{msg.get('content') or ''}"
+    return msg
 ```
 
-With the flag enabled, each assistant message in history contains its reasoning traces inline, so the model sees its full prior chain-of-thought.
+With the flag off (default), the model does not see prior chain-of-thought. With
+it on, each assistant message regains its reasoning inline.
 
 ---
 
@@ -82,7 +111,7 @@ Enable in `~/.config/pico-chat/context.toml`:
 preserve_reasoning_traces = true
 ```
 
-The flag defaults to `false` for backward compatibility. Existing users are not affected.
+The flag defaults to `false`; reasoning is still saved either way.
 
 ---
 
@@ -90,10 +119,11 @@ The flag defaults to `false` for backward compatibility. Existing users are not 
 
 | Scenario | Flag Off | Flag On |
 |---|---|---|
-| **Single-turn interactions** | No issue | No issue |
+| **Stored in history / export / import** | ✅ Always preserved | ✅ Always preserved |
+| **Visible in the transcript** | ✅ Always (`▌ thought for Xs`) | ✅ Always |
+| **Model sees prior CoT** | ❌ Not re-sent | ✅ Re-sent inline |
 | **Multi-turn, non-reasoning model** | No issue | No issue (no reasoning to preserve) |
-| **Multi-turn, reasoning model (e.g. DeepSeek-R1)** | ❌ Degraded — prior CoT lost | ✅ Reasoning preserved |
-| **Tool-calling multi-step** | ⚠️ Moderate — reasoning between calls lost | ✅ Reasoning between calls preserved |
+| **Tool-calling multi-step** | Reasoning kept in history for all steps | ✅ Reasoning between calls re-sent |
 
 ---
 

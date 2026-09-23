@@ -69,8 +69,12 @@ class MessageView(Box):
             width, self.content_pad_left, self.content_pad_right))
         base = self.child.get_preferred_height(inner_w)
         if self._visible_actions():
-            return base + 1
-        return base
+            base += 1
+        # A message always occupies at least its gutter row, even when its
+        # content is empty (a thought with no exposed reasoning, an empty
+        # notice, ...). Without this the box collapses to zero rows and the
+        # message — prefix included — vanishes from the transcript.
+        return max(1, base)
 
     def _visible_actions(self):
         if self.parent_msg is not None:

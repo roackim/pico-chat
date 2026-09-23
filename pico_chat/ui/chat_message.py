@@ -1,5 +1,6 @@
 """Chat message representation with formatting and action support."""
 
+import time
 from typing import Any, Optional
 from pico_chat import pico_cfg
 from pico_chat.ui.tui.colors import theme, RGB
@@ -96,6 +97,11 @@ class Message:
         self.collapsed = False        # Whether this message type folds by default and expands on focus.
         self.collapsible = isinstance(msg_type, msg_types.ThinkingMsg)        # Animated spinner frame index (advances on TickEvent while streaming).
         self.spinner_frame = 0
+        # Live wait-phase label for a collapsible status message (e.g.
+        # "processing", "thinking"); rendered collapsed while in flight.
+        self.status_phase: Optional[str] = None
+        self._phase_started_at: Optional[float] = None
+        self.phase_seconds: Optional[float] = None
         
         # Tool-specific metadata
         self.tool_name: Optional[str] = None
@@ -144,6 +150,7 @@ class Message:
         if self._reveal_len < len(self.base_text):
             self.reveal_to(len(self.base_text))
         self.finalized = True
+        self.complete_phase()
         # A finalized message is complete: re-render the previously-open last
         # line with its inline styling (streaming renders it plain).
         if self.render_markdown and hasattr(self.component, "set_streaming"):
@@ -249,6 +256,23 @@ class Message:
             self.layout_revision += 1
             self.box.mark_changed()
 
+    def begin_phase(self, phase: str):
+        """Label this message with the current wait phase (``processing``/``thinking``).
+
+        The first call starts the phase clock; subsequent calls only relabel, so
+        a single message can move processing → thinking without resetting timing.
+        """
+        self.status_phase = phase
+        if self._phase_started_at is None:
+            self._phase_started_at = time.perf_counter()
+        self.box.mark_changed()
+
+    def complete_phase(self):
+        """Stop the phase clock, freezing the elapsed duration for the summary."""
+        if self._phase_started_at is not None:
+            self.phase_seconds = time.perf_counter() - self._phase_started_at
+        self.box.mark_changed()
+
     def advance_spinner(self):
         """Advance the animated spinner frame (called on TickEvent)."""
         self.spinner_frame = (self.spinner_frame + 1) % len(SPINNER_FRAMES)
@@ -331,7 +355,7 @@ class Message:
     def _collapsed_text(self) -> str:
         """Return the single-line summary shown when collapsed."""
         if isinstance(self.type, msg_types.ThinkingMsg):
-            return "thinking"
+            return self.status_phase or "thinking"
         return self.type.title or self.type.name
 
     def done_glyph(self) -> tuple[str, Any]:
@@ -351,7 +375,11 @@ class Message:
     def done_label(self, collapsed_text: str) -> str:
         """Label shown beside the done marker for a finalized collapsed message."""
         if isinstance(self.type, msg_types.ThinkingMsg):
-            return "thoughts"
+            if self.phase_seconds is None:
+                return "thoughts"
+            seconds = self.phase_seconds
+            shown = f"{seconds:.1f}" if seconds < 10 else f"{seconds:.0f}"
+            return f"thought for {shown}s"
         return collapsed_text
 
     def render_collapsed_line(self, subbuffer, max_width: int, fg, bg) -> None:
@@ -365,6 +393,10 @@ class Message:
         if not self.finalized:
             frame = SPINNER_FRAMES[self.spinner_frame % len(SPINNER_FRAMES)]
             line = f"{frame} {text}"
+        elif isinstance(self.type, msg_types.ThinkingMsg):
+            # Muted summary only: no done glyph, the message prefix carries the
+            # identity (kept in the caller's muted fg).
+            line = self.done_label(text)
         else:
             done_glyph, done_color = self.done_glyph()
             line = f"{done_color}{done_glyph}{theme.reset()} {self.done_label(text)}"

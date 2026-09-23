@@ -95,13 +95,27 @@ def test_thinking_spinner_animates_while_streaming():
     assert "⠙" in second  # spinner frame 1
     assert second != first
 
-    # Once finalized, the spinner is replaced by a done marker + "thoughts".
+    # Once finalized, the spinner is replaced by a muted summary line with the
+    # normal message prefix and no done glyph.
     msg.finalize()
     finalized = row()
     assert "⠋" not in finalized
     assert "⠙" not in finalized
-    assert "✓" in finalized
+    assert "✓" not in finalized
+    assert "▌" in finalized
     assert "thoughts" in finalized
+
+
+def test_empty_message_keeps_minimum_row():
+    """An empty message must not collapse to zero rows.
+
+    A thought with no exposed reasoning is empty; focusing it used to un-collapse
+    it to a zero-height box, so the message and its prefix vanished.
+    """
+    from pico_chat.ui.tui.msg_types import ThinkingMsg
+
+    msg = Message("", msg_type=ThinkingMsg(), max_width=40)
+    assert msg.get_component().get_preferred_height(40) == 1
 
 
 def test_thinking_done_glyph_and_label():

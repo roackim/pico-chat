@@ -44,6 +44,25 @@ def _adapt_tool_calls(raw_calls: Any) -> list:
     return adapted
 
 
+def _extract_reasoning(data: Dict[str, Any]) -> Optional[str]:
+    """Read reasoning from whichever field a provider uses.
+
+    DeepSeek/vLLM/llama.cpp stream ``reasoning_content``; OpenRouter and others
+    stream ``reasoning`` (and may also expose structured ``reasoning_details``).
+    """
+    reasoning = data.get("reasoning_content")
+    if reasoning is None:
+        reasoning = data.get("reasoning")
+    if reasoning is None:
+        details = data.get("reasoning_details")
+        if isinstance(details, list):
+            joined = "".join(
+                item.get("text") or "" for item in details if isinstance(item, dict)
+            )
+            reasoning = joined or None
+    return reasoning
+
+
 def _adapt_stream_chunk(data: Dict[str, Any]) -> Any:
     """Adapt one streaming ``chat.completions`` SSE object to SDK chunk shape."""
     choice = None
@@ -55,7 +74,7 @@ def _adapt_stream_chunk(data: Dict[str, Any]) -> Any:
             index=rc.get("index", 0),
             delta=SimpleNamespace(
                 content=delta.get("content"),
-                reasoning_content=delta.get("reasoning_content"),
+                reasoning_content=_extract_reasoning(delta),
                 refusal=delta.get("refusal"),
                 tool_calls=_adapt_tool_calls(delta.get("tool_calls")),
             ),
@@ -73,6 +92,7 @@ def _adapt_message(message: Dict[str, Any]) -> SimpleNamespace:
     return SimpleNamespace(
         role=message.get("role"),
         content=message.get("content"),
+        reasoning_content=_extract_reasoning(message),
         refusal=message.get("refusal"),
         tool_calls=_adapt_tool_calls(message.get("tool_calls")),
     )

@@ -132,6 +132,64 @@ def test_reasoning_complete_before_content_appears():
     assert think[0].finalized is True
 
 
+def test_processing_phase_shown_while_context_is_ingested():
+    """The wait line is labelled "processing" until the request is in flight."""
+    ui = chatTUI(StubAgent())
+    observed = {}
+    clock = [0.0]
+    ui._clock = lambda: clock[0]
+
+    async def chat(_):
+        # Runs during context ingestion, before the first harness event.
+        observed["phase"] = _messages(ui)[-1].status_phase
+        yield events.Start(message_id="m1", role="assistant")
+        observed["after_start"] = _messages(ui)[-1].status_phase
+        yield events.Token(text="hi")
+        yield events.Done()
+
+    ui.agent.chat = chat
+    asyncio.run(ui._process_generation("hello", ui.chat_history_panel.add_message("hello")))
+
+    assert observed["phase"] == "processing"
+    assert observed["after_start"] == "thinking"
+
+
+def test_thought_message_kept_when_model_exposes_no_reasoning():
+    """Even with no Reasoning events, the wait line stays as a thought summary."""
+    ui = chatTUI(StubAgent())
+    script = [
+        events.Start(message_id="m1", role="assistant"),
+        events.Token(text="hi"),
+        events.Done(),
+    ]
+    _run_script(ui, script)
+
+    think = [m for m in _messages(ui) if isinstance(m.type, ThinkingMsg)]
+    assert len(think) == 1
+    assert think[0].finalized is True
+    assert think[0].status_phase == "thinking"
+    assert think[0].phase_seconds is not None
+    assert "thought for" in think[0].done_label("thinking")
+    assert len(_pico(ui)) == 1
+
+
+def test_thinking_message_finalizes_to_duration_summary():
+    ui = chatTUI(StubAgent())
+    script = [
+        events.Start(message_id="m1", role="assistant"),
+        events.Reasoning(text="thinking hard"),
+        events.Token(text="answer"),
+        events.Done(),
+    ]
+    _run_script(ui, script)
+
+    think = [m for m in _messages(ui) if isinstance(m.type, ThinkingMsg)]
+    assert len(think) == 1
+    assert think[0].status_phase == "thinking"
+    assert think[0].phase_seconds is not None
+    assert "thought for" in think[0].done_label("thinking")
+
+
 def test_error_retains_arrived_text_and_drains():
     ui = chatTUI(StubAgent())
     script = [

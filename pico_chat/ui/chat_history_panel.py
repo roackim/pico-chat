@@ -54,6 +54,10 @@ class ChatHistoryPanel(TextComponent):
         self._flash_msg: Optional[Message] = None
         self._flash_action_key: Optional[str] = None  # e.g. "c" for COPY
         self._flash_until: float = 0.0  # monotonic time when flash expires
+        # Spinner cadence is decoupled from the render fps (see ui.spinner_fps);
+        # tick events arrive every frame, but the glyph only advances at this
+        # slower rate so it doesn't blur.
+        self._spinner_next_at: float = 0.0
         
         # Initial component - self is now the component
         self.compositor: Optional[object] = None
@@ -445,12 +449,16 @@ class ChatHistoryPanel(TextComponent):
     def handle_input(self, event: Any) -> bool:
         """Handle mouse wheel for scrolling and keyboard navigation."""
         # Animate the spinner on any in-progress message: collapsible (thinking)
-        # or live tool messages (running command / pending permission).
+        # or live tool messages (running command / pending permission). Tick
+        # events fire every render frame, so gate the glyph on ui.spinner_fps.
         if isinstance(event, TickEvent):
-            for msg in self.messages:
-                if not getattr(msg, "finalized", True):
-                    if getattr(msg, "collapsible", False) or getattr(msg, "is_tool_message", lambda: False)():
-                        msg.advance_spinner()
+            interval = 1.0 / max(1, pico_cfg.config.ui_spinner_fps)
+            if event.timestamp >= self._spinner_next_at:
+                self._spinner_next_at = event.timestamp + interval
+                for msg in self.messages:
+                    if not getattr(msg, "finalized", True):
+                        if getattr(msg, "collapsible", False) or getattr(msg, "is_tool_message", lambda: False)():
+                            msg.advance_spinner()
             return False
 
         # Handle keyboard input only if this panel has keyboard focus

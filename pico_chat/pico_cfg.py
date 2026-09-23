@@ -129,6 +129,7 @@ DEFAULT_UI_TOML = """\
 # status_bar_fields = ["endpoint_model", "role", "context"]
 # stream_smoothing = true             # reveal streamed text smoothly
 # smooth_target_fps = 60              # reveal cadence (independent of render fps)
+# spinner_fps = 10                    # braille spinner cadence (independent of render fps)
 # target_fps = 60
 """
 
@@ -139,7 +140,7 @@ DEFAULT_CONTEXT_TOML = """\
 # max_files = 500
 # max_depth = 4
 # ignore_gitignore = false
-# preserve_reasoning_traces = false
+# preserve_reasoning_traces = false  # re-send prior reasoning to the model (always stored)
 """
 
 DEFAULT_SUBAGENTS_TOML = """\
@@ -278,6 +279,7 @@ _UI_SPEC: Dict[str, tuple[str, str]] = {
     "status_bar_fields": ("ui_status_bar_fields", "str_list"),
     "stream_smoothing": ("ui_stream_smoothing", "bool"),
     "smooth_target_fps": ("ui_smooth_target_fps", "int"),
+    "spinner_fps": ("ui_spinner_fps", "int"),
     "target_fps": ("target_fps", "int"),
 }
 
@@ -525,6 +527,7 @@ class Config:
         self.ui_status_bar_fields: list[str] = ["endpoint_model", "role", "context"]
         self.ui_stream_smoothing: bool = True
         self.ui_smooth_target_fps: int = 60
+        self.ui_spinner_fps: int = 10
         self.target_fps: int = 60
 
         # Debug / reasoning.
