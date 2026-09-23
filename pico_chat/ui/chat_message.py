@@ -64,6 +64,10 @@ class Message:
             content_color = getattr(theme, color_name, None)
         
         self.base_text = text
+        # Number of characters of ``base_text`` currently rendered. While
+        # streaming, ``base_text`` is the full arrived text and this prefix is
+        # what the component shows; non-streamed messages keep them in sync.
+        self._reveal_len = len(text)
         self.max_width = max_width
         self.layout_revision = 0
         self.left_pad = left_pad
@@ -135,6 +139,10 @@ class Message:
         )
     
     def finalize(self):
+        # A finalized message is complete: drain any un-revealed arrived text so
+        # the full content is rendered before the inline styling is applied.
+        if self._reveal_len < len(self.base_text):
+            self.reveal_to(len(self.base_text))
         self.finalized = True
         # A finalized message is complete: re-render the previously-open last
         # line with its inline styling (streaming renders it plain).
@@ -363,17 +371,19 @@ class Message:
 
         subbuffer.write_str(2, 0, line, fg=fg, bg=bg, max_width=max(0, max_width))
     
-    def _format_line_wrap(self) -> str:
+    def _format_line_wrap(self, text: Optional[str] = None) -> str:
         """Format the message text with smart word wrapping and padding.
-        
+
         Uses the provided left and right padding for each line.
         Normalises the text first: strips trailing whitespace on every line
         and collapses runs of blank lines into a single blank line so that
         streaming artefacts (extra \\n from chunk boundaries) don't bloat
         the display.  Existing intentional newlines are preserved.
         """
+        if text is None:
+            text = self.base_text
         if self.max_width is None or self.max_width <= 0:
-            return self.base_text
+            return text
 
         # ``max_width`` is already the content width (the panel subtracts the
         # gutter and padding); the Box applies the padding at render time.
@@ -382,7 +392,7 @@ class Message:
             content_width = 1
         
         # Convert literal \n escape sequences to real newlines (thinking messages)
-        base_text = self.base_text.replace('\\n', '\n')
+        base_text = text.replace('\\n', '\n')
         
         # Strip trailing newlines from the whole block
         base_text = base_text.rstrip('\n')
@@ -422,26 +432,31 @@ class Message:
 
         Args:
             max_width: New maximum width for line wrapping
-            append: True when the text was only extended (streaming); enables
-                the incremental parse/render fast path.
+            append: True when the rendered text was only extended (streaming);
+                enables the incremental parse/render fast path.
 
         Returns:
             The newly formatted text (plain-text fallback for markdown)
         """
         self.max_width = max_width
+        return self._render_revealed(append=append)
+
+    def _render_revealed(self, append: bool = False) -> str:
+        """Render ``base_text[:self._reveal_len]`` into the component."""
         self.layout_revision += 1
+        text = self.base_text[:self._reveal_len]
 
         if self._is_markdown():
             # MarkdownComponent handles wrapping internally via set_layout / width
-            self.component.update(self.base_text, append=append)
+            self.component.update(text, append=append)
             self.box.mark_changed()
-            return self.base_text
+            return text
         else:
-            self.formatted_text = self._format_line_wrap()
+            self.formatted_text = self._format_line_wrap(text)
             self.component.update(self.formatted_text)
             self.box.mark_changed()
             return self.formatted_text
-    
+
     def get_formatted(self) -> str:
         """Get the current formatted text."""
         return self.formatted_text
@@ -451,16 +466,36 @@ class Message:
         return self.box
 
 
-    def append(self, text: str):
-        """Append text to the message and reformat.
+    def ingest(self, text: str):
+        """Append arrived text without rendering it (streaming).
 
         Leading whitespace on the very first chunk is dropped (models often
-        open with a space; user input is stripped on submit).
+        open with a space; user input is stripped on submit). The rendered
+        prefix is advanced separately by ``reveal_to``.
         """
         if not self.base_text:
             text = text.lstrip()
         self.base_text += text
-        self.reformat(self.max_width, append=True)
+
+    def reveal_to(self, n: int):
+        """Reveal up to ``n`` characters of the arrived text.
+
+        Never reveals past ``base_text``. Uses the append-only fast path when
+        the prefix grows.
+        """
+        n = max(0, min(n, len(self.base_text)))
+        grew = n >= self._reveal_len
+        self._reveal_len = n
+        self._render_revealed(append=grew)
+
+    def append(self, text: str):
+        """Append text and reveal it all (non-streamed callers).
+
+        Leading whitespace on the very first chunk is dropped (models often
+        open with a space; user input is stripped on submit).
+        """
+        self.ingest(text)
+        self.reveal_to(len(self.base_text))
     
     def rebuild_tool_display(self):
         """Rebuild tool message display text based on current metadata and show_output state."""
@@ -587,6 +622,7 @@ class Message:
                     lines.append(f"     {line}")  # Indent continuation lines
         
         self.base_text = '\n'.join(lines)
+        self._reveal_len = len(self.base_text)
         self.reformat(self.max_width)
     
     def update_metrics(self, tokens: int, tokens_per_second: float, ttft_ms: Optional[float] = None, duration_ms: Optional[float] = None):

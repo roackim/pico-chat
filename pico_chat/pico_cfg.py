@@ -22,6 +22,7 @@ project-local overrides, and reloading is explicit (``/reload``).
 from __future__ import annotations
 
 import os
+import re
 import toml
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional
@@ -126,6 +127,8 @@ DEFAULT_UI_TOML = """\
 # metrics_show_ttft = false
 # metrics_refresh_interval = 0.1
 # status_bar_fields = ["endpoint_model", "role", "context"]
+# stream_smoothing = true             # reveal streamed text smoothly
+# smooth_target_fps = 60              # reveal cadence (independent of render fps)
 # target_fps = 60
 """
 
@@ -273,6 +276,8 @@ _UI_SPEC: Dict[str, tuple[str, str]] = {
     "metrics_show_ttft": ("ui_metrics_show_ttft", "bool"),
     "metrics_refresh_interval": ("ui_metrics_refresh_interval", "float"),
     "status_bar_fields": ("ui_status_bar_fields", "str_list"),
+    "stream_smoothing": ("ui_stream_smoothing", "bool"),
+    "smooth_target_fps": ("ui_smooth_target_fps", "int"),
     "target_fps": ("target_fps", "int"),
 }
 
@@ -294,6 +299,95 @@ _SUBAGENT_SPEC: Dict[str, tuple[str, str]] = {
 _DEBUG_SPEC: Dict[str, tuple[str, str]] = {
     "log_enabled": ("debug_log_enabled", "bool"),
 }
+
+# Keys removed from a flat section but kept here so existing user files can be
+# cleaned up on startup. Add a key here when you delete it from its ``*_SPEC``
+# and ``DEFAULT_*_TOML`` (see "Adding or deprecating a config key" in AGENTS.md).
+_RETIRED_UI: set[str] = set()
+_RETIRED_CONTEXT: set[str] = set()
+_RETIRED_SUBAGENTS: set[str] = set()
+_RETIRED_DEBUG: set[str] = set()
+
+# Flat sections that can be synced line-by-line against their template. Each
+# maps to ``(template, retired_keys)``. Structured sections (styles, servers,
+# themes) are user-authored tables and are deliberately not synced.
+_FLAT_SECTION_SYNC: Dict[str, tuple[str, set[str]]] = {
+    "ui": (DEFAULT_UI_TOML, _RETIRED_UI),
+    "context": (DEFAULT_CONTEXT_TOML, _RETIRED_CONTEXT),
+    "subagents": (DEFAULT_SUBAGENTS_TOML, _RETIRED_SUBAGENTS),
+    "debug": (DEFAULT_DEBUG_TOML, _RETIRED_DEBUG),
+}
+
+_KEY_LINE_RE = re.compile(r"^\s*#?\s*([A-Za-z_][A-Za-z0-9_]*)\s*=")
+
+
+def _template_key_lines(template: str) -> "list[tuple[str, str]]":
+    """Return ``[(key, line), ...]`` for every key line in a template."""
+    entries = []
+    for line in template.splitlines():
+        match = _KEY_LINE_RE.match(line)
+        if match:
+            entries.append((match.group(1), line))
+    return entries
+
+
+def _sync_flat_file(path: Path, template: str, retired: "set[str]") -> bool:
+    """Insert missing commented keys and drop retired ones.
+
+    Line-preserving: user values, comments, and ordering are left alone. Only
+    keys named by the template or the ``retired`` set are touched. Returns True
+    when the file changed.
+    """
+    if not path.exists():
+        return False
+    original = path.read_text(encoding="utf-8")
+    lines = original.splitlines(keepends=True)
+
+    known = {}
+    for key, line in _template_key_lines(template):
+        known.setdefault(key, line)
+
+    kept = []
+    present: set[str] = set()
+    for line in lines:
+        match = _KEY_LINE_RE.match(line)
+        key = match.group(1) if match else None
+        if key is not None:
+            if key in retired:
+                continue  # drop deprecated key
+            present.add(key)
+        kept.append(line)
+
+    missing = [key for key in known if key not in present]
+    if missing:
+        if kept and not kept[-1].endswith("\n"):
+            kept[-1] += "\n"
+        order = list(known)
+        template_index = {key: i for i, key in enumerate(order)}
+        positions: dict[str, int] = {}
+        for index, line in enumerate(kept):
+            match = _KEY_LINE_RE.match(line)
+            if match and match.group(1) in known:
+                positions.setdefault(match.group(1), index)
+        for key in missing:
+            insert_at = len(kept)
+            for following in order[template_index[key] + 1:]:
+                if following in positions:
+                    insert_at = positions[following]
+                    break
+            kept.insert(insert_at, known[key] + "\n")
+            positions = {
+                pk: (pv + 1 if pv >= insert_at else pv)
+                for pk, pv in positions.items()
+            }
+            positions[key] = insert_at
+
+    updated = "".join(kept)
+    if updated == original:
+        return False
+    path.write_text(updated, encoding="utf-8")
+    return True
+
 
 _STYLE_SECTIONS = {"markdown_styles", "syntax_highlight"}
 
@@ -429,6 +523,8 @@ class Config:
         self.ui_metrics_show_ttft: bool = False
         self.ui_metrics_refresh_interval: float = 0.1
         self.ui_status_bar_fields: list[str] = ["endpoint_model", "role", "context"]
+        self.ui_stream_smoothing: bool = True
+        self.ui_smooth_target_fps: int = 60
         self.target_fps: int = 60
 
         # Debug / reasoning.
@@ -575,14 +671,34 @@ class Config:
         return True
 
     def ensure_section_file(self, section: str) -> Path:
-        """Create a section file from its commented template if missing."""
+        """Create a section file from its commented template if missing.
+
+        Existing flat-section files are also synced (missing keys inserted,
+        retired keys removed) so ``/config <section>`` always shows current
+        keys.
+        """
         if section not in CONFIG_FILES:
             raise KeyError(section)
         path = self.section_file(section)
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(DEFAULT_CONFIG_TEMPLATES[section], encoding="utf-8")
+        elif section in _FLAT_SECTION_SYNC:
+            template, retired = _FLAT_SECTION_SYNC[section]
+            _sync_flat_file(path, template, retired)
         return path
+
+    def sync_section_files(self) -> list[str]:
+        """Sync every existing flat section file; return changed sections.
+
+        Called on startup so keys added (or retired) since a user's config was
+        first written appear in their file.
+        """
+        changed = []
+        for section, (template, retired) in _FLAT_SECTION_SYNC.items():
+            if _sync_flat_file(self.section_file(section), template, retired):
+                changed.append(section)
+        return changed
 
     def ensure_config_files(self) -> list[Path]:
         """Create every missing section file from its commented template."""
@@ -817,3 +933,11 @@ config: Config = Config()
 def reload_config() -> list[str]:
     """Reload the global config from disk; return validation errors."""
     return config.reload()
+
+
+def sync_config_files() -> list[str]:
+    """Insert new commented keys and drop retired keys in existing flat files.
+
+    Returns the list of changed sections. Safe to call on every startup.
+    """
+    return config.sync_section_files()

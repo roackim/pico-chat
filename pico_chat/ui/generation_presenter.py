@@ -3,6 +3,12 @@
 ``process_generation`` drives one ``agent.chat()`` stream and translates each
 harness event into UI mutations on the app. It lives outside ``app.py`` so the
 event→UI mapping can be read on its own.
+
+Streamed text (Token/Reasoning) is routed through the app's revealer when
+smoothing is enabled: the message stores the canonical arrived text via
+``ingest`` while the revealer paces how much of it is rendered. Hard boundaries
+(tool calls, permission requests, errors, reasoning↔content switches) flush the
+revealer synchronously before the next block so ordering always wins.
 """
 from __future__ import annotations
 
@@ -33,12 +39,18 @@ async def process_generation(app, user_input, user_msg) -> None:
     chat = app.chat_history_panel
     agent = app.agent
     app.refresh_status_bar()
+
+    if hasattr(app, "reset_stream_revealer"):
+        app.reset_stream_revealer()
+    smoothing = getattr(app, "stream_revealer", None) is not None
+
     # No placeholder status message: the first real chunk creates its own
     # message. This keeps the conversation free of transient "Sending
     # request..." / "Processing results..." clutter.
     current_msg = None
     current_msg_type = None
     current_harness_ids = []
+    natural_done = False
 
     def ensure_tool_message_type(msg: Message, target_type: MsgType) -> Message:
         if isinstance(msg.type, type(target_type)):
@@ -56,15 +68,24 @@ async def process_generation(app, user_input, user_msg) -> None:
         chat.replace_message(msg, new_msg)
         return new_msg
 
-    if app.compositor and hasattr(app.compositor, "set_streaming_active"):
-        app.compositor.set_streaming_active(True)
+    def begin_text_message(msg: Message) -> None:
+        if smoothing:
+            app.start_stream_message(msg)
+
+    def emit_text(text: str) -> None:
+        if smoothing:
+            current_msg.ingest(text)
+            app.stream_ingest(text)
+        else:
+            current_msg.append(text)
+
+    def flush_text() -> None:
+        if smoothing:
+            app.flush_stream()
 
     # Process streaming events from Harness
     try:
         async for event in agent.chat(user_input):
-            if app.compositor and hasattr(app.compositor, "request_render"):
-                app.compositor.request_render()
-
             if isinstance(event, events.Start):
                 current_harness_ids = [event.message_id]
                 logger.debug(f"Start: {event.role} with ID {event.message_id}")
@@ -79,25 +100,29 @@ async def process_generation(app, user_input, user_msg) -> None:
                 # If not currently in a thinking message, create one
                 if current_msg_type != ThinkingMsg:
                     if current_msg is not None:
-                        # Finalize previous and create new
+                        # Flush previous and create new
+                        flush_text()
                         current_msg.finalize()
                     current_msg = chat.add_message("", msg_type=ThinkingMsg(), harness_message_ids=current_harness_ids)
                     # Thinking folds to a single line by default; expand on focus.
                     current_msg.set_collapsed(True)
                     current_msg_type = ThinkingMsg
+                    begin_text_message(current_msg)
 
-                current_msg.append(event.text)
+                emit_text(event.text)
 
             elif isinstance(event, events.Token):
                 # If not currently in a content message, create one
                 if current_msg_type != PicoMsg:
                     if current_msg is not None:
-                        # Finalize previous and create new
+                        # Flush previous and create new
+                        flush_text()
                         current_msg.finalize()
                     current_msg = chat.add_message("", msg_type=PicoMsg(), harness_message_ids=current_harness_ids)
                     current_msg_type = PicoMsg
+                    begin_text_message(current_msg)
 
-                current_msg.append(event.text)
+                emit_text(event.text)
 
             elif isinstance(event, events.ToolCall):
                 tool_id = event.id
@@ -106,6 +131,7 @@ async def process_generation(app, user_input, user_msg) -> None:
 
                 # Flush any incomplete text message before showing tool draft
                 if current_msg_type in (ThinkingMsg, PicoMsg) and current_msg:
+                    flush_text()
                     current_msg.finalize()
 
                 if not msg:
@@ -128,6 +154,7 @@ async def process_generation(app, user_input, user_msg) -> None:
 
                 # Flush any incomplete text message before showing tool request
                 if current_msg_type in (ThinkingMsg, PicoMsg) and current_msg:
+                    flush_text()
                     current_msg.finalize()
 
                 msg = app.active_tool_messages.get(tool_id)
@@ -221,13 +248,20 @@ async def process_generation(app, user_input, user_msg) -> None:
 
             elif isinstance(event, events.Error):
                 if current_msg is not None:
+                    flush_text()
                     current_msg.finalize()
                     current_msg = None
                     current_msg_type = None
+                if smoothing:
+                    app.disengage_stream()
                 chat.add_message(event.message, msg_type=SysMsgError())
 
             elif isinstance(event, events.Done):
-                pass
+                # Natural completion: let the revealer drain over its remaining
+                # window; the frame callback finalizes once it is empty.
+                if smoothing:
+                    app.defer_stream_finalize()
+                natural_done = True
 
             # Ensure we scroll to bottom if needed
             if chat.auto_scroll:
@@ -245,7 +279,10 @@ async def process_generation(app, user_input, user_msg) -> None:
         # Avoid appending ANSI codes to a MarkdownComponent message (PicoMsg)
         # since the component would render the escape sequences as literal text.
         if current_msg is not None:
+            flush_text()
             current_msg.finalize()
+        if smoothing:
+            app.disengage_stream()
         chat.add_message("[Generation stopped]", msg_type=SysMsg())
         raise
 
@@ -253,8 +290,13 @@ async def process_generation(app, user_input, user_msg) -> None:
         raise e
 
     finally:
-        if app.compositor and hasattr(app.compositor, "set_streaming_active"):
-            app.compositor.set_streaming_active(False)
-        if current_msg is not None:
-            current_msg.finalized = True
-            current_msg.update_actions()
+        # Backstop for torn-down/aborted streams. On a natural Done with
+        # smoothing on, the frame callback owns finalization so the reveal can
+        # finish animating; otherwise finalize now.
+        if not natural_done or not smoothing:
+            flush_text()
+            if current_msg is not None:
+                current_msg.finalize()
+                current_msg.update_actions()
+            if smoothing:
+                app.disengage_stream()

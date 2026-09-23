@@ -18,14 +18,18 @@ def main():
     # Initialize harness first
     print("Initializing Pico-Chat Harness...")
     from pico_chat.harness import roles
+    from pico_chat import pico_cfg
 
     roles.ensure_roles_dir()
+    # Insert commented lines for newly added config keys (and drop retired ones)
+    # in existing files, then reload so the fresh file is what the app sees.
+    pico_cfg.sync_config_files()
+    pico_cfg.reload_config()
     harness = get_harness()
     print() 
 
     # Apply theme from config
     from pico_chat.ui.tui.colors import set_theme
-    from pico_chat import pico_cfg
     set_theme(pico_cfg.config.get_active_theme())
 
     tui = chatTUI(harness)

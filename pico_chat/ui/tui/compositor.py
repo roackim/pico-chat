@@ -29,7 +29,7 @@ class Compositor:
         self._full_redraw = True
         self.idle_sleep_seconds = 0.0
         self._wake_event = asyncio.Event()
-        self.streaming_active = False
+        self._frame_callbacks: list = []
 
         # Scroll coalescing: touchpads emit a high-frequency burst of tiny wheel
         # deltas. We accumulate them and dispatch a single event per frame so we
@@ -99,10 +99,32 @@ class Compositor:
         self._full_redraw = True
         self.request_render()
 
-    def set_streaming_active(self, active: bool):
-        """Mark whether high-frequency LLM streaming is in progress."""
-        self.streaming_active = active
-        self.request_render()
+    def add_frame_callback(self, cb):
+        """Register a per-frame callback invoked with the current time.
+
+        The callback returns ``True`` when it produced work and a repaint is
+        needed. Callbacks may unregister themselves (or others) from within the
+        callback; iteration runs over a copy.
+        """
+        if cb not in self._frame_callbacks:
+            self._frame_callbacks.append(cb)
+
+    def remove_frame_callback(self, cb):
+        """Unregister a callback previously passed to ``add_frame_callback``."""
+        try:
+            self._frame_callbacks.remove(cb)
+        except ValueError:
+            pass
+
+    def _run_frame_callbacks(self, now: float) -> bool:
+        """Invoke every registered frame callback; return True if any had work."""
+        work = False
+        for cb in list(self._frame_callbacks):
+            if cb(now):
+                work = True
+        if work:
+            self.request_render()
+        return work
 
     def _handle_shutdown_key(self, event) -> bool:
         key = event.key if isinstance(event, KeyEvent) else event
@@ -203,8 +225,10 @@ class Compositor:
                 if self.event_router.dispatch(TickEvent(time.perf_counter())):
                     self.request_render()
 
+                self._run_frame_callbacks(time.perf_counter())
+
                 has_dirty = self.root.is_dirty() if hasattr(self.root, 'is_dirty') else True
-                should_render = self.streaming_active or self._render_requested or has_dirty
+                should_render = self._render_requested or has_dirty
 
                 if not should_render:
                     idle_timeout = (1.0 / current_fps) if current_fps > 0 else (self.idle_sleep_seconds or 0.016)

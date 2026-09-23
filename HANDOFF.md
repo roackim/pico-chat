@@ -1,6 +1,6 @@
 # Pico-Chat — Handoff
 
-**Branch:** `cleanup` · **Suite:** 524 passing · **Last updated:** 2026-09-22
+**Branch:** `cleanup` · **Suite:** 457 passing · **Last updated:** 2026-09-23
 **HEAD:** `caaa359 UI tweaks`
 **Recent commits (newest first):**
 `caaa359 UI tweaks` · `cc9fbf2 pruning` · `43d0ca7 Input completion unification`
@@ -25,7 +25,7 @@ Canonical plans: `SIMPLIFICATION.md` (R1–R11), `plans/message_ui_rework.md`,
 ## 1. Commands / gates
 
 ```bash
-.pixi/envs/default/bin/python -m pytest test/ -q            # 524 passing
+.pixi/envs/default/bin/python -m pytest test/ -q            # 457 passing
 .pixi/envs/default/bin/python -m compileall -q pico_chat
 .pixi/envs/default/bin/python -m vulture pico_chat --min-confidence 80
 .pixi/envs/default/bin/python -m pytest test/test_core_ui_boundary.py -q        # R9 guard
@@ -72,16 +72,25 @@ beside it and keep `chatTUI` thin (methods delegate):
 ### Commands
 `ui/commands/registry.py` is the single assembly point. Leaf commands are plain
 `async def` handlers wrapped in `Command(name, description, handler=…, params=…)`;
-only real subcommand trees stay as classes (`ServerCommand`, `DebugCommand`,
-`OpenRouterCommand`). `help`'s handler is `registry._help` (it needs the whole
-registry). Domain modules import **only** `base` (enforced by
+`ConfigCommand` is the only `Command` subclass (contextual role/theme
+completion). `help`'s handler is `registry._help` (it needs the whole registry).
+Domain modules import **only** `base` (enforced by
 `test_command_import_graph.py`).
+
+Registered: `help`, `clear`, `reload`, `config`, `edit`, `export`, `import`,
+`compact`, `exit`, `stop`, `activity`, `model`, `role`, `theme`.
+The old `/pwd`, `/cd`, `/server`, `/debug`, `/openrouter`, `/status` commands
+(and earlier `/roles`/`/tools`) are **removed**; server config is files
+(`/config servers`), model selection is `/model`, themes are `/theme`, debug
+logging is `debug.toml`.
 - `/import <file>` and `/export <file>` are top-level leaves (the old
   `/conversation import|export` tree is gone).
 - `/model` is a leaf: no args → searchable picker; `<model>`/`server:model` →
   select directly. `/model list` is gone.
+- `/role` lists/switches roles; `/theme` picks a color theme (built-ins +
+  `themes.toml`), persisted in `state.toml`.
 - Descriptions flow to the UI via `get_command_descriptions()` /
-  `get_subcommand_descriptions()`.
+  `get_subcommand_descriptions()`; argument menus also show `Param.descriptions`.
 
 ### Input completion
 One module, `ui/tui/components/input/completion.py`, holds the `Completer` base
@@ -149,6 +158,46 @@ forwarding, `xclip`) or an OSC 52-capable terminal.
 
 ## 3. Done recently
 
+- **Roles rework (W1–W4 of `plans/roles_rework.md`):** the permission engine is
+  gone. A `Role` is now `description` + `prompt` + `tools: dict[str, str]`
+  (`no`/`ask`/`yes`); `PermissionGate` maps the value to `deny`/`ask`/`allow`
+  and owns only the prompt + user-response queue. `permissions.py` shrank from
+  ~760 to ~100 lines (no `SecurityChecker`, no command lists, no profiles, no
+  path confinement). `tools.py`/`harness.py` lost all policy plumbing.
+  Built-ins `agent` (all `yes`) and `chat` (all `no`) are seeded as files by
+  `roles.ensure_roles_dir()`; `create_role` writes all tools `no`; `scaffolder`
+  stays code-only for subagents. Commands: `/role` (list/switch),
+  `/config role <id>` and `/config role delete <id> confirm`; `/tools` deleted.
+  Role files are validated by `roles.validate_roles()` (surfaced by `/reload`).
+- **System prompt is role-owned:** `harness/system_prompt.py` is deleted. The
+  system message is exactly the active role's `prompt` (empty → no system
+  message), built by `Harness._system_messages()`; `get_system_prompt()` returns
+  it. Edit it in `roles/<name>.toml`. `/config role` now offers role-name
+  completions (`ConfigCommand.get_completions` + `Command.get_completions`
+  gained a `prior_args` parameter).
+- **Themes:** `themes.toml` (`[themes.<name>]` palettes) + `/theme` picker
+  (`terminal` default, plus 13 RGB built-ins: `pastel`, `nord`, `dracula`,
+  `gruvbox`, `solarized`, `one-dark`, `catppuccin`, `tokyo-night`, `rose-pine`,
+  `everforest`, `monokai`, `ayu-dark`, `kanagawa`; user definitions merge in;
+  ANSI or hex colors). No `default` alias.
+  Selection persists in `state.toml` (`active_theme`); `/config theme` edits the
+  file and `/config theme <id>` materializes a `[themes.<id>]` override section
+  (with theme-name suggestions) then opens it. Palette-only; markdown/syntax styles stay in `styles.toml`. The picker
+  **previews on highlight** (`SearchModal.on_highlight`), shows a
+  `ThemePreview` swatch overlay while browsing, and on cancel reloads the
+  configured theme. `/theme` has **no inline argument completion** so Enter
+  always opens the picker.
+  A theme switch calls `chatTUI.refresh_theme()` (re-resolves chrome + every
+  message + overlays/menus + status-bar field colors) and
+  `Compositor.request_full_redraw()`.
+- **Command surface trimmed:** removed `/pwd`, `/cd`, `/server`, `/debug`,
+  `/openrouter`, `/status` (keeping `/activity`). Server config is files, model
+  selection `/model`, themes `/theme`, debug logging `debug.toml`. Remaining:
+  `help, clear, reload, config, edit, export, import, compact, exit, stop,
+  activity, model, role, theme`.
+- **Completion menus unified:** all four providers use
+  `Completer._apply_selector_style()` (full width, `USER` frame, `DEFAULT`
+  content) and show `Param.descriptions`; see the wiki rule.
 - **Clipboard / SSH:** native helpers then OSC 52 (see §2). `handle_copy_action`,
   `_auto_copy_selection`, `/debug get_context` all use `ui/clipboard.py`.
 - **Ollama 422 fix:** `content=None` on tool-call-only assistant turns; fixed via
@@ -209,6 +258,19 @@ Open improvements not yet requested but worth considering:
 - Tests isolate config by monkeypatching **module functions**
   (`pico_cfg.get_config_dir`, `get_state_path`, `get_roles_dir`,
   `roles._ROLES_DIR`). Follow that pattern for new tests.
+- Roles: `Role.tools` is a `dict[str, str]` of `no`/`ask`/`yes`;
+  `enabled_tool_names()` = values != `no` (the harness filters `tools_map` /
+  `tool_schemas` by it). `PermissionGate(role=…)` → `allow`/`ask`/`deny`.
+  Role files are top-level `<tool> = "…"` keys beside `description`/`prompt`.
+  Built-in files are seeded on startup; `roles.validate_roles()` reports
+  unknown tools / bad values. `/reload` runs it.
+- **Themes resolve at construction, not render.** After `set_theme()` you must
+  call `chatTUI.refresh_theme()` (chrome + long-lived overlays `Popup`/
+  `DebugPopup` + cached completion menus + `ChatHistoryPanel.refresh_theme()` /
+  `Message.refresh_theme()`) and `Compositor.request_full_redraw()`, otherwise
+  cached fg/bg cells stay stale. `/theme` and `_apply_theme()` do this; do the
+  same from any new theme surface. Components that keep a `theme.*` color must
+  expose `refresh_theme()`/`apply_theme()` and be wired in.
 - `harness/` must not import `ui/` (R9 guard); only `main.py` may import both.
 - **Command import graph** (`test/test_command_import_graph.py`): domain modules
   under `ui/commands/` may import **only** `base`; `registry.py`/`__init__.py` are
@@ -224,7 +286,12 @@ Open improvements not yet requested but worth considering:
 - `.local` resolution lives in `harness/endpoint_local.py`; tests patch
   `endpoint_local._getent_host`, not `endpoint._getent_host`.
 - Input completion is one module (`input/completion.py`); tests import
-  `ContextCompletion` from `.completion`.
+  `ContextCompletion` from `.completion`. **All four providers must style their
+  menu via `Completer._apply_selector_style()`** (full width, `theme.USER`
+  frame, `theme.DEFAULT` content) and pass descriptions to
+  `_show(..., descriptions=...)`; never restyle one menu inline. Descriptions
+  flow through `Command.get_descriptions(arg_index, prior_args)` /
+  `Param.descriptions`. See `.wiki/notes/ui.md` → "Completion menu styling".
 - `SelectionMenu.render` must bg-fill its whole rectangle before drawing (overlay
   cells aren't auto-blanked). The `/` and `@` menus set `fill_width` +
   `frame_color=theme.USER`; item descriptions/footers use `_tail_len` for width.

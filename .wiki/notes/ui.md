@@ -132,6 +132,7 @@ and remove legacy paths only after production references reach zero.
 - Tracks dirty state; only redraws when something changed
 - `Compositor.invalidate()` — marks the frame as needing redraw
 - `add_overlay(component)` / `remove_overlay(component)` — register floating components rendered on top of the main tree
+- `add_frame_callback(cb)` / `remove_frame_callback(cb)` — per-iteration hooks called with `time.perf_counter()`; a callback returns `True` when it produced work, which requests a repaint. Iteration runs over a copy so callbacks may unregister themselves. The stream revealer uses this as its clock (see below).
 
 ## Popup System (`tui/components/popup.py`)
 
@@ -374,8 +375,11 @@ overlay only.
 `x + gutter + content_pad_left` with width reduced by the right pad. Content
 components render *unpadded* (plain text is no longer pre-padded and
 `MarkdownComponent` gets `left_pad=0`), so "where content starts and how wide it
-is" has a single owner. `Message.append()` drops leading whitespace on the first
-chunk, since models often open with a space.
+is" has a single owner. `Message.ingest()` appends arrived text without
+rendering (canonical `base_text`); `Message.reveal_to(n)` renders
+`base_text[:n]` through the append-only markdown fast path. `Message.append()`
+is `ingest` + `reveal_to(len(base_text))` for non-streamed callers and drops
+leading whitespace on the first chunk, since models often open with a space.
 
 Messages are separated by `ui_msg_v_margin` blank lines (default `1`; set it in
 `ui.toml`). `ChatHistoryPanel` is the owner of the message list — it handles
@@ -529,9 +533,42 @@ O(open region) rather than O(message length):
 - An open code fence or table is held whole until it closes (bounded by its own
   size); a single never-ending line is still re-wrapped per append (O(line)).
 
-`notes/bench_render.py` has a `stream` scenario (append+render per frame) and a
+`notes/bench_render.py` has a `stream` scenario (append+render per frame), a
+`stream_smooth` scenario (ingest + one revealer tick + render), and a
 `stream_micro` table (µs/append vs length for prose/code/table); baseline in
 `notes/bench_stream_baseline.json`.
+
+### Stream smoothing (`ui/stream_revealer.py`)
+
+Decouples how fast text *arrives* from how fast it *appears*.
+
+- `StreamRevealer` is a pure controller (no TUI imports, all time passed in):
+  `ingest(text, now)` schedules arrived text, `tick(now)` returns the next slice
+  to release, `drain()` releases everything. The deadline is anchored to the
+  **oldest** buffered character (`oldest + max_window`), so no character is held
+  longer than `max_window` (250 ms) no matter how many newer chunks merge in.
+  A small chunk reveals one cluster per frame; a large chunk spreads across the
+  window. Behind schedule (`now >= deadline`) it releases everything. Grain =
+  non-whitespace grapheme clusters, derived from the remaining window and
+  `smooth_target_fps`; whitespace is released for free.
+- `ui/tui/graphemes.py` provides `split_clusters` / `count_nonws` /
+  `advance_nonws` (combining marks, ZWJ, variation selectors, skin tones,
+  regional-indicator pairs, Hangul jamo) — vendored rather than adding `regex`.
+- `chatTUI` owns `stream_revealer`, the active `stream_message`, and
+  `stream_revealed`; `_on_frame` (registered via the compositor frame callback)
+  calls `revealer.tick`, applies the slice with `message.reveal_to(...)`, and
+  returns whether the rendered output changed. It deliberately returns `False`
+  when the revealer is merely waiting for its next step: a render request with
+  no dirty rects makes the compositor full-redraw, so signalling every frame
+  would full-redraw at `target_fps` during the whole stream. The compositor's
+  idle wakeups (`1/target_fps`) still tick the revealer. `generation_presenter`
+  routes Token/Reasoning through `message.ingest` + `revealer.ingest` and flushes
+  synchronously before tool calls, permission requests, reasoning↔content
+  switches, errors, and message replacement/clear. On a natural `Done` the
+  revealer drains and the frame callback finalizes (spinner persists ≤250 ms);
+  the presenter `finally` force-drains as a backstop.
+- Config: `stream_smoothing` (bool, default `true`) and `smooth_target_fps`
+  (int, default `60`). `stream_smoothing = false` keeps the direct-append path.
 
 ### Styling
 

@@ -6,6 +6,7 @@ Scenarios (each per raster size, width x height in terminal cells):
   scroll    - one wheel notch into the history, then a full frame
   hittest   - one click hit-test (line-map lookup), then a full frame
   stream    - append one 8-char chunk to a growing message, then a full frame
+  stream_smooth - ingest a chunk, reveal one grain via StreamRevealer, full frame
 
 Reported per scenario (median):
   component ms - append (stream) + ChatHistoryPanel.render() into the Buffer
@@ -37,10 +38,11 @@ from pico_chat.ui.tui.buffer import Buffer
 from pico_chat.ui.tui.events import MouseEvent
 from pico_chat.ui.tui.msg_types import PicoMsg, UserMsg
 from pico_chat.ui.tui.components.markdown import MarkdownComponent
+from pico_chat.ui.stream_revealer import StreamRevealer
 
 CONVO = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "convo.json")
 
-SCENARIOS = ("steady", "rerender", "scroll", "hittest", "stream")
+SCENARIOS = ("steady", "rerender", "scroll", "hittest", "stream", "stream_smooth")
 
 STREAM_CHUNK = 8
 STREAM_BASE = (
@@ -99,18 +101,33 @@ def bench(width, height, iterations, scenario, repeat=1):
     stream_msg = None
     stream_source = None
     stream_pos = 0
-    if scenario == "stream":
+    revealer = None
+    revealed = 0
+    clock = 0.0
+    if scenario in ("stream", "stream_smooth"):
         stream_msg = panel.add_message("", msg_type=PicoMsg())
         stream_source = _stream_source(repeat)
         panel.set_layout(0, 0, width, height)
+    if scenario == "stream_smooth":
+        revealer = StreamRevealer(60)
 
     def one_frame():
-        nonlocal stream_pos
+        nonlocal stream_pos, revealed, clock
         t0 = time.perf_counter()
         if scenario == "stream":
             chunk = stream_source[stream_pos:stream_pos + STREAM_CHUNK]
             stream_pos = (stream_pos + STREAM_CHUNK) % len(stream_source)
             stream_msg.append(chunk)
+        elif scenario == "stream_smooth":
+            chunk = stream_source[stream_pos:stream_pos + STREAM_CHUNK]
+            stream_pos = (stream_pos + STREAM_CHUNK) % len(stream_source)
+            clock += 1.0 / 60.0
+            stream_msg.ingest(chunk)
+            revealer.ingest(chunk, clock)
+            released = revealer.tick(clock)
+            if released:
+                revealed += len(released)
+                stream_msg.reveal_to(revealed)
         panel.render(buf)
         t1 = time.perf_counter()
         out = buf.render()

@@ -25,6 +25,7 @@ from pico_chat.ui.commands import (
     get_subcommand_list, get_subcommand_descriptions,
 )
 from pico_chat.ui.generation_presenter import process_generation
+from pico_chat.ui.stream_revealer import StreamRevealer
 from pico_chat.ui.status_presenter import refresh_status_bar
 from pico_chat.ui.shell_command import handle_shell_command
 from pico_chat.ui.tui.focus import FocusScope
@@ -180,6 +181,14 @@ class chatTUI(ChatActionHandlers):
         self.pending_permission_prompt = None
         self._active_user_input = None
         self._active_user_msg = None
+        # Stream smoothing: the revealer owns timing, the message owns the
+        # canonical arrived text plus its rendered prefix.
+        self.stream_revealer = None
+        self.stream_message = None
+        self.stream_revealed = 0
+        self._stream_finalize_pending = False
+        # Single time source for stream ingestion; tests can replace it.
+        self._clock = time.perf_counter
         atexit.register(self._emergency_cleanup)
 
     def switch_role(self, role):
@@ -196,6 +205,83 @@ class chatTUI(ChatActionHandlers):
             self.current_generation_task is not None
             and not self.current_generation_task.done()
         )
+
+    # -- stream smoothing ----------------------------------------------------
+
+    def reset_stream_revealer(self):
+        """(Re)initialize smoothing state for a new generation."""
+        if pico_cfg.config.ui_stream_smoothing:
+            self.stream_revealer = StreamRevealer(pico_cfg.config.ui_smooth_target_fps)
+        else:
+            self.stream_revealer = None
+        self.stream_message = None
+        self.stream_revealed = 0
+        self._stream_finalize_pending = False
+
+    def start_stream_message(self, msg):
+        """Mark ``msg`` as the message the revealer currently feeds."""
+        self.stream_message = msg
+        self.stream_revealed = msg._reveal_len
+        self._stream_finalize_pending = False
+
+    def stream_ingest(self, text: str):
+        """Schedule arrived text for smoothed release."""
+        if self.stream_revealer is not None:
+            self.stream_revealer.ingest(text, self._clock())
+
+    def flush_stream(self):
+        """Release all pending text into the active message immediately."""
+        if self.stream_revealer is None or self.stream_message is None:
+            return
+        released = self.stream_revealer.drain()
+        if released:
+            self.stream_revealed += len(released)
+            self.stream_message.reveal_to(self.stream_revealed)
+
+    def defer_stream_finalize(self):
+        """Let the revealer drain, then finalize from the frame callback."""
+        if self.stream_revealer is not None and self.stream_message is not None:
+            self._stream_finalize_pending = True
+
+    def _finalize_stream(self):
+        if self.stream_message is not None:
+            self.stream_message.finalize()
+        self.stream_message = None
+        self.stream_revealed = 0
+        self._stream_finalize_pending = False
+
+    def disengage_stream(self):
+        """Drop the active-stream reference once the stream has ended.
+
+        Assumes any pending text has already been flushed/finalized.
+        """
+        self.stream_message = None
+        self.stream_revealed = 0
+        self._stream_finalize_pending = False
+
+    def _on_frame(self, now: float) -> bool:
+        """Compositor frame callback: reveal a grain and manage finalization.
+
+        Returns True only when it changed the rendered output. Returning True
+        with no dirty rects makes the compositor fall back to a full-screen
+        redraw, so a stream must not request a repaint on every frame while the
+        revealer is merely waiting for its next step.
+        """
+        if self.stream_revealer is None:
+            return False
+        changed = False
+        released = self.stream_revealer.tick(now)
+        if released and self.stream_message is not None:
+            self.stream_revealed += len(released)
+            self.stream_message.reveal_to(self.stream_revealed)
+            # Keep the growing text in view while it animates.
+            if self.chat_history_panel.auto_scroll:
+                self.chat_history_panel.scroll_offset = 0
+            changed = True
+        if self._stream_finalize_pending and not self.stream_revealer.active():
+            self._finalize_stream()
+            changed = True
+        return changed
 
     def _input_box_fg(self):
         """Color the input row by focus (muted when unfocused)."""
@@ -735,6 +821,10 @@ class chatTUI(ChatActionHandlers):
         self.compositor.padding = pico_cfg.config.ui_app_global_padding  # Apply global padding from config
         self.modal_host = ModalHost(self.compositor)
         self._focus_scope.enter()
+
+        self.reset_stream_revealer()
+        if self.stream_revealer is not None:
+            self.compositor.add_frame_callback(self._on_frame)
         
         self.compositor.event_router.set_interceptor(self.handle_global_input)
         self.compositor.event_router.set_focus_scope(self._focus_scope)

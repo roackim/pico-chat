@@ -20,11 +20,12 @@ See [notes/ui.md](../notes/ui.md) for the component model and layer stack.
 | `navigation.py` | `Navigator` (push/pop/replace/back), `ModalHost` (compositor modal ownership) |
 | `chat_screen.py` | `ChatScreen(Screen)` — history + input workspace with pinned status bar |
 | `scaffold.py` | `AppScaffold` — shared top-level screen chrome |
-| `compositor.py` | `Compositor` — async render loop, overlay stack, FPS tracking, Ctrl-C shutdown |
+| `compositor.py` | `Compositor` — async render loop, overlay stack, FPS tracking, per-frame callbacks, Ctrl-C shutdown |
 | `buffer.py` | `Cell`, `Buffer` (full-screen grid), `SubBuffer` (clipping viewport) |
 | `container.py` | `Container`, `Split`/`Vsplit`/`Hsplit`, `Padding`, `Align`, `Stack`/`Overlay`, `ScrollView`; size policies `Fixed`/`Percent`/`Content`/`Fill` |
 | `colors.py` | `RGB`, `ANSIColor`, `theme` palette, `set_theme()` |
 | `layout_utils.py` | `wrap_text`, `display_width`, `strip_ansi`, `break_long_word` |
+| `graphemes.py` | `split_clusters`, `count_nonws`, `advance_nonws` — grapheme-cluster helpers for stream reveal granularity |
 | `fuzzy.py` | `fuzzy_match` (subsequence + indices, used by the file picker), `fuzzy_score`/`fuzzy_search` (word-based, used by menus) |
 | `msg_types.py` | `MsgType` base + `UserMsg`, `PicoMsg`, `SysMsg{,Error,Warning}`, `ThinkingMsg`, `ToolCallMsg`, `ToolDraftMsg`, `AskPermissionMsg`; `MsgAction` enum |
 | `ascii_table.py` | `TableStyle`, `AsciiTable` — used by the markdown table renderer |

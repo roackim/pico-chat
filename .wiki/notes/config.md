@@ -28,6 +28,17 @@ Missing files are created from fully commented templates
 `ensure_config_files()`. The built-in role files (`agent.toml`, `chat.toml`)
 are seeded by `roles.ensure_roles_dir()` on startup.
 
+Existing **flat** files (`ui`, `context`, `subagents`, `debug`) are kept in sync
+with their templates: on startup (`pico_cfg.sync_config_files()` in `main()`) and
+when `/config <section>` opens one, `_sync_flat_file()` inserts the commented
+line for any spec key missing from the file (at its template-relative position)
+and removes lines whose key is in that section's `_RETIRED_*` set. Only keys
+named by the template or a registered retirement are touched; user values,
+comments, and ordering are preserved, and the file is written only when the text
+changes. Structured files (`styles`, `servers`, `theme`) hold user-authored
+tables and are never synced. See "Adding or deprecating a config key" in
+`AGENTS.md`.
+
 ## Loader (`pico_cfg.py`)
 
 `Config` is a plain class with a flat attribute surface (`pico_cfg.config.<attr>`),
@@ -111,7 +122,8 @@ stored one file per role under `roles/<name>.toml`. `PermissionGate`
 `subagent_max_depth`, `subagent_server`, `subagent_timeout`,
 `subagent_max_context`; `ui_theme`, `ui_box_style`, `ui_show_metrics`,
 `ui_status_bar_fields`, `ui_max_input_height` (input box caps + scrolls past
-this many wrapped lines), `target_fps`, and the rest of the `ui_*` attrs.
+this many wrapped lines), `ui_stream_smoothing` / `ui_smooth_target_fps`
+(streamed-text reveal smoothing), `target_fps`, and the rest of the `ui_*` attrs.
 
 **Styles / themes:** `config.markdown_styles`, `config.syntax_highlight_styles`;
 `config.themes`, `config.active_theme`, `config.get_active_theme()`,
