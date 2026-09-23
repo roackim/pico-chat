@@ -19,11 +19,9 @@ chatTUI (app.py)
 ```
 
 Typed event dataclasses are defined in `tui/events.py`. Shared focus ownership
-is provided by `tui/focus.py`; `FormContainer` uses `FocusManager` while
-retaining its existing form navigation API.
-`FocusScope` provides modal focus boundaries; `FormPopup` enters its scope when
-shown and releases it when hidden. `EventRouter` dispatches keyboard events to
-the active focus target after application policy handling.
+is provided by `tui/focus.py`.
+`FocusScope` provides modal focus boundaries. `EventRouter` dispatches keyboard
+events to the active focus target after application policy handling.
 `EventRouter` provides overlay-priority dispatch and layout-based mouse
 hit-testing for compositor input.
 Keyboard input is normalized to string-compatible `KeyEvent` objects at the
@@ -32,11 +30,10 @@ terminal boundary, and terminal resize notifications are dispatched as
 The application-level input/history focus state is backed by `FocusScope`; its
 domain-specific Up/Down and inline-editing rules remain in `chatTUI`.
 
-Each conversation tab owns its runtime agent, history panel, queue, worker, and
-conversation-local tool/permission state. The selected runtime's history panel
-is mounted directly into the active chat workspace, so switching tabs does not
-copy messages through a shared panel. Slash commands use one application-level
-worker and remain responsive while conversation generation is running.
+There is one conversation per process: the app owns its runtime agent, history
+panel, queue, worker, and conversation-local tool/permission state. Slash
+commands use one application-level worker and remain responsive while
+conversation generation is running.
 
 ## Status Bar
 
@@ -48,7 +45,7 @@ order come from `pico_cfg.config.ui_status_bar_fields`; the default is:
 status_bar_fields = ["endpoint_model", "role", "context"]
 ```
 
-The default display is `endpoint:model  role default  ctx 12.4k/32k`.
+The default display is `endpoint:model  role agent  ctx 12.4k/32k`.
 Available values include `endpoint_model`, `endpoint`, `model`, `context`,
 `role`, `state`, and `workspace`. Provider-reported prompt usage replaces the
 context estimate after a response supplies authoritative usage data.
@@ -57,16 +54,16 @@ The `context` field is colorized by how full the context window is:
 green below 33%, orange/amber below 66%, and red at or above 66%.
 
 The `role` field reflects the active conversation role and is refreshed
-whenever the role changes (via `/roles use`, the `/permissions` role editor,
-or a conversation import that applies a saved role).
+whenever the role changes (via `/role <name>` or a conversation import that
+applies a saved role).
 
 ## Conversation import/export
 
 `/export <file>` writes `{"role": ..., "history": [...]}`.
 `/import <file>`:
 - Fuzzy-autocompletes `.json` files in the current directory.
-- Restores the saved role; if the role no longer exists, it defaults to
-  `default` and posts a warning message in the chat.
+- Restores the saved role; if the role no longer exists, it falls back to the
+  `agent` role and posts a warning message in the chat.
 - Rebuilds visible messages, splitting assistant thinking/content with the
   same `ThinkingTagParser` the harness uses (so imported reasoning renders as
   a `ThinkingMsg`).
@@ -120,22 +117,13 @@ and legacy `chatTUI` callbacks remain internal and may change during migration.
 
 ### Library-Only Example
 
-`pico_chat.ui.tui.example_screen.ExampleScreen` is a minimal screen composed
-only from library primitives. It demonstrates root composition, focus scope,
-semantic activation, layout, and rendering without chat or harness state.
+The former `example_screen.py` was removed in the toolkit pruning pass. There is
+no library-only demo screen; tests compose library primitives directly.
 
 ## Integration Boundary
 
-Migration is vertical and behavior-preserving: add focused coverage before
-replacing a legacy path, keep compatibility at the application boundary, and
-remove legacy paths only after production references reach zero. User-visible
-behavior that must remain unchanged includes modal priority and Escape
-cancellation, focus restoration after modal dismissal, tab selection and close
-behavior, keyboard and mouse routing, resize handling, scrolling, and the
-existing chat input/history navigation policy.
-The running application now presents form popups through `ModalHost`; direct
-compositor ownership remains available for isolated callers and compatibility
-tests.
+Behavior-preserving migration: keep compatibility at the application boundary
+and remove legacy paths only after production references reach zero.
 
 ## Compositor (`tui/compositor.py`)
 
@@ -160,169 +148,17 @@ Centered overlay popups for commands that benefit from floating display rather t
 - Input interception: when popup is visible, the `EventRouter` overlay-priority
     path routes input to the popup before normal focus handling
 - Auto-sizing: `max_width_ratio` / `max_height_ratio` control popup dimensions relative to terminal
-- Currently used by: `/help` (command list), `/status` (async with placeholder), `/tools`, `/permissions`, `/debug` help
+- Currently used by: `/help` (command list), `/status` (async with placeholder), `/debug` help
 
-## Forms System (`tui/components/form.py`, `form_popup.py`)
+## No In-App Forms
 
-Modal form dialogs for interactive input (server configuration, settings, etc.).
-`FormPopup` can be owned directly by `ModalHost` through its `FormPopupScreen`
-adapter, while retaining the legacy compositor overlay path.
+The interactive form stack (`form.py`, `form_popup.py`, `field_models.py`,
+`form_schema.py`, `role_editor_model.py`, `config_overlay.py`, `input/basic.py`)
+was removed. Configuration is edited as files: `/config <section>` and
+`/config role <name>` open the file in `$EDITOR` and reload. Interactive UI is
+reserved for permission approval and destructive confirmation; see
+[notes/principles.md](./principles.md).
 
-### Field Types (`form.py`)
-
-| Field | Rendered | Value Type | Navigation |
-|-------|----------|------------|------------|
-| `ToggleField` | `[x] Label` / `[ ] Label` | `bool` | Space/Enter toggles |
-| `TextField` | `Label: value_cursor` | `str` | Typing, arrow keys, Home/End |
-| `TextAreaField` | Label + multiline content | `str` | Enter inserts newline, arrows navigate |
-| `CheckboxListField` | `Label:` + `[ ]`/`[x]` per option | `List[int]` | Up/Down moves cursor, Space/Enter toggles |
-| `RadioListField` | `Label:` + `()`/`(x)` per option | `Optional[int]` | Up/Down moves cursor, Space/Enter selects |
-
-All fields extend `FormField` ABC with: `get_value()`, `set_value()`, `render()`, `handle_input()`, `get_preferred_height()`.
-Field value and validation state can be held by standalone models from
-`components/field_models.py`; widgets synchronize editor changes to their model.
-`FormFieldSpec` and `build_fields()` in `components/form_schema.py` provide
-declarative construction for the same widgets. Models validate synchronously
-by default and expose `validate_async()` for future asynchronous checks.
-
-### FormContainer (`form.py`)
-
-Vertical layout manager for a list of fields:
-- **Tab / Shift+Tab** moves focus between fields
-- **Up / Down arrows** also navigate between fields
-- Input routes to the focused field
-- Scroll offset for forms taller than available height
-- 1-row spacing between fields
-- Recomputes field heights and offsets before rendering, so a field whose
-    child rows change size does not overwrite fields below it
-- Accepts `InputResult` focus intents from composite fields; a child handles
-    local navigation first and requests `focus="previous"` or `focus="next"`
-    only at its boundary
-- `activate_focused()` calls the field's public `activate()` method, keeping
-    Enter, Space, and mouse activation on the same action path
-
-### Building complex interactive forms
-
-Use a form as three separate layers rather than putting persistence and
-navigation into one field:
-
-1. **Model** — owns domain state, validation, and persistence. UI callbacks
-     should call public model methods and receive a safe, already-updated value.
-     For roles this is `RoleEditorModel`, which owns the active role draft and
-     operations such as `select()`, `create()`, `rename()`, `duplicate()`,
-     `remove()`, and `update()`.
-2. **Fields/components** — own local value editing and rendering. Compose
-     `FormField` implementations for scalar values, and compose `ProfileRow`
-     and `Button` instances for repeated interactive content. Keep selection,
-     keyboard focus, and text-editing state distinct.
-3. **Container/popup** — owns sibling focus, scrolling, modal cancellation,
-     submission, and layout. It should not inspect private state or special-case
-     a particular child type.
-
-#### Recommended composition pattern
-
-```python
-model = RoleEditorModel()
-fields = [
-        ProfileList("Roles", options=model.role_names(), value=0,
-                                on_select=load_profile, on_create=create_profile,
-                                on_rename=rename_profile, on_duplicate=duplicate_profile,
-                                on_remove=remove_profile),
-        FormSectionTitle("Settings:"),
-        HorizontalSelector("Read", options=["allow", "ask", "deny"],
-                                             value=0, on_change=save_draft),
-        ToggleField("Use container", value=False, on_change=save_draft),
-]
-container = FormContainer(fields)
-```
-
-The exact callbacks are application-specific, but the flow should remain:
-
-- `on_select` calls `model.select(name)` and copies the returned draft into
-    the controls with `set_value()`.
-- Scalar field `on_change` callbacks construct a complete draft from the
-    fields and call `model.update(draft)`; do not mutate the role store
-    directly from a widget.
-- Create/duplicate/rename/remove callbacks update the model first, then
-    refresh the profile-list options and selected index. Rebuild the list's
-    rows after changing its options.
-- A dynamic list must report its full preferred height. `FormContainer`
-    recalculates offsets during render, which keeps the controls below the list
-    aligned after rows are added or removed.
-
-#### Input routing contract
-
-New composite fields should override `handle_input_result()` and return an
-`InputResult`:
-
-- `handled=True` stops propagation.
-- `redraw=True` asks the owning container to repaint.
-- `focus="next"` or `focus="previous"` bubbles a sibling-navigation request
-    to `FormContainer`; the child must not choose a sibling itself.
-- At an internal edge, consume the arrow key and move the local cursor. At a
-    boundary, return the focus intent instead.
-
-Leaves should expose `activate()`. `Button` uses it for Enter, Space, and
-left-click, while `ProfileRow` delegates to its focused button. This makes
-keyboard and mouse behavior identical and avoids parent code branching on
-concrete child types. Existing boolean `handle_input()` fields remain
-compatible through `InputResult.from_legacy()`.
-
-#### Inline editing and repeated rows
-
-For rename-like interactions, keep an explicit editing index and draft text
-on the composite control. While editing, printable characters and deletion
-are handled locally; Enter commits through the model callback and Escape
-cancels without changing the model. A row should contain a selection control
-plus independent action buttons for rename, duplicate, and remove. Activating
-the row selects it; moving focus among its action buttons must not change the
-selected profile.
-
-#### Testing checklist
-
-Test the model without rendering, then test the component and popup paths:
-
-- selection is independent from focus and loads/applies the complete draft;
-- Enter, Space, and click invoke the same action;
-- local arrow movement bubbles only at first/last boundaries;
-- Tab and Shift+Tab move between top-level fields;
-- rename supports typing, deletion, commit, and Escape cancellation;
-- create, duplicate, and remove update list rows and following-field layout;
-- persistence and invalid-name errors leave the model unchanged on failure;
-- Escape dismisses only the active modal and does not leak to the app.
-
-### FormPopup (`form_popup.py`)
-
-Modal overlay wrapping a `FormContainer` inside a `Box`:
-- `show(title, fields, on_submit, on_cancel)` — displays form, registers with compositor
-- `hide()` — dismisses, unregisters from compositor
-- **Action bar**: `[Enter] ok` / `[Esc] cancel` in bottom border
-- **Validation**: required and custom model validation block submit with an error message
-- **Lifecycle**: `dirty` reports changed model values; `reset()` restores initial values, and cancel resets before dismissing
-- **Enter behavior**: on `TextField` moves to next field; on other fields submits
-- **Mouse**: clickable OK/Cancel buttons, click-to-focus fields
-- Callback receives `Dict[str, Any]` mapping field labels to values
-
-### Usage Pattern
-
-```python
-from pico_chat.ui.tui.components.form import TextField, RadioListField
-from pico_chat.ui.tui.components.form_popup import FormPopup
-
-form = FormPopup(compositor=compositor)
-form.show(
-    title="Add Server",
-    fields=[
-        TextField("Name", required=True),
-        RadioListField("Type", options=["openrouter", "llamacpp"]),
-        TextField("Model or URL", required=True),
-    ],
-    on_submit=lambda values: print(values),
-    on_cancel=lambda: print("cancelled"),
-)
-```
-
-Currently used by: `/server add` (no-args form mode)
 
 ## Single Conversation
 
@@ -368,7 +204,6 @@ Key components:
 - `TextComponent` — static/scrollable text display
 - `SelectionMenu` — floating dropdown with fuzzy filtering
 - `InputComponent` — multi-line editor (see below)
-- `LineInput` and `BoxInput` — reusable cursor-aware single-line and multiline editors used by form fields
 - `DebugLogPanel` — scrolling log display
 - `MarkdownComponent` — live markdown renderer (see [Markdown Rendering](#markdown-rendering) below)
 
@@ -381,11 +216,7 @@ The most complex component. Responsibilities are split across sub-modules:
 | `input.py` | Coordinator; cursor animation, menu orchestration, schema-driven parameter hints |
 | `text_buffer.py` | Text storage, undo/redo |
 | `input_handlers.py` | Keyboard, mouse, paste events |
-| `command_completion.py` | `/command` autocomplete |
-| `subcommand_completion.py` | Subcommand suggestions |
-| `context_completion.py` | Context-aware suggestions |
-| `path_completion.py` | File path autocomplete |
-| `argument_completion.py` | **Generic argument completer** — reads `Command.params` from registry, fuzzy filters completions per argument index |
+| `completion.py` | `Completer` base + the four trigger-based providers: `CommandCompletion`, `SubcommandCompletion`, `ArgumentCompletion`, `ContextCompletion` |
 | `scroll_manager.py` | Scroll offset for large input |
 | `cursor_renderer.py` | Cursor visibility and animation |
 | `coordinate_mapper.py` | Screen position → text offset |
@@ -539,74 +370,65 @@ layout, selection, scrolling, and width-change reformatting.
 
 ## Commands (`commands/` package)
 
-Slash commands typed by the user (e.g. `/server`, `/model`, `/status`, `/tools`, `/help`).
+Slash commands typed by the user (e.g. `/server`, `/model`, `/status`, `/help`).
+The package lives in `pico_chat/ui/commands/`:
 
-The command system lives in the `pico_chat/ui/commands/` package (replacing the legacy single `commands.py`): `builtins.py` holds the `COMMANDS` registry, `base.py` defines `Param`/`Command`, and `server.py`/`models.py` hold the server and model commands. Server management commands are thin UI adapters — all business logic lives in `harness/server_service.py`. The commands call the service and render the results.
+- `registry.py` — the single `COMMANDS` assembly point and `handle_command()`.
+- `base.py` — `Param`, `Command`, `ChatUIProtocol`, completion helpers.
+- Domain modules (`core`, `conversation`, `models`, `server`, `debug`,
+  `openrouter`, `roles`) import **only** `base`; `registry.py` assembles them.
+  This shape is enforced by `test/test_command_import_graph.py`.
+- Leaf commands are plain `async def` handlers wrapped in
+  `Command(name, description, handler=..., params=[...])`. Only commands with a
+  real subcommand tree are classes (`ServerCommand`, `DebugCommand`,
+  `OpenRouterCommand`).
 
 ### Registered Commands
 
-`help`, `clear`, `reload`, `config`, `edit`, `export`, `import`, `compact`, `exit`, `stop`, `status`, `server`, `model`, `tools`, `debug`, `roles`, `openrouter`, `cd`, `pwd`
+`help`, `clear`, `reload`, `config`, `edit`, `export`, `import`, `compact`,
+`exit`, `stop`, `status`, `activity`, `server`, `model`, `role`, `debug`,
+`openrouter`, `cd`, `pwd`
 
 ### Server & model selection
 
-- `/server` — add, list, info, diagnose, remove. The `use`/switch subcommand was **removed**; switching is implicit via model selection.
-- `/model` — opens a searchable picker; `/model <model>` selects directly (the single selection entry point). Refreshes discovery live, resolves a model across all servers, switches the harness to the serving server, and selects it. An explicit `server:model` form (model id may contain colons, e.g. Ollama quantized tags) is verified against that server before switching. Fuzzy completion is driven by `Param.completions` reading the cached catalog. The picker (`SearchModal`) shows the cached catalog instantly, refreshes in the background, tags the current model with a green `active`, shows the model id with muted aligned server/context, and supports type-to-filter.
+- `/server` — add, list, info, diagnose, remove. The `use`/switch subcommand was removed; switching is implicit via model selection.
+- `/model` — opens a searchable picker; `/model <model>` selects directly. Refreshes discovery live, resolves a model across servers, switches the harness, and selects it. The picker (`SearchModal`) shows the cached catalog instantly, refreshes in the background, tags the current model with a green `active`, and supports type-to-filter.
+
+### Roles
+
+- `/role` lists roles (marking the active one) or switches with `/role <name>`.
+- `/config role <name>` creates/opens `roles/<name>.toml` in `$EDITOR` and reloads;
+  `/config role delete <name> confirm` removes it.
 
 ### Structure
 
-- `Param` dataclass — defines a command argument: `name`, `completions` (static list or callable returning list), `path` (filesystem scan if True), `required` (default False)
-- `Command` — base class. Constructor: `Command(name, description, subcommands={}, params=[])`.
-- `Command.resolve_command(parts)` — walks subcommand tree, returns `(deepest_cmd, arg_offset)` for hint/completion resolution
-- `Command.get_completions(arg_index)` — resolves completions from `Param` schema (static list, callable, or `path=True` filesystem scan via `_scan_dirs()`)
-- `execute(ui, args)` — async method to override. `ui` is the `chatTUI` instance; `args` is a list of string tokens after the command name.
-- `COMMANDS: Dict[str, Command]` — module-level registry mapping name → instance.
+- `Param` dataclass — a command argument: `name`, `completions` (static list or callable), `path` (filesystem scan), `required`.
+- `Command` — `name`, `description`, `handler` or `subcommands`, `params`. `resolve_command()`, `get_completions(arg_index)`, `execute(ui, args)`.
+- `COMMANDS: Dict[str, Command]` — registry.
 - `handle_command(ui, text)` — strips the leading `/`, looks up `COMMANDS`, calls `execute`.
-
-### Subcommands
-
-Commands with sub-operations (e.g. `/server add`, `/server remove`) pass a `subcommands` dict to the `Command` constructor. The parent `execute()` reads `args[0]` and dispatches to the matching sub-command instance.
 
 ### How to Add a New Command
 
-1. **Define the class** in `pico_chat/ui/commands/` (e.g. a new module, or `builtins.py`):
+1. Write a handler in the relevant domain module (or `core.py` for a general one):
    ```python
-   class MyCommand(Command):
-       def __init__(self):
-           super().__init__("mycommand", "One-line description",
-               params=[
-                   Param("NAME", required=True),
-                   Param("TYPE", completions=["type1", "type2"], required=True),
-                   Param("PATH", path=True),
-               ])
-
-       async def execute(self, ui: ChatUIProtocol, args: List[str]):
-           # use ui.chat_history_panel.add_message() to show output
-           ui.chat_history_panel.add_message("hello", msg_type=SysMsg())
+   async def cmd_mycommand(ui: ChatUIProtocol, args: List[str]):
+       ui.chat_history_panel.add_message("hello", msg_type=SysMsg())
    ```
-
-   The `Param` definitions automatically provide:
-   - **Parameter hints** shown as grey text after the command name
-   - **Fuzzy autocomplete** in the argument completion menu
-   - **Filesystem scanning** when `path=True`
-
-2. **Register it** in the `COMMANDS` dict at the bottom of the file:
+2. Register it in `registry.py`:
    ```python
-   COMMANDS: Dict[str, Command] = {
-       ...
-       "mycommand": MyCommand(),
-   }
+   "mycommand": Command("mycommand", "One-line description", handler=cmd_mycommand,
+                        params=[Param("NAME", required=True)]),
    ```
+   `Param` definitions drive parameter hints and fuzzy argument autocomplete;
+   `path=True` adds filesystem scanning.
+3. It is now callable as `/mycommand`, listed by `/help`, and offered by the input autocomplete.
 
-3. That's it. The command is now:
-   - Callable as `/mycommand` in the chat input
-   - Listed by `/help` automatically
-   - Available in the input autocomplete (fed by `get_command_list()`)
-
-For commands with subcommands, instantiate sub-command classes and pass them as a dict to the `subcommands` parameter. See `ServerCommand` in `commands/server.py` for an example.
+Subcommand trees subclass `Command` and pass a `subcommands` dict; see
+`ServerCommand` in `commands/server.py`.
 
 ### Hiding a Command from `/help`
 
-Prefix the name with `_` (e.g. `"_internal"`). `HelpCommand` skips names starting with `_`.
+Prefix the registry key with `_`; `cmd_help` / `get_command_descriptions` skip such names.
 
 ## Terminal I/O (`tui/terminal.py`)
 

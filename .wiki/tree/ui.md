@@ -1,124 +1,72 @@
 # pico_chat/ui/ — Chat UI Layer
 
-Async TUI built from scratch. Handles chat display, user input, message actions, and slash commands.
-
-See [notes/ui.md](../notes/ui.md) for the full architecture overview.
+Async TUI built from scratch. Handles chat display, user input, message
+actions, and slash commands. See [notes/ui.md](../notes/ui.md) for the full
+architecture overview.
 
 ---
 
 ## Files
 
-### `app.py`
-`chatTUI` — main application class.
-- Sets up layout, compositor, and component tree
-- Owns a **single conversation**: `agent`, `chat_history_panel`, `message_queue`,
-	`current_generation_task`, `active_tool_messages`, `pending_permission_prompt`,
-	and pause/steer state live directly on the app (no `ConversationRuntime`)
-- Installs one `ChatScreen` (history + input + status bar) through `Navigator`
-- The **action line** just above the input is a collapsible `ActionBar` in the
-	workspace body; `_update_action_strip` shows the selected message's actions
-	(with a `▌ ` prefix) or, when the input is focused and empty, the input
-	prefixes (`/`, `@`, `$`) as clickable hints (`input_component.on_change`,
-	`chat_history_panel.on_selection_changed`)
-- The debug console is a `DebugPopup` compositor overlay toggled by `/debug panel`
-	(`toggle_debug_console`), not a workspace tab
-- The activity overlay (`DebugPopup` titled "activity", toggled by `/activity`)
-	holds non-conversation output; `SysMsg*` is routed to it (and a status-bar
-	toast) instead of the transcript
-- Ordinary, edited, retried, and resumed messages share one enqueue path,
-	preserving consistent queued state and FIFO ordering
-- Application startup launches one `agent_worker` plus one app-level command
-	worker; slash commands are consumed independently of generation
-- Popup input is routed by registered EventRouter overlays rather than duplicated in `handle_global_input`
-- History/input mouse focus is selected through the reusable `FocusScope.focus_at()` API
-- Application focus adapters delegate layout geometry to their wrapped components for mouse hit testing
-- Completion-menu input is dispatched directly to the input component; no root-handler compatibility fallback remains
-- Application focus navigation consumes canonical `KeyEvent` metadata while accepting legacy raw strings
-- `switch_role(role)` applies a role and emits a de-duped role-change notice
-- Runs the async event loop
-- Routes incoming `events.*` from the harness to the chat display
-- Dispatches user input to the harness or command handler
-- Manages popup overlay via `show_popup()` / `hide_popup()`; input is routed by registered EventRouter overlays
+| File | Purpose |
+|------|---------|
+| `app.py` | `chatTUI` — main application class: single conversation, layout, compositor, session, popup overlay |
+| `chat_history_panel.py` | `ChatHistoryPanel` — scrollable transcript: messages, focus, mouse selection, action hit testing |
+| `chat_message.py` | `Message` — wraps content with a `MsgType`, colors, padding, and action set |
+| `chat_action_handlers.py` | `ChatActionHandlers` mixin for `chatTUI` — copy/delete/edit message actions |
+| `message_selection.py` | `SelectionState` + `MessageSelection` — drag state, column resolution, text extraction, highlight overlay |
+| `generation_presenter.py` | Maps harness generation events onto transcript messages |
+| `status_presenter.py` | Renders agent/endpoint state into the status bar |
+| `shell_command.py` | The `$` shell-command escape for the chat input |
+| `clipboard.py` | `copy_to_clipboard` — native helpers first, then OSC 52 |
+| `external_editor.py` | Opens files in `$VISUAL`/`$EDITOR`, suspending the TUI |
+| `logging_handlers.py` | `TuiLogHandler` — routes log records to the debug panel |
+| `__init__.py` | (empty) |
 
-The application-specific panels and command callbacks remain outside the
-library contract; reusable widgets and screens are documented in
-`../notes/ui.md`.
+### Key details
 
-### `chat_history_panel.py`
-`ChatHistoryPanel` — extends `TextComponent` and is used directly as the
-scrollable message component in `ChatScreen`.
-- `restore_messages(messages)` — restores message objects while rebuilding
-	panel-owned message and scroll state
-- `add_message(text, msg_type, title=None, ...)` — creates a `Message`, appends it, scrolls to bottom
-- `new_message(...)` — creates but does not append (use with `replace_message`)
-- `replace_message(old, new)` — swap a placeholder message with a final one
-- `clear()` — removes all messages
-- `start_inline_edit(message)` / `stop_inline_edit(save)` — in-place message editing via `Box.inline_editor`
-- Handles keyboard focus, per-message focus navigation, and width-change reformatting
-- Owns the message collection and lays out visible message components directly;
-	there is no parallel child-container compatibility state
-- **Mouse selection**: drag-to-select text within messages; selection highlight rendered as reverse-video overlay; auto-copies to clipboard on release
-- **Action click handling**: `_hit_test_action_bar()` computes button hit regions for action buttons in box bottom borders; clicking dispatches the action with a brief reverse-video flash feedback
-- Keyboard and mouse message actions share the `on_action(message, action)` callback boundary
-- **Parameter hints**: `_get_parameter_hint()` reads `Command.params` from the registry to show schema-driven argument hints when typing `/commands`
-- `y` key yanks current selection to clipboard
+- **`chatTUI`** owns one conversation: `agent`, `chat_history_panel`,
+  `message_queue`, `current_generation_task`, `active_tool_messages`,
+  `pending_permission_prompt`. `switch_role(role)` applies a role via
+  `agent.set_role` and emits a de-duped role-change notice. Ordinary, edited,
+  retried, and resumed messages share one enqueue path.
+- **Action surface**: a collapsible `ActionBar` above the input shows the
+  selected message's actions, or input prefixes (`/`, `@`, `$`) when focused.
+- **Activity overlay**: `SysMsg*` is routed to the activity surface (a
+  `DebugPopup`) instead of the transcript; `/activity` toggles it.
+- **Clipboard**: `ui/clipboard.py` is the single owner (native
+  `xclip`/`xsel`/`wl-copy`, then OSC 52 via `harness/clipboard.py`). VTE
+  terminals ignore OSC 52.
 
-### `chat_message.py`
-`Message` — wraps content with a `MsgType`, colors, padding, and action set.
-- Constructor accepts `msg_type`, `title`, `frame_color`, `content_color`, `left_margin`, `harness_message_ids`
-- `finalize()` — marks message complete; removes STOP action, enables DELETE
-- `get_active_actions()` — returns actions appropriate for current state
-- Internally composed of a `TextComponent` inside a `Box`
-- See [notes/ui.md](../notes/ui.md) for the full MsgType and MsgAction reference.
+---
 
-### `chat_action_handlers.py`
-`ChatActionHandlers` mixin for `chatTUI`.
-- Copy to clipboard via native `xclip`/`xsel`/`wl-copy`, falling back to an OSC 52 escape sequence (terminal-owned clipboard, works over SSH). tmux needs `allow-passthrough on`; **VTE-based terminals (Ptyxis, GNOME Terminal, Tilix, Terminator) do not implement OSC 52**, so over SSH from those use X11 forwarding (`ssh -X`) or an OSC 52-capable terminal (Ghostty, Kitty, WezTerm, Alacritty, foot).
-- Delete message from history
-- `handle_edit_action` — expanded in-place editing: edits paused AI messages (thinking prefill), finalized `ThinkingMsg` (edit reasoning as prefill), finalized `PicoMsg` (finds preceding `ThinkingMsg`), and `UserMsg` (edit + wipe subsequent messages)
-- Retry (re-send last user message)
+## `commands/` (package)
 
-### `commands/` (package)
-Slash command system with generic parameter schema. The `commands/` package
-replaces the legacy single `commands.py`:
+Slash command system. Leaf commands are plain `async def` handlers wrapped in
+`Command(...)`; only real subcommand trees are classes.
 
-- `commands/__init__.py` — public API re-exports (`Command`, `Param`, `COMMANDS`, `handle_command`, etc.) and preserves the historical `pico_chat.ui.commands` import path
-- `commands/registry.py` — the single `COMMANDS` assembly point (help, clear, reload, config, edit, export, import, compact, exit, stop, status, activity, server, model, role, debug, openrouter, cd, pwd). Leaf commands are plain handler functions; only real subcommand trees are classes.
-- `commands/base.py` — `Param` and `Command` base classes plus completion helpers
-- `commands/server.py` — `ServerAddCommand`, `ServerListCommand`, `ServerInfoCommand`, `ServerRemoveCommand`, `ServerDiagnoseCommand`
-- `commands/models.py` — `known_model_ids`, `model_command` (`/model` leaf: picker or `<model>` selection)
+| File | Purpose |
+|------|---------|
+| `registry.py` | The single `COMMANDS` assembly point; `handle_command`, description/completion helpers |
+| `base.py` | `Command`, `Param`, `ChatUIProtocol`, `config_section_completions`, `role_name_completions` |
+| `core.py` | Core commands: help, clear, reload, config, edit, compact, exit, stop, status, activity, cd, pwd |
+| `conversation.py` | `/import`, `/export` |
+| `models.py` | `/model` leaf (picker or direct selection) |
+| `server.py` | `ServerCommand` subcommand tree |
+| `debug.py` | `DebugCommand` subcommand tree |
+| `openrouter.py` | `OpenRouterCommand` subcommand tree |
+| `roles.py` | `/role` — list roles or switch the active one |
 
-Base contracts:
-- `Param` dataclass: `name`, `completions` (static list or callable), `path` (filesystem scan), `required`
-- `Command`: `name`, `description`, `subcommands`, `params: List[Param]`, `execute(ui, args)`
-- `Command.resolve_command(parts)` — walks subcommand tree, returns `(deepest_cmd, arg_offset)`
-- `Command.get_completions(arg_index)` — resolves completions from `Param` schema (static list, callable, or `path=True` filesystem scan)
-- `handle_command(ui, text)` — strips `/`, looks up `COMMANDS`, dispatches
-- Commands starting with `_` are hidden from `/help`
+Registered commands: `help`, `clear`, `reload`, `config`, `edit`, `export`,
+`import`, `compact`, `exit`, `stop`, `status`, `activity`, `server`, `model`,
+`role`, `debug`, `openrouter`, `cd`, `pwd`.
 
-**Server/model management:**
-- `/server` — add, list, info, diagnose, remove. The `use`/switch subcommand was **removed**; switching is done implicitly by selecting a model.
-- `/model` — opens the searchable picker; `/model <model>` selects directly. Refreshes discovery live (it does not trust the cached catalog), verifies the model is actually served by the chosen server, switches the harness to it, and selects it. Accepts an explicit `server:model` form (the model id may itself contain colons, e.g. Ollama quantized tags); if that server does not list the model, the command refuses instead of switching. Model completions are fuzzy-filtered from the cached catalog. The picker (`SearchModal`) shows cached models instantly, refreshes in the background, tags the current model with a green `active`, and supports type-to-filter.
-
-The input layer's `ArgumentCompletion` reads `Param.completions` to drive
-fuzzy argument completion for `/model <model>`. See [notes/ui.md](../notes/ui.md) for how to add a new command.
-
-### Role commands (`commands/roles.py`, `commands/core.py`)
-There is no role editor form. `/role` lists roles or switches the active one
-(`commands/roles.py`); `/config role <name>` creates/opens
-`roles/<name>.toml` in `$EDITOR` and reloads, and
-`/config role delete <name> confirm` removes it (`_config_role` in
-`commands/core.py`). See [notes/tools-and-permissions.md](../notes/tools-and-permissions.md).
-
-### Shell Commands (`$` prefix)
-- `$ <command>` — Execute shell command directly (not visible to LLM)
-- Example: `$ ls -la`, `$ git status`, `$ python3 script.py`
-- Output displayed as system message with exit code and timing
-- 30-second timeout for safety
-
-### `logging_handlers.py`
-`TuiLogHandler` — Python `logging.Handler` that routes log records to the debug panel.
-Filters out high-volume noise from known verbose loggers.
+- `/config <section>` opens a section file in `$EDITOR` and reloads.
+  `/config role <name>` creates/opens `roles/<name>.toml`;
+  `/config role delete <name> confirm` removes it (`_config_role` in `core.py`).
+- Domain modules import **only** `base`; `registry.py` is the assembler
+  (enforced by `test/test_command_import_graph.py`).
+- See [notes/tools-and-permissions.md](../notes/tools-and-permissions.md) for the role model.
 
 ---
 

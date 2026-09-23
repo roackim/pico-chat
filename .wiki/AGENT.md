@@ -12,13 +12,14 @@ This document tells AI agents and humans how to operate and maintain this wiki.
   notes/
     principles.md           ← Canonical design principles (direction; read first)
     architecture.md         ← High-level system design and data flow
-    config.md               ← Configuration reference (config.toml)
+    config.md               ← Configuration reference (split files under ~/.config/pico-chat/)
     reasoning-traces.md     ← Reasoning trace handling (thinking tags, reasoning_content)
-    security.md             ← Security model, dangerous patterns, sandboxing
-    subagents.md            ← Subagent lifecycle, permissions, depth/timeout/context limits
+    security.md             ← Approval model, trust boundary (no sandbox in pico)
+    subagents.md            ← Subagent lifecycle, scaffolder role, depth/timeout/context limits
     testing.md              ← Test suite overview and how to run tests
-    tools-and-permissions.md← Tool system, permission policies, wrappers
+    tools-and-permissions.md← Tool system and the no/ask/yes role model
     ui.md                   ← TUI architecture, component model, markdown rendering
+    local-hostname-resolution.md ← `.local` mDNS resolution in the endpoint layer
   tree/
     README.md               ← Root package overview
     harness.md              ← pico_chat/harness/ — LLM agent core

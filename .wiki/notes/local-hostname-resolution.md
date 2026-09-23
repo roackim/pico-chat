@@ -1,8 +1,9 @@
 # `.local` (mDNS) Hostname Resolution
 
-pico's LLM server layer (`pico_chat/harness/llm_server.py`) has special handling
-for `*.local` hostnames (mDNS / Bonjour / Avahi), which are common for local
-servers on a LAN (e.g. `http://llm-mini-server.local:8080`).
+pico's endpoint layer (`pico_chat/harness/endpoint.py`, with resolution in
+`pico_chat/harness/endpoint_local.py`) has special handling for `*.local`
+hostnames (mDNS / Bonjour / Avahi), which are common for local servers on a LAN
+(e.g. `http://llm-mini-server.local:8080`).
 
 ## Transport: raw httpx (no OpenAI SDK)
 

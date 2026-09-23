@@ -1,37 +1,58 @@
 # test/ — Test Suite
 
-All tests use pytest. See [notes/testing.md](../notes/testing.md) for run instructions and coverage details.
+All tests use pytest. Run with the project virtualenv (see HANDOFF §1):
+
+```bash
+.pixi/envs/default/bin/python -m pytest test/ -q
+```
 
 ---
 
-## Common Fixtures
+## Common Fixtures (`conftest.py`)
 
-`conftest.py` — shared test infrastructure:
 - `NoopDebugStream`, `FakeServer`, `StubReadTool`, `StubAgent` — reusable stubs
-- `harness_stub` / `harness_stub_compaction` — pre-built fixture harnesses (skip full __init__)
+- `harness_stub` / `harness_stub_compaction` — pre-built harnesses (skip `__init__`)
 - `run_harness_tool_call()`, `make_chunk_stream()` — async test helpers
 
 ## Test Files
 
 | File | Module Under Test | What It Covers |
 |------|-------------------|----------------|
-| `test_permissions.py` | `permissions.py`, `tools.py`, `harness.py` | Gate decisions, prompt text, ask/deny/allow flow |
+| `test_permissions.py` | `permissions.py`, `tools.py`, `harness.py` | Gate decisions, prompt text, ask/deny/allow flow; file-tool layer |
 | `test_roles.py` | `roles.py` | Role model, files, seeding, validation |
-| `test_buffer.py` | `ui/tui/buffer.py` | Cell operations, ANSI-aware text writing, SubBuffer |
-| `test_forms.py` | `ui/tui/components/form.py` | Form fields, dynamic profile-list composition, layout, and input routing |
-| `test_tui_form_actions.py` | `ui/tui/components/form_popup.py`, `ui/tui/components/form.py` | Shared keyboard/mouse actions, modal submit/cancel, focus, and typed events |
-| `test_basic_inputs.py` | `ui/tui/components/input/` | Line/box editors and typed keyboard metadata |
-| `test_chat_message.py` | `ui/chat_message.py` | Focused compact-message layout invalidation |
-| `test_compaction.py` | `harness.py` | Conversation history summarization (uses FakeServer fixture) |
-| `test_context_builder.py` | `context_builder.py` | Git repo detection, file tree building guardrails |
-| `test_patch_parser.py` | `patch_parser.py` | `parse_patch` format validation, `apply_patch` 3-mode cascade |
-| `test_ui_permission_submit.py` | `ui/app.py` | Input blocked during active permission prompt |
-| `test_ollama_server.py` | `harness/llm_server.py` | Ollama `/api/tags` discovery, context-window parsing, native chat adaptation |
-| `test_layout_primitives.py` | `ui/tui/container.py` | Layout, clipping, scrolling, and typed ScrollView navigation |
-| `test_tui_interactions.py` | `ui/app.py`, `ui/tui/components/` | Focus routing, queued-message state, and the debug overlay |
-| `test_message_focus.py` | `ui/app.py`, `chat_history_panel.py` | Message selection, action line, activity routing, toasts |
-| `test_list_modal.py` | `ui/tui/components/list_modal.py` | Modal list selector (accept/cancel/navigation) |
-| `test_context_window_discovery.py` | `harness/endpoint.py` | OpenRouter context-window lookup by bare/canonical id |
-| `test_input_height.py` | `ui/tui/components/input/` | Input box cap/scroll via `ui_max_input_height` |
-| `test_tui_navigation.py` | `ui/tui/navigation.py`, `ui/tui/compositor.py` | Screen navigation, modal lifecycle, and compositor shutdown handling |
 | `test_subagents.py` | `tools.py`, `harness.py` | Depth limit, timeout, scaffolder role, abort |
+| `test_tool_cancel.py` | `tools.py` | `ShellTool`/`MinimalToolset` run/cancel/timeout |
+| `test_tool_message_lifecycle.py` | `tools.py`, `ui/chat_message.py` | Tool message states, `Harness.stop_tool` |
+| `test_tool_call_assembly.py` | `harness.py` | Streaming tool-call buffer assembly |
+| `test_ui_permission_submit.py` | `ui/app.py` | Input blocked/cleared during permission prompts |
+| `test_command_surface.py` | `ui/commands/` | Command registry shape, descriptions, model rows |
+| `test_command_import_graph.py` | `ui/commands/` | Domain modules import only `base`; no cycles |
+| `test_core_ui_boundary.py` | `harness/` | R9 guard: harness imports no UI |
+| `test_config_loader.py` | `pico_cfg.py` | Split config files, validation, state |
+| `test_config_commands.py` | `ui/commands/core.py` | `/config`, `/edit`, `/reload`, external editor |
+| `test_conversation_commands.py` | `ui/commands/conversation.py` | `/import`, `/export`, history rebuild |
+| `test_compaction.py` | `harness.py` | Conversation history summarization (FakeServer) |
+| `test_context_builder.py` | `context_builder.py` | File tree building, gitignore, bounded walk |
+| `test_context_completion.py` | `input/completion.py` | `@` file picker completion |
+| `test_context_window_discovery.py` | `harness/endpoint.py` | OpenRouter context-window lookup |
+| `test_local_hostname_resolution.py` | `endpoint_local.py` | `.local` mDNS resolution |
+| `test_local_proxy_diagnostics.py` | `harness/endpoint.py` | Connection diagnosis |
+| `test_ollama_server.py` | `endpoint.py`, `endpoint_ollama.py` | Ollama discovery + native chat |
+| `test_model_selection.py` | `ui/commands/models.py` | Model picker/selection |
+| `test_patch_parser.py` | `patch_parser.py` | `parse_patch` + `apply_patch` cascade |
+| `test_usage.py` | `usage.py` | Token usage normalization |
+| `test_streaming_incremental.py` | UI rendering | Incremental streaming render artifacts |
+| `test_no_shadowed_modules.py` | package layout | No shadowed/duplicate module names |
+| TUI widget tests | `ui/tui/` | `buffer`, `bars`, `button`, `choice`, `table_view`, `list_view`, `list_modal`, `popup`, `text`, `layout`, `fuzzy`/`menu`, `search_modal`, `colors`, `tui_*` (navigation/router/actions/foundations/interactions/integration), `message_focus`, `chat_message`, `input_height`, `debug_popup`, `clipboard` |
+
+## Notes
+
+- `test_compaction.py` uses the `FakeServer` fixture; no real backend needed.
+- Tests isolate config by monkeypatching module functions
+  (`pico_cfg.get_config_dir`, `get_state_path`, `roles._ROLES_DIR`).
+
+## Adding Tests
+
+- Place new test files in `test/`, mirroring the module (`harness/roles.py` →
+  `test/test_roles.py`).
+- Use `conftest.py` fixtures/stubs; avoid global state.

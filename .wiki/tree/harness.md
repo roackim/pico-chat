@@ -1,8 +1,8 @@
 # pico_chat/harness/ — LLM Agent Core
 
-The agent backbone. Manages the LLM conversation loop, tool execution, security checks, context construction, and server management.
+The agent backbone. Manages the LLM conversation loop, tool execution, approval gating, context construction, and endpoint management.
 
-Key internal modules: `permissions.py` (the single permission decision point), `thinking_parser.py` (thinking-tag state machine), `endpoint.py` (one type for endpoint config + transport), `events.py` (the one harness→UI event protocol). The `Harness` class in `harness.py` delegates to these.
+Key internal modules: `permissions.py` (the single approval decision point), `roles.py` (role model), `thinking_parser.py` (thinking-tag state machine), `endpoint.py` (one type for endpoint config + transport), `events.py` (the one harness→UI event protocol). The `Harness` class in `harness.py` delegates to these.
 
 See [notes/architecture.md](../notes/architecture.md), [notes/tools-and-permissions.md](../notes/tools-and-permissions.md), and [notes/reasoning-traces.md](../notes/reasoning-traces.md) for conceptual details.
 
@@ -16,7 +16,7 @@ See [notes/architecture.md](../notes/architecture.md), [notes/tools-and-permissi
 - `_stream_llm_response()` — delegates thinking-tag parsing to `ThinkingTagParser`
 - `_execute_tool_calls()` — delegates permission checking to `PermissionGate`
 - `_auto_wait_subagents()` — awaits pending background subagents after the main loop ends (no events)
-Key state: `AgentState` enum, message history list, active server, tool profile, `_pending_subagents` list, `_abort_subagents_event`, and thinking steering state (`_current_reasoning`, `_pending_thinking_prefill`, `_last_detected_thinking_tag`) initialized during construction.
+Key state: `AgentState` enum, message history list, active endpoint, active role, `_pending_subagents` list, `_abort_subagents_event`, and thinking steering state (`_current_reasoning`, `_pending_thinking_prefill`, `_last_detected_thinking_tag`).
 Subagents: instantiated with `depth > 0`; use the `scaffolder` built-in role automatically.
 See [notes/subagents.md](../notes/subagents.md) for the full subagent lifecycle.
 
@@ -63,6 +63,16 @@ This one type replaced the former `LLMServerConfig` + `ServerService` +
 `server_service.py` are deleted). The UI `commands/` package calls into
 `endpoint.py` and `pico_cfg` directly.
 
+Server-family code is split out and reached through thin `Endpoint` wrappers:
+- `endpoint_openai.py` — SSE transport/adapters
+- `endpoint_ollama.py` — native chat + context; outgoing message normalization
+- `endpoint_discovery.py` — `list_models` / `discover_models` / `query_*`
+- `endpoint_local.py` — `.local` mDNS resolution
+
+### `clipboard.py`
+OSC 52 clipboard escape for headless Linux terminals (fallback for
+`ui/clipboard.py`).
+
 ### `usage.py`
 `TokenUsage` and normalization helpers convert OpenAI-compatible and Ollama
 usage counters into provider-neutral prompt/completion/total token data.
@@ -72,10 +82,11 @@ usage counters into provider-neutral prompt/completion/total token data.
 
 ### `tools.py`
 Low-level tool implementations plus the tool registry.
-- `MinimalToolset` (read/list), `FileTools` (+ write/patch), `ShellTool` (run_command).
+- `MinimalToolset` — binds `FileTools` + `ShellTool` (`read`/`write`/`patch`/`run`).
+- `FileTools` (+ write/patch), `ShellTool` (`run_command`, cancellable async path).
 - `ToolError` — raised by tool functions on failure.
 
-`FileTools.read()` supports optional 1-based inclusive line ranges, character
+`FileTools.read()` supports optional 0-based offset + line limit, character
 limits with an explicit truncation marker, and source line-number prefixes.
 
 **Tool registry** — each tool is declared once with the `@tool` decorator,
@@ -93,10 +104,9 @@ which carries its name, LLM-facing schema and handler. There is no separate
 - Public factories `RunTool`, `SubagentTool`, `WaitForSubagentsTool` remain
 	for direct construction/tests.
 
-Search tools: main agent 3 results/search, unlimited searches. Subagents
-10 results/search, max 3 searches. Subagent tool spawns a read-only child
-`Harness` (foreground or background) and enforces depth/timeout/context limits;
-`wait_for_subagents` gathers and clears the pending queue.
+The `subagent` tool spawns a read-only child `Harness` (foreground or
+background) and enforces depth/timeout/context limits; `wait_for_subagents`
+gathers and clears the pending queue.
 
 See [notes/tools-and-permissions.md](../notes/tools-and-permissions.md).
 

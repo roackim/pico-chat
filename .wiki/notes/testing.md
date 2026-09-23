@@ -25,10 +25,8 @@ pytest test/test_permissions.py
 
 | File | What It Tests |
 |------|--------------|
-| `test_permissions.py` | Read/write/patch/run permission enforcement (inside/outside repo) |
-| `test_dangerous_patterns.py` | Escalation from ALLOW→ASK for dangerous shell patterns |
-| `test_benign_dangerous_commands.py` | Safe usages of commands that superficially match dangerous patterns |
-| `test_permission_chain_policy.py` | Quote-aware chain operator detection and chain_policy enforcement |
+| `test_permissions.py` | Gate decisions, prompt text, ask/deny/allow harness flow |
+| `test_roles.py` | Role model, files, seeding, validation |
 | `test_buffer.py` | Buffer/SubBuffer rendering (cell operations, ANSI clipping, text writing) |
 | `test_compaction.py` | Conversation history compaction (summarization via LLM) |
 | `test_context_builder.py` | Git repo detection, file tree building guardrails |

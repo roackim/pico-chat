@@ -15,11 +15,11 @@ Pico is a terminal-based AI agent that connects to local (llama.cpp) or cloud (O
 └────────────┬────────────────┘
              │ async messages / callbacks
 ┌────────────▼────────────────┐
-│      pico_chat/harness/     │  Agent core — LLM loop, tools, security
+│      pico_chat/harness/     │  Agent core — LLM loop, tools, approval gate
 │  harness.py (main loop)     │
-│  llm_server.py              │
+│  endpoint.py (+ endpoint_*) │
 │  tools.py (registry)        │
-│  permissions.py             │
+│  permissions.py / roles.py  │
 └────────────┬────────────────┘
              │ HTTP / websocket
 ┌────────────▼────────────────┐
@@ -69,7 +69,9 @@ file at `roles/<name>.toml`, and a disposable `state.toml`; loaded by
 - **Streaming-first** — LLM output streams token-by-token to the buffer; no waiting for full response
 - **Approval gate** — every tool call goes through `PermissionGate` (`permissions.py`), which maps the active role's per-tool setting (`no`/`ask`/`yes`) to a decision before execution; the UI can pause to ask the user
 - **Stateless tools** — tools are pure functions; harness owns all state
-- **Service layer** — server management and OpenRouter API calls are in `harness/server_service.py`; UI commands are thin adapters- **Model selection is `(server, model)`** — the unit of selection is a server/model pair. `/model <model>` refreshes discovery live, resolves a model across all servers, verifies the chosen server serves it, then switches the harness and selects it. Per-server model choices persist in `[model_selection]` and are reapplied by `get_server_config_by_name`, so switching back restores the last model used on that server. The discovery catalog persists in `[model_catalog]` and is pruned when a server is removed. OpenRouter models are disabled by default unless listed in `enabled_models`. The status bar shows the model that will actually be sent (`_cached_model_name`, reconciled with single-model endpoints such as llama.cpp), not merely the requested selection.- **Thinking-tag parsing** — the thinking-tag state machine is in `harness/thinking_parser.py` for testability; handles both `<think>`/`</think>` and `<thinking>`/`</thinking>` across chunk boundaries;
+- **Endpoints** — server config + transport live in one `Endpoint` type (`harness/endpoint.py`, with `endpoint_*` modules for transport/discovery); UI commands are thin adapters
+- **Model selection is `(server, model)`** — `/model` refreshes discovery live, resolves a model across servers, then switches the harness. Per-server choices persist in `state.toml`; the catalog is a completion cache. OpenRouter models are disabled unless listed in `enabled_models`.
+- **Thinking-tag parsing** — the state machine (`harness/thinking_parser.py`) handles `<think>`/`</think>` and `<thinking>`/`</thinking>` across chunk boundaries
 
 ## Module Relationships
 
@@ -78,16 +80,14 @@ pico_chat/
   harness/
     harness.py           ← Orchestrator (delegates to modules below)
     permissions.py       ← Single decision point: PermissionGate (role no/ask/yes → deny/ask/allow)
-    thinking_parser.py   ← Thinking-tag state machine + metrics emission
-    server_service.py    ← Server config CRUD + model discovery/selection + OpenRouter API (used by commands/)
-    tools.py             ← Tool implementations + @tool registry (read/write/patch/run/subagent)
     roles.py             ← Role (prompt + per-tool no/ask/yes; single source of truth)
-    llm_server.py        ← LLMServer ABC + concrete impls (llama.cpp, OpenRouter, OpenAI)
-    llm_server_config.py ← LLMServerConfig dataclass + config loading
+    thinking_parser.py   ← Thinking-tag state machine + metrics emission
+    endpoint.py          ← Endpoint config + transport; endpoint_* modules split the families
+    tools.py             ← Tool implementations + @tool registry (read/write/patch/run/subagent)
     ...
 
   ui/
-    commands/            ← Slash commands package (builtins.py registry, server.py, models.py, ...)
+    commands/            ← Slash commands package (registry.py assembler; domain modules import base only)
     chat_action_handlers.py
     app.py               ← Main TUI class
     tui/

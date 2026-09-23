@@ -76,10 +76,9 @@ With the flag enabled, each assistant message in history contains its reasoning 
 
 ## Configuration
 
-Enable via `~/.config/pico-chat/config.toml`:
+Enable in `~/.config/pico-chat/context.toml`:
 
 ```toml
-[settings]
 preserve_reasoning_traces = true
 ```
 
