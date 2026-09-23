@@ -22,6 +22,8 @@ from .base import (
     config_section_completions,
     role_descriptions,
     role_name_completions,
+    theme_descriptions,
+    theme_name_completions,
 )
 
 logger = logging.getLogger(__name__)
@@ -99,6 +101,9 @@ async def cmd_config(ui: ChatUIProtocol, args: List[str]):
     if section == "role":
         await _config_role(ui, args[1:])
         return
+    if section == "theme":
+        await _config_theme(ui, args[1:])
+        return
     if section not in pico_cfg.CONFIG_FILES:
         ui.chat_history_panel.add_message(
             f"Unknown section '{section}'. Valid: "
@@ -126,7 +131,7 @@ async def cmd_config(ui: ChatUIProtocol, args: List[str]):
 
 
 class ConfigCommand(Command):
-    """``/config [section]``; offers role names after ``/config role``."""
+    """``/config [section]``; offers role/theme ids after the matching section."""
 
     def __init__(self):
         super().__init__(
@@ -137,13 +142,21 @@ class ConfigCommand(Command):
         )
 
     def get_completions(self, arg_index, prior_args=()):
-        if arg_index == 1 and prior_args and prior_args[0].lower() == "role":
-            return role_name_completions()
+        if arg_index == 1 and prior_args:
+            section = prior_args[0].lower()
+            if section == "role":
+                return role_name_completions()
+            if section == "theme":
+                return theme_name_completions()
         return super().get_completions(arg_index, prior_args)
 
     def get_descriptions(self, arg_index, prior_args=()):
-        if arg_index == 1 and prior_args and prior_args[0].lower() == "role":
-            return role_descriptions()
+        if arg_index == 1 and prior_args:
+            section = prior_args[0].lower()
+            if section == "role":
+                return role_descriptions()
+            if section == "theme":
+                return theme_descriptions()
         return super().get_descriptions(arg_index, prior_args)
 
 
@@ -197,6 +210,47 @@ async def _config_role(ui: ChatUIProtocol, args: List[str]):
         return
     open_editor(ui, path)
     errors = pico_cfg.reload_config() + roles.validate_roles()
+    if errors:
+        ui.chat_history_panel.add_message(
+            "Config reloaded with errors:\n" + "\n".join(errors),
+            msg_type=SysMsgError(), title="config")
+    else:
+        ui.chat_history_panel.add_message("Config reloaded.", msg_type=SysMsg(), title="config")
+    if hasattr(ui, "refresh_status_bar"):
+        ui.refresh_status_bar()
+
+
+async def _config_theme(ui: ChatUIProtocol, args: List[str]):
+    """Open ``themes.toml``; with an id, materialize that theme's section first."""
+    from pico_chat import pico_cfg
+    from pico_chat.ui.external_editor import open_editor, resolve_editor
+    from pico_chat.ui.tui.colors import theme_toml_section
+
+    if not resolve_editor():
+        ui.chat_history_panel.add_message(
+            "No editor found. Set $VISUAL or $EDITOR.",
+            msg_type=SysMsgError(), title="config")
+        return
+
+    path = pico_cfg.config.ensure_section_file("theme")
+    if args:
+        name = args[0]
+        block = theme_toml_section(name)
+        if block is None:
+            ui.chat_history_panel.add_message(
+                f"Unknown theme '{name}'. Use /theme to list the available themes.",
+                msg_type=SysMsgError(), title="config")
+            return
+        text = path.read_text(encoding="utf-8")
+        # Add an override section for this theme if it is not there yet (so the
+        # user edits the palette rather than an empty file).
+        header = f"[themes.{name}]"
+        if not any(line.strip() == header for line in text.splitlines()):
+            path.write_text(text.rstrip() + "\n\n" + block, encoding="utf-8")
+
+    open_editor(ui, path)
+    errors = pico_cfg.reload_config()
+    _apply_theme(ui)
     if errors:
         ui.chat_history_panel.add_message(
             "Config reloaded with errors:\n" + "\n".join(errors),

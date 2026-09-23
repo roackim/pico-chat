@@ -234,8 +234,7 @@ picker) share **one** look, applied by `Completer._apply_selector_style()` in
 its constructor and pass descriptions via `_show(..., descriptions=...)`. Never
 style one provider's menu inline — that is how the argument menu drifted from
 the `/` and `@` menus. Descriptions come from `Command.get_descriptions(...)`
-(`Param.descriptions`, or an override such as `ConfigCommand` for
-`/config role <name>`).
+(`Param.descriptions`, or an override such as `ConfigCommand` for `/config role <name>` / `/config theme <id>`).
 
 ### Schema-Driven Parameter Hints
 

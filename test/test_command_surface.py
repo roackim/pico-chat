@@ -39,6 +39,16 @@ def test_config_command_completes_role_names():
     assert config.get_completions(1, ("ui",)) == []
 
 
+def test_config_command_completes_theme_names():
+    config = COMMANDS["config"]
+
+    names = config.get_completions(1, ("theme",))
+    assert "terminal" in names
+    assert "nord" in names
+
+    assert config.get_descriptions(1, ("theme",))["terminal"] == "built-in"
+
+
 def test_every_command_has_a_description():
     descriptions = get_command_descriptions()
     assert set(descriptions) == set(COMMANDS)

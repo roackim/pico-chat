@@ -121,6 +121,41 @@ def test_config_command_without_editor_reports_error(monkeypatch):
     assert any("No editor" in m for m in ui.chat_history_panel.messages)
 
 
+def test_config_theme_materializes_section(monkeypatch, tmp_path):
+    import pico_chat.pico_cfg as cfg_mod
+
+    monkeypatch.setattr(cfg_mod, "get_config_dir", lambda: tmp_path)
+    monkeypatch.setattr(cfg_mod, "get_state_path", lambda: tmp_path / "state.toml")
+    monkeypatch.setenv("EDITOR", "my-editor")
+    ui = _UI()
+    opened = []
+
+    monkeypatch.setattr(
+        "pico_chat.ui.external_editor.open_editor",
+        lambda _ui, path: opened.append(Path(path)) or True,
+    )
+
+    asyncio.run(cmd_config(ui, ["theme", "nord"]))
+
+    text = (tmp_path / "themes.toml").read_text(encoding="utf-8")
+    assert "[themes.nord]" in text
+    assert opened == [tmp_path / "themes.toml"]
+
+
+def test_config_theme_unknown_reports_error(monkeypatch, tmp_path):
+    import pico_chat.pico_cfg as cfg_mod
+
+    monkeypatch.setattr(cfg_mod, "get_config_dir", lambda: tmp_path)
+    monkeypatch.setattr(cfg_mod, "get_state_path", lambda: tmp_path / "state.toml")
+    monkeypatch.setenv("EDITOR", "my-editor")
+    ui = _UI()
+    monkeypatch.setattr("pico_chat.ui.external_editor.open_editor", lambda _ui, path: True)
+
+    asyncio.run(cmd_config(ui, ["theme", "nope"]))
+
+    assert any("Unknown theme" in m for m in ui.chat_history_panel.messages)
+
+
 def test_edit_command_opens_requested_file(monkeypatch, tmp_path):
     monkeypatch.setenv("EDITOR", "my-editor")
     ui = _UI()

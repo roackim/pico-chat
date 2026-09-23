@@ -61,7 +61,9 @@ Registered commands: `help`, `clear`, `reload`, `config`, `edit`, `export`,
 - `/config <section>` opens a section file in `$EDITOR` and reloads (sections:
   `ui`, `context`, `subagents`, `debug`, `styles`, `servers`, `theme`).
   `/config role <name>` creates/opens `roles/<name>.toml`;
-  `/config role delete <name> confirm` removes it (`_config_role` in `core.py`).
+  `/config role delete <name> confirm` removes it (`_config_role` in `core.py`);
+  `/config theme <id>` materializes a `[themes.<id>]` section then opens
+  `themes.toml` (`_config_theme`). Both offer id completions via `ConfigCommand`.
 - Domain modules import **only** `base`; `registry.py` is the assembler
   (enforced by `test/test_command_import_graph.py`).
 - See [notes/tools-and-permissions.md](../notes/tools-and-permissions.md) for the role model and

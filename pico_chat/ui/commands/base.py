@@ -134,3 +134,19 @@ def role_descriptions() -> Dict[str, str]:
         except (KeyError, OSError, ValueError):
             descriptions[name] = ""
     return descriptions
+
+
+def theme_name_completions() -> List[str]:
+    """Return the selectable color theme names (for ``/config theme <id>``)."""
+    from pico_chat.ui.tui.colors import theme_names
+
+    return theme_names()
+
+
+def theme_descriptions() -> Dict[str, str]:
+    """Return theme name -> description (for completion menus)."""
+    custom = set(getattr(pico_cfg.config, "themes", {}))
+    return {
+        name: ("custom (themes.toml)" if name in custom else "built-in")
+        for name in theme_name_completions()
+    }

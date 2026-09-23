@@ -64,6 +64,9 @@ into the `markdown_styles` / `syntax_highlight_styles` / `servers` tables, and
 - `/edit <path>` opens any file.
 - `/config role <name>` opens (creating if needed) `roles/<name>.toml`;
   `/config role delete <name> confirm` removes it.
+- `/config theme` opens `themes.toml`; `/config theme <id>` first materializes a
+  `[themes.<id>]` override section from that theme's current palette (with name
+  suggestions as you type the id), then opens the file.
 - `/theme` opens a picker; `/theme <name>` selects directly. The choice is
   persisted in `state.toml` (`active_theme`), falling back to `ui.toml`'s
   `theme` when unset.

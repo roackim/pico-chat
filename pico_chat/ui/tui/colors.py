@@ -373,6 +373,36 @@ def theme_names() -> list:
     return sorted(available_themes())
 
 
+#: Palette fields in display/file order.
+PALETTE_FIELDS = (
+    "BACKGROUND", "DEFAULT", "MUTED", "ERROR", "WARNING",
+    "SUCCESS", "PERMISSION", "USER", "PICO", "FOCUSED",
+)
+
+
+def _color_to_toml(color) -> str:
+    """Render one palette color as a ``themes.toml`` value."""
+    if hasattr(color, "r"):
+        return f'"#{color.r:02X}{color.g:02X}{color.b:02X}"'
+    return f"{{ ansi = {color.fg}, bg = {color.bg} }}"
+
+
+def theme_toml_section(name: str) -> "str | None":
+    """Render a ``[themes.<name>]`` block for an existing theme, or None.
+
+    Used by ``/config theme <id>`` to materialize a built-in as an override.
+    """
+    selected = available_themes().get(name)
+    if selected is None:
+        return None
+    lines = [f"[themes.{name}]"]
+    lines.extend(
+        f"{field} = {_color_to_toml(getattr(selected, field))}"
+        for field in PALETTE_FIELDS
+    )
+    return "\n".join(lines) + "\n"
+
+
 def set_theme(name: str):
     """Switch the active theme by name. Unknown names fall back to terminal."""
     selected = available_themes().get(name) or terminal
