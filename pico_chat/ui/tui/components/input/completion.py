@@ -106,6 +106,18 @@ class Completer:
         clean = text.lstrip()
         return len(text) - len(clean)
 
+    def _apply_selector_style(self) -> None:
+        """One shared look for every completion menu.
+
+        Full width, ``USER`` accent frame, normal content color, and muted
+        aligned descriptions. All providers must call this instead of styling
+        their menu in isolation — see ``.wiki/notes/ui.md``
+        ("Completion menu styling").
+        """
+        self.menu.set_fill_width(True)
+        self.menu.frame_color = theme.USER
+        self.menu.content_color = theme.DEFAULT
+
 
 # ---------------------------------------------------------------------------
 # /command
@@ -120,10 +132,7 @@ class CommandCompletion(Completer):
         super().__init__(menu)
         self.commands = commands
         self.descriptions = dict(descriptions or {})
-        # Style like the @ file picker: full-width, accent frame, normal text.
-        self.menu.set_fill_width(True)
-        self.menu.frame_color = theme.USER
-        self.menu.content_color = theme.DEFAULT
+        self._apply_selector_style()
 
     def should_trigger(self, text: str) -> bool:
         """Check if command completion should be active."""
@@ -200,9 +209,7 @@ class SubcommandCompletion(Completer):
         super().__init__(menu)
         self.get_subcommands = get_subcommands_callback
         self.get_descriptions = get_descriptions_callback
-        self.menu.set_fill_width(True)
-        self.menu.frame_color = theme.USER
-        self.menu.content_color = theme.DEFAULT
+        self._apply_selector_style()
         # Track which command we're completing for, so suppression memory is
         # cleared when the parent command changes.
         self.current_parent_command: Optional[str] = None
@@ -320,9 +327,10 @@ class ArgumentCompletion(Completer):
     def __init__(self, menu, commands: Dict[str, "Command"]):
         super().__init__(menu)
         self.commands = commands  # The COMMANDS registry
+        self._apply_selector_style()
 
-    def _resolve(self, text: str) -> Optional[tuple["Command", int, str]]:
-        """Parse the input text and resolve to (command, arg_index, current_arg_text).
+    def _resolve(self, text: str) -> Optional[tuple["Command", int, str, tuple[str, ...]]]:
+        """Parse the input text and resolve to (command, arg_index, current_arg_text, prior_args).
 
         Returns None if no argument completion is applicable.
         """
@@ -355,6 +363,7 @@ class ArgumentCompletion(Completer):
             if clean.endswith(' '):
                 arg_index = 0
                 current_text = ''
+                prior_args: tuple[str, ...] = ()
             else:
                 return None  # still typing subcommand
         else:
@@ -370,8 +379,9 @@ class ArgumentCompletion(Completer):
                 # On an arg — completing the CURRENT arg
                 arg_index = len(after_parts) - 1
                 current_text = after_parts[-1]
+            prior_args = tuple(after_parts[:arg_index])
 
-        return cmd, arg_index, current_text
+        return cmd, arg_index, current_text, prior_args
 
     def update(self, text: str, cursor_pos: int):
         """Auto-update menu based on current text and cursor position."""
@@ -380,13 +390,15 @@ class ArgumentCompletion(Completer):
             self.hide()
             return
 
-        cmd, arg_index, current_text = result
+        cmd, arg_index, current_text, prior_args = result
 
         # Get completions from the resolved command
-        items = cmd.get_completions(arg_index)
+        items = cmd.get_completions(arg_index, prior_args)
         if not items:
             self.hide()
             return
+
+        descriptions = cmd.get_descriptions(arg_index, prior_args)
 
         # Suppression
         self._refresh_suppression(current_text)
@@ -400,7 +412,7 @@ class ArgumentCompletion(Completer):
             return
 
         # Fuzzy filter and show
-        self._show(items, current_text)
+        self._show(items, current_text, descriptions=descriptions or None)
 
     def accept_selection(self, text: str, cursor_pos: int) -> Optional[tuple[str, int]]:
         """Accept current selection, return (completed_text, cursor_pos)."""
@@ -412,7 +424,7 @@ class ArgumentCompletion(Completer):
         if not result:
             return None
 
-        cmd, arg_index, current_text = result
+        cmd, arg_index, current_text, _prior_args = result
         clean = text.lstrip()
         parts = clean.split()
 
@@ -446,7 +458,7 @@ class ArgumentCompletion(Completer):
         """User pressed ESC — suppress menu for current word."""
         result = self._resolve(text)
         if result:
-            _, _, current_text = result
+            current_text = result[2]
             self._suppress(current_text)
         else:
             self.hide()
@@ -479,11 +491,7 @@ class ContextCompletion(Completer):
         self.trigger = trigger
         self.trigger_len = len(trigger)
         # File paths are long; let the menu use the available width.
-        self.menu.set_fill_width(True)
-        # Frame in the user/accent color; suggestions keep the normal color;
-        # the selected row is that accent (bold, not inverted).
-        self.menu.frame_color = theme.USER
-        self.menu.content_color = theme.DEFAULT
+        self._apply_selector_style()
 
     def find_trigger_position(self, text: str, cursor_pos: int) -> Optional[int]:
         """Find the last trigger before cursor position."""

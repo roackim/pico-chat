@@ -10,7 +10,6 @@ from typing import AsyncGenerator, Any, Dict, List, Optional
 from pico_chat.harness.llm_status import AgentState
 from pico_chat.harness.debug import get_debug_stream
 from pico_chat.harness.context_builder import build_harness_context
-from pico_chat.harness.system_prompt import get_system_message
 from pico_chat.harness import events
 from pico_chat.harness.endpoint import Endpoint, get_active_endpoint, get_endpoint
 from pico_chat.harness.permissions import PermissionGate
@@ -372,18 +371,6 @@ class Harness:
                 "message": "History is already compacted.",
             }
 
-        model_name = await self.endpoint.get_model_name()
-        context_window = await self.endpoint.get_context_window()
-        context_window_str = f"{context_window // 1024}k" if isinstance(context_window, int) else str(context_window)
-
-        system_msg = get_system_message(
-            project_context=self.project_context,
-            model_name=model_name,
-            context_window=context_window_str,
-            role_name=getattr(getattr(self, "role", None), "name", ""),
-            role_prompt=getattr(getattr(self, "role", None), "prompt", ""),
-        )
-
         summarize_user = {
             "role": "user",
             "content": (
@@ -404,7 +391,7 @@ class Harness:
 
         summary_text = ""
         async for response in self.endpoint.create_completion(
-            messages=[system_msg, summarize_user],
+            messages=self._system_messages() + [summarize_user],
             tools=None,
             stream=False,
         ):
@@ -446,32 +433,18 @@ class Harness:
         """
         return await self.endpoint.get_model_name()
 
+    def _system_messages(self) -> List[Dict[str, Any]]:
+        """The system prompt comes solely from the active role's ``prompt``."""
+        prompt = (getattr(getattr(self, "role", None), "prompt", "") or "").strip()
+        return [{"role": "system", "content": prompt}] if prompt else []
+
     async def _build_messages(self, user_input: str) -> List[Dict[str, Any]]:
-        """Build message list with system prompt and conversation history."""
+        """Build message list with the role's system prompt and history."""
         # Add user message to history and store its ID
         user_msg_id = self._add_message_to_history("user", user_input)
         self._last_user_message_id = user_msg_id
-        
-        # Get model context information from server
-        model_name = await self.endpoint.get_model_name()
-        context_window = await self.endpoint.get_context_window()
-        
-        # Format context window for display
-        if isinstance(context_window, int):
-            context_window_str = f"{context_window // 1024}k"
-        else:
-            context_window_str = str(context_window)
-        
-        # Build System Prompt with Context
-        system_msg = get_system_message(
-            project_context=self.project_context,
-            model_name=model_name,
-            context_window=context_window_str,
-            role_name=getattr(getattr(self, "role", None), "name", ""),
-            role_prompt=getattr(getattr(self, "role", None), "prompt", ""),
-        )
-        
-        messages = [system_msg]
+
+        messages = self._system_messages()
         messages.extend(self._get_effective_history())
         # Log how much reasoning context is in history
         think_msgs = [m for m in messages if isinstance(m.get('content'), str) and '<think>' in m.get('content', '')]
@@ -487,50 +460,17 @@ class Harness:
         Returns the exact message list that would be sent to the LLM.
         Useful for debugging and inspecting what the model sees.
         """
-        # Get model context information from server
-        model_name = await self.endpoint.get_model_name()
-        context_window = await self.endpoint.get_context_window()
-        
-        # Format context window for display
-        if isinstance(context_window, int):
-            context_window_str = f"{context_window // 1024}k"
-        else:
-            context_window_str = str(context_window)
-        
-        # Build System Prompt with Context
-        system_msg = get_system_message(
-            project_context=self.project_context,
-            model_name=model_name,
-            context_window=context_window_str,
-            role_name=getattr(getattr(self, "role", None), "name", ""),
-            role_prompt=getattr(getattr(self, "role", None), "prompt", ""),
-        )
-        
-        messages = [system_msg]
+        messages = self._system_messages()
         messages.extend(self._get_effective_history())
         return messages
 
     async def get_system_prompt(self) -> str:
         """Return the exact system prompt that would be sent on the next turn.
 
-        Includes the active role's name and prompt, so switching roles is
-        reflected here.
+        The system prompt is the active role's ``prompt`` (empty when unset),
+        so switching roles is reflected here.
         """
-        model_name = await self.endpoint.get_model_name()
-        context_window = await self.endpoint.get_context_window()
-        if isinstance(context_window, int):
-            context_window_str = f"{context_window // 1024}k"
-        else:
-            context_window_str = str(context_window)
-
-        system_msg = get_system_message(
-            project_context=self.project_context,
-            model_name=model_name,
-            context_window=context_window_str,
-            role_name=getattr(getattr(self, "role", None), "name", ""),
-            role_prompt=getattr(getattr(self, "role", None), "prompt", ""),
-        )
-        return system_msg.get("content", "")
+        return (getattr(getattr(self, "role", None), "prompt", "") or "").strip()
 
     @staticmethod
     def _assemble_tool_calls(buffer: Dict) -> list:

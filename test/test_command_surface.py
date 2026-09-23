@@ -24,6 +24,21 @@ def test_model_is_a_leaf_handler():
     assert [p.name for p in model.params] == ["MODEL"]
 
 
+def test_config_command_completes_role_names():
+    config = COMMANDS["config"]
+
+    sections = config.get_completions(0)
+    assert "role" in sections
+    assert "ui" in sections
+
+    names = config.get_completions(1, ("role",))
+    assert "agent" in names
+    assert "chat" in names
+
+    # A non-role section must not offer role names.
+    assert config.get_completions(1, ("ui",)) == []
+
+
 def test_every_command_has_a_description():
     descriptions = get_command_descriptions()
     assert set(descriptions) == set(COMMANDS)

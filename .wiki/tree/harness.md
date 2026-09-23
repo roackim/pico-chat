@@ -128,15 +128,19 @@ tool to exactly one of `no` / `ask` / `yes`. There is no permission engine.
 	represented by one system history notice; consecutive notices are collapsed.
 
 ### `context_builder.py`
-`build_harness_context()` — constructs the context injected alongside the system prompt.
+`build_harness_context()` — builds the project file-tree context string.
 - Builds the file tree regardless of git status (outside a git repo there is no `.gitignore`, so the whole directory is listed — this keeps the `@` file picker working everywhere)
 - `list_files_bounded()` — breadth-first, depth/max-files-bounded walk used by the `@` file picker so it stays responsive on huge trees (e.g. `$HOME`); respects `.gitignore` unless `ignore_gitignore` is set
-- Builds file tree (with guardrails to avoid huge trees)
 - Injects current date and time
-- Returns structured context string
+- Note: the result is stored on `Harness.project_context` but is **not** sent to
+  the model — the system prompt is the active role's `prompt` only.
 
-### `system_prompt.py`
-`get_system_message()` — returns the agent's system prompt string. Defines agent behavior, tool usage instructions, and output format rules.
+### System prompt
+
+There is no `system_prompt.py`. The entire system message is the active role's
+`prompt` field (empty → no system message). `Harness._system_messages()` builds
+it; `Harness.get_system_prompt()` returns it. It is edited as a role file
+(`roles/<name>.toml`), never in code.
 
 ### `patch_parser.py`
 `PatchBlock` — parsed representation of a search/replace block.

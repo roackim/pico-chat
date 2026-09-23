@@ -55,6 +55,9 @@ def test_deleting_compaction_marker_restores_full_history_behavior(harness_stub_
 
 def test_compact_history_summary_call_has_single_system_message_first(harness_stub_compaction):
     harness = harness_stub_compaction
+    from pico_chat.harness.roles import Role
+
+    harness.role = Role("test", prompt="You are a test agent.")
     harness.history = [
         {"id": "u1", "role": "user", "content": "first"},
         {"id": "a1", "role": "assistant", "content": "first answer"},

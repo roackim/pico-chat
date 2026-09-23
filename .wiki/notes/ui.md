@@ -221,6 +221,25 @@ The most complex component. Responsibilities are split across sub-modules:
 | `cursor_renderer.py` | Cursor visibility and animation |
 | `coordinate_mapper.py` | Screen position → text offset |
 
+### Completion menu styling
+
+All four input completion menus (command `/`, subcommand, argument, `@` file
+picker) share **one** look, applied by `Completer._apply_selector_style()` in
+`input/completion.py`:
+
+- `set_fill_width(True)` — span the full screen width;
+- `frame_color = theme.USER` — accent frame;
+- `content_color = theme.DEFAULT` — normal suggestion text;
+- descriptions rendered as muted, right-aligned tails
+  (`SelectionMenu.item_descriptions`, optionally a `footer` tag).
+
+**Rule:** a new completion provider must call `self._apply_selector_style()` in
+its constructor and pass descriptions via `_show(..., descriptions=...)`. Never
+style one provider's menu inline — that is how the argument menu drifted from
+the `/` and `@` menus. Descriptions come from `Command.get_descriptions(...)`
+(`Param.descriptions`, or an override such as `ConfigCommand` for
+`/config role <name>`).
+
 ### Schema-Driven Parameter Hints
 
 When typing a `/command`, the input component shows grey hints for upcoming parameters. This is driven by the `Param` dataclass on each `Command`:

@@ -10,6 +10,7 @@ from pico_chat import pico_cfg
 
 
 CompletionSource = Union[List[str], Callable[[], List[str]]]
+DescriptionSource = Union[Dict[str, str], Callable[[], Dict[str, str]]]
 CommandHandler = Callable[["ChatUIProtocol", List[str]], Awaitable[None]]
 
 
@@ -19,6 +20,7 @@ class Param:
 
     name: str
     completions: Optional[CompletionSource] = None
+    descriptions: Optional[DescriptionSource] = None
     path: bool = False
     required: bool = False
 
@@ -68,7 +70,7 @@ class Command:
             offset += 1
         return cmd, offset
 
-    def get_completions(self, arg_index: int) -> List[str]:
+    def get_completions(self, arg_index: int, prior_args: tuple[str, ...] = ()) -> List[str]:
         if self.has_subcommands():
             return sorted(self.subcommands.keys()) if arg_index == 0 else []
         if arg_index < 0 or arg_index >= len(self.params):
@@ -80,6 +82,15 @@ class Command:
             return []
         return (parameter.completions() if callable(parameter.completions)
                 else list(parameter.completions))
+
+    def get_descriptions(self, arg_index: int, prior_args: tuple[str, ...] = ()) -> Dict[str, str]:
+        """Return value -> one-line description for an argument position."""
+        if arg_index < 0 or arg_index >= len(self.params):
+            return {}
+        source = self.params[arg_index].descriptions
+        if source is None:
+            return {}
+        return dict(source() if callable(source) else source)
 
     @staticmethod
     def _scan_dirs(workspace: Any = None) -> List[str]:
@@ -115,3 +126,16 @@ def role_name_completions() -> List[str]:
     from pico_chat.harness import roles
 
     return roles.list_roles()
+
+
+def role_descriptions() -> Dict[str, str]:
+    """Return role name -> description (for completion menus)."""
+    from pico_chat.harness import roles
+
+    descriptions: Dict[str, str] = {}
+    for name in roles.list_roles():
+        try:
+            descriptions[name] = roles.load_role(name).description
+        except (KeyError, OSError, ValueError):
+            descriptions[name] = ""
+    return descriptions

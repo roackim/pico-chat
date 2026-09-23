@@ -41,6 +41,18 @@ def test_gate_returns_ask_for_ask_tools():
     assert gate.check("wait_for_subagents", {}) == "ask"
 
 
+def test_system_message_is_the_role_prompt():
+    harness = Harness.__new__(Harness)
+
+    harness.role = Role(name="r", prompt="You are a reviewer.")
+    assert harness._system_messages() == [
+        {"role": "system", "content": "You are a reviewer."}
+    ]
+
+    harness.role = Role(name="r", prompt="")
+    assert harness._system_messages() == []
+
+
 def test_true_role_change_history_replaces_consecutive_notices():
     harness = Harness.__new__(Harness)
     harness.history = []

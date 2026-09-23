@@ -13,14 +13,14 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-from .base import ChatUIProtocol, Command, Param, config_section_completions, role_name_completions
+from .base import ChatUIProtocol, Command, Param, role_descriptions, role_name_completions
 from .conversation import conversation_export, conversation_import, json_file_completions
 from .core import (
+    ConfigCommand,
     cmd_activity,
     cmd_cd,
     cmd_clear,
     cmd_compact,
-    cmd_config,
     cmd_edit,
     cmd_exit,
     cmd_help,
@@ -46,9 +46,7 @@ COMMANDS: Dict[str, Command] = {
     "clear":        Command("clear", "Clear chat history", handler=cmd_clear),
     "reload":       Command("reload", "Reload config files and validate role files from disk",
                             handler=cmd_reload),
-    "config":       Command("config", "Edit a config file in $EDITOR and reload it",
-                            handler=cmd_config,
-                            params=[Param("SECTION", completions=config_section_completions)]),
+    "config":       ConfigCommand(),
     "edit":         Command("edit", "Open a file in $EDITOR", handler=cmd_edit,
                             params=[Param("FILE", path=True)]),
     "export":       Command("export", "Export conversation history to a JSON file",
@@ -71,7 +69,8 @@ COMMANDS: Dict[str, Command] = {
                             params=[Param("MODEL", completions=known_model_ids)]),
     "role":         Command("role", "List roles or switch the active one",
                             handler=cmd_role,
-                            params=[Param("NAME", completions=role_name_completions)]),
+                            params=[Param("NAME", completions=role_name_completions,
+                                          descriptions=role_descriptions)]),
     "debug":        DebugCommand(),
     "openrouter":   OpenRouterCommand(),
     "cd":           Command("cd", "Change workspace directory and rebuild context",

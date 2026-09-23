@@ -393,10 +393,9 @@ class TestHarnessSubagentIntegration:
         assert h._last_usage is not None
         assert h._last_usage.prompt_tokens == 13000
 
-    def test_get_system_prompt_includes_role(self, tmp_path):
-        """get_system_prompt must reflect the active role's name and prompt."""
+    def test_get_system_prompt_is_the_role_prompt(self, tmp_path):
+        """get_system_prompt returns the active role's prompt (the only source)."""
         import asyncio
-        from unittest.mock import AsyncMock
 
         from pico_chat.harness.harness import Harness
         from pico_chat.harness.roles import Role
@@ -404,14 +403,10 @@ class TestHarnessSubagentIntegration:
         with patch("pico_chat.harness.harness.get_active_endpoint", return_value=Endpoint(name="test", type="llamacpp")):
             h = Harness(workspace_path=str(tmp_path), depth=0)
 
-        h.endpoint.get_model_name = AsyncMock(return_value="test-model")
-        h.endpoint.get_context_window = AsyncMock(return_value=32768)
-
         h.set_role(Role("reviewer", prompt="You are a strict code reviewer."))
         prompt = asyncio.run(h.get_system_prompt())
 
-        assert "Active Role: reviewer" in prompt
-        assert "You are a strict code reviewer." in prompt
+        assert prompt == "You are a strict code reviewer."
 
     def test_subagent_role_isolated_from_parent_role(self, tmp_path):
         """A child harness keeps scaffolder policy even when a parent role is supplied."""

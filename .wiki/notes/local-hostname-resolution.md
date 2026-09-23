@@ -102,27 +102,27 @@ through a bogus inherited proxy.
 
 ## Per-request latency: context-window fetch not cached
 
-`Harness._build_messages()` runs on **every message** and calls
-`get_model_name()` + `get_context_window()` to build the system prompt. Both are
-cached on the server object — **but `get_context_window()` only cached the
-successful result**. If `query_context_window()` failed (e.g. llama.cpp `/props`
-returns 404 / no `n_ctx`), the `except` path fell back to a default **without
-caching**, so a failing/slow query was re-run (opening a fresh `httpx.AsyncClient`
-+ hitting `/props` + `list_models()`) on *every message* — the source of
-"10s before the server receives the request" within one conversation.
+`Harness._build_messages()` used to run on **every message** and call
+`get_context_window()` to build the system prompt. It is currently cached on the
+endpoint — **but `get_context_window()` only cached the successful result**. If
+`query_context_window()` failed (e.g. llama.cpp `/props` returns 404 / no
+`n_ctx`), the `except` path fell back to a default **without caching**, so a
+failing/slow query was re-run (opening a fresh `httpx.AsyncClient` + hitting
+`/props` + `list_models()`) on *every message* — the source of "10s before the
+server receives the request" within one conversation.
 
-Fix: `get_context_window()` now caches the **fallback** value
-(`max_context` or 32768) in `_model_context_windows` too, so a failing query is
-tried exactly once and later messages use the cached default.
+Fix: `get_context_window()` now caches the **fallback** value (`max_context` or
+32768) in `_model_context_windows` too, so a failing query is tried exactly once
+and later messages use the cached default. (The message-build path no longer
+fetches the context window at all — the system prompt is the role's `prompt`.)
 
 ## Connection diagnostics — `/server diagnose`
 
 `check_connection()` historically swallowed the real error and returned a bare
 bool, hiding *why* a connect failed. Now:
 
-- `LLMServer.diagnose_connection()` → `ConnectionDiagnosis` — returns the
+- `Endpoint.diagnose_connection()` → `ConnectionDiagnosis` — returns the
   underlying exception, the resolved URL (vs original), and builds a hint-rich
   report mentioning active proxy env vars and DNS resolution.
-- `ServerService.diagnose(name)` — wires it to configured servers.
 - UI: `/server diagnose <name>` prints the report. Run it when a server that
   `curl`/`ping` can reach is unreachable from pico.

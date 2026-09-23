@@ -16,7 +16,14 @@ from typing import Any, Dict, List
 from pico_chat.ui.tui.colors import theme
 from pico_chat.ui.tui.msg_types import SysMsg, SysMsgError, SysMsgWarning
 
-from .base import ChatUIProtocol
+from .base import (
+    ChatUIProtocol,
+    Command,
+    Param,
+    config_section_completions,
+    role_descriptions,
+    role_name_completions,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +115,28 @@ async def cmd_config(ui: ChatUIProtocol, args: List[str]):
         ui.chat_history_panel.add_message("Config reloaded.", msg_type=SysMsg(), title="config")
     if hasattr(ui, "refresh_status_bar"):
         ui.refresh_status_bar()
+
+
+class ConfigCommand(Command):
+    """``/config [section]``; offers role names after ``/config role``."""
+
+    def __init__(self):
+        super().__init__(
+            "config",
+            "Edit a config file in $EDITOR and reload it",
+            handler=cmd_config,
+            params=[Param("SECTION", completions=config_section_completions)],
+        )
+
+    def get_completions(self, arg_index, prior_args=()):
+        if arg_index == 1 and prior_args and prior_args[0].lower() == "role":
+            return role_name_completions()
+        return super().get_completions(arg_index, prior_args)
+
+    def get_descriptions(self, arg_index, prior_args=()):
+        if arg_index == 1 and prior_args and prior_args[0].lower() == "role":
+            return role_descriptions()
+        return super().get_descriptions(arg_index, prior_args)
 
 
 async def _config_role(ui: ChatUIProtocol, args: List[str]):
@@ -324,5 +353,5 @@ async def cmd_cd(ui: ChatUIProtocol, args: List[str]):
 __all__ = [
     "cmd_help", "cmd_clear", "cmd_reload", "cmd_config", "cmd_edit",
     "cmd_compact", "cmd_exit", "cmd_stop", "cmd_activity", "cmd_status",
-    "cmd_pwd", "cmd_cd", "format_status",
+    "cmd_pwd", "cmd_cd", "format_status", "ConfigCommand",
 ]
