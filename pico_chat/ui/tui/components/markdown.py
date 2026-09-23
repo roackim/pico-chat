@@ -144,6 +144,22 @@ Block = (
 
 
 # ---------------------------------------------------------------------------
+# Line splitting
+# ---------------------------------------------------------------------------
+
+def _split_lines(text: str) -> List[str]:
+    """Split text into logical lines, dropping the phantom trailing element.
+
+    A trailing newline does not start a new (empty) line; dropping it keeps a
+    full parse identical to a line-by-line incremental parse.
+    """
+    lines = text.split("\n")
+    if len(lines) > 1 and lines[-1] == "" and text.endswith("\n"):
+        lines.pop()
+    return lines
+
+
+# ---------------------------------------------------------------------------
 # Block-level parser
 # ---------------------------------------------------------------------------
 
@@ -151,14 +167,13 @@ class BlockParser:
     """Parse markdown text into a list of Block objects (one per line)."""
 
     def parse(self, text: str) -> List[Block]:
+        return self.parse_with_lines(text)[0]
+
+    def parse_with_lines(self, text: str) -> tuple[List[Block], List[int]]:
+        """Like :meth:`parse`, but also return the source line index per block."""
         blocks: List[Block] = []
-        lines = text.split("\n")
-        # A trailing newline does not start a new (empty) line; drop the phantom
-        # element so "a\n\n" parses as [paragraph, blank] rather than
-        # [paragraph, blank, blank]. Keeps incremental prefix parsing identical
-        # to a full-document parse.
-        if len(lines) > 1 and lines[-1] == "" and text.endswith("\n"):
-            lines.pop()
+        block_lines: List[int] = []
+        lines = _split_lines(text)
         i = 0
         in_code_block = False
         code_fence = ""  # the opening fence (``` or ~~~) optionally with lang
@@ -167,6 +182,10 @@ class BlockParser:
         # --- Table state machine ---
         in_table = False
 
+        def emit(block: Block, line_index: int) -> None:
+            blocks.append(block)
+            block_lines.append(line_index)
+
         while i < len(lines):
             line = lines[i]
 
@@ -174,7 +193,7 @@ class BlockParser:
             if in_table:
                 tbl = self._parse_table_line(line)
                 if tbl is not None:
-                    blocks.append(tbl)
+                    emit(tbl, i)
                     i += 1
                     continue
                 else:
@@ -190,7 +209,7 @@ class BlockParser:
                     i += 1
                     continue
                 # Preserve raw line (including leading whitespace) for code blocks
-                blocks.append(CodeBlockLine(text=line, lang=_current_code_lang))
+                emit(CodeBlockLine(text=line, lang=_current_code_lang), i)
                 i += 1
                 continue
 
@@ -209,41 +228,41 @@ class BlockParser:
 
             # Empty line
             if stripped == "":
-                blocks.append(EmptyLine())
+                emit(EmptyLine(), i)
                 i += 1
                 continue
 
             # Horizontal rule: --- or *** or ___ (at least 3, optional spaces)
             if self._is_hr(stripped):
-                blocks.append(HrLine())
+                emit(HrLine(), i)
                 i += 1
                 continue
 
             # Header
             header = self._parse_header(line)
             if header is not None:
-                blocks.append(header)
+                emit(header, i)
                 i += 1
                 continue
 
             # Blockquote
             quote = self._parse_quote(line)
             if quote is not None:
-                blocks.append(quote)
+                emit(quote, i)
                 i += 1
                 continue
 
             # Unordered list
             ul_item = self._parse_unordered_list(line)
             if ul_item is not None:
-                blocks.append(ul_item)
+                emit(ul_item, i)
                 i += 1
                 continue
 
             # Ordered list
             ol_item = self._parse_ordered_list(line)
             if ol_item is not None:
-                blocks.append(ol_item)
+                emit(ol_item, i)
                 i += 1
                 continue
 
@@ -256,18 +275,86 @@ class BlockParser:
                     j += 1
                 if j < len(lines) and self._is_table_separator(lines[j]):
                     in_table = True
-                    blocks.append(tbl)  # header row
+                    emit(tbl, i)  # header row
                     i += 1
                     # Consume separator row
-                    blocks.append(self._parse_table_line(lines[i]) or TableLine(cells=[""]))
+                    emit(self._parse_table_line(lines[i]) or TableLine(cells=[""]), i)
                     i += 1
                     continue
 
             # Default: paragraph
-            blocks.append(ParagraphLine(raw=line))
+            emit(ParagraphLine(raw=line), i)
             i += 1
 
-        return blocks
+        return blocks, block_lines
+
+    def find_commit_line(self, lines: List[str], start: int, last_open: bool = False) -> int:
+        """Largest line index ``c`` such that ``lines[:c]`` parses independently.
+
+        A boundary is safe only at a line the parser visits with neutral state
+        (outside a fence/table). It additionally holds the last line (it may
+        still grow into a table header), any run of trailing blank lines, and a
+        potential table header whose lookahead has not yet seen a separator.
+        Scanning resumes at ``start`` (a previous safe boundary, neutral state).
+        """
+        n = len(lines)
+        i = start
+        in_code = False
+        fence = ""
+        in_table = False
+        table_start = start
+        last_start = start
+        pending = None
+        while i < n:
+            if in_code:
+                if lines[i].strip().startswith(fence):
+                    in_code = False
+                i += 1
+                continue
+            if in_table:
+                if self._parse_table_line(lines[i]) is not None:
+                    i += 1
+                    continue
+                # The table is closed by a non-table line. If that line is the
+                # still-growing last line it might yet become a row, which would
+                # re-group the table across the boundary: hold the whole table.
+                if i >= n - 1 and last_open:
+                    pending = table_start
+                    break
+                in_table = False
+                # Fall through to neutral handling of this same line.
+            # Neutral line start.
+            last_start = i
+            stripped = lines[i].strip()
+            if stripped.startswith("```") or stripped.startswith("~~~"):
+                fence = stripped[0] * 3
+                in_code = True
+                i += 1
+                continue
+            tbl = self._parse_table_line(lines[i])
+            if tbl is not None and not tbl.is_separator:
+                j = i + 1
+                while j < n and lines[j].strip() == "":
+                    j += 1
+                # The final line may still grow (e.g. into `|---|`), so a
+                # candidate separator there cannot resolve the header yet.
+                if j >= n or (last_open and j == n - 1):
+                    pending = i
+                    break
+                if self._is_table_separator(lines[j]):
+                    in_table = True
+                    table_start = i
+                    i += 2
+                    continue
+            i += 1
+
+        c = n - 1 if last_start > n - 1 else last_start
+        if pending is not None:
+            c = min(c, pending)
+        # Keep any trailing blank run in the open region.
+        while c > start and lines[c - 1].strip() == "":
+            c -= 1
+        return max(c, start)
 
 
     # --- helpers ---
@@ -510,17 +597,30 @@ class Markdown:
         self._block_parser = BlockParser()
         self._inline_parser = InlineParser()
 
-    def parse(self, text: str, strip_trailing: bool = True) -> List[List[StyledSegment]]:
+    def parse(
+        self,
+        text: str,
+        strip_trailing: bool = True,
+        open_tail: bool = False,
+    ) -> List[List[StyledSegment]]:
         """Return a list of lines; each line is a list of StyledSegment.
 
         ``strip_trailing`` removes trailing blank lines (the default for a
         complete document). Incremental append parsing passes ``False`` for the
         stable prefix so its separating blank line is retained.
+
+        ``open_tail`` renders the final line with its inline content *plain*
+        (no ``InlineParser``). While a line is still being streamed, closed
+        spans such as ``**bold**`` stay literal until its newline arrives; this
+        keeps per-append cost independent of how much of the line has arrived.
         """
         if not text:
             return []
 
-        blocks = self._block_parser.parse(text)
+        blocks, block_lines = self._block_parser.parse_with_lines(text)
+        open_line = None
+        if open_tail and not text.endswith("\n"):
+            open_line = len(_split_lines(text)) - 1
         result: List[List[StyledSegment]] = []
 
         i = 0
@@ -537,7 +637,8 @@ class Markdown:
                 result.extend(rendered)
                 continue
 
-            rendered = self._render_block(block)
+            plain = open_line is not None and block_lines[i] == open_line
+            rendered = self._render_block(block, plain_inline=plain)
             result.extend(rendered)
             i += 1
 
@@ -548,7 +649,11 @@ class Markdown:
 
         return result
 
-    def _render_block(self, block: Block) -> List[List[StyledSegment]]:
+    def find_commit_line(self, lines: List[str], start: int, last_open: bool = False) -> int:
+        """Line count up to which ``lines`` may be committed (see BlockParser)."""
+        return self._block_parser.find_commit_line(lines, start, last_open)
+
+    def _render_block(self, block: Block, plain_inline: bool = False) -> List[List[StyledSegment]]:
         if isinstance(block, EmptyLine):
             return [[]]
 
@@ -559,7 +664,7 @@ class Markdown:
             marker = self._header_marker(block.level)
             segments = [StyledSegment(marker, **style)]
             # Inline-parse the header text for bold/code/etc inside headers
-            inner = self._inline_parser.parse(block.text)
+            inner = [StyledSegment(block.text)] if plain_inline else self._inline_parser.parse(block.text)
             # Merge header style into each segment
             for seg in inner:
                 seg.bold = seg.bold or style["bold"]
@@ -576,7 +681,7 @@ class Markdown:
             base_fg = style["fg"]
             # Apply syntax highlighting
             from pico_chat.ui.tui.syntax_highlight import highlight_line, _get_highlight_color
-            hl_segments = highlight_line(block.text, block.lang)
+            hl_segments = [(block.text, "")] if plain_inline else highlight_line(block.text, block.lang)
             result_segs: List[StyledSegment] = []
             for text, hl_type in hl_segments:
                 seg_fg = _get_highlight_color(hl_type)
@@ -588,7 +693,7 @@ class Markdown:
         if isinstance(block, QuoteLine):
             style = _get_style("quote")
             segments = [StyledSegment("> ", **style)]
-            inner = self._inline_parser.parse(block.text)
+            inner = [StyledSegment(block.text)] if plain_inline else self._inline_parser.parse(block.text)
             for seg in inner:
                 seg.reverse = seg.reverse or style["reverse"]
                 if seg.fg is None:
@@ -602,7 +707,7 @@ class Markdown:
             style = _get_style("list")
             indent_str = "  " * block.indent
             segments = [StyledSegment(indent_str + "- ")]
-            inner = self._inline_parser.parse(block.text)
+            inner = [StyledSegment(block.text)] if plain_inline else self._inline_parser.parse(block.text)
             for seg in inner:
                 if seg.fg is None:
                     seg.fg = style["fg"]
@@ -616,7 +721,7 @@ class Markdown:
             indent_str = "  " * block.indent
             prefix = f"{indent_str}{block.number}. "
             segments = [StyledSegment(prefix)]
-            inner = self._inline_parser.parse(block.text)
+            inner = [StyledSegment(block.text)] if plain_inline else self._inline_parser.parse(block.text)
             for seg in inner:
                 if seg.fg is None:
                     seg.fg = style["fg"]
@@ -631,6 +736,8 @@ class Markdown:
             return [[StyledSegment("hr", **style)]]
 
         if isinstance(block, ParagraphLine):
+            if plain_inline:
+                return [[StyledSegment(block.raw)]]
             return [self._inline_parser.parse(block.raw)]
 
         return [[]]
@@ -682,42 +789,21 @@ class Markdown:
 # MarkdownComponent — TUI component
 # ---------------------------------------------------------------------------
 
-def _last_stable_blank(text: str) -> int:
-    """Char offset just after the last blank line that can never be changed by
-    appending more text (i.e. not inside an open fenced code block).
-
-    Returns 0 when there is no such boundary, in which case callers must fall
-    back to a full re-parse. A boundary must be followed by real content, so a
-    document ending on a blank line yields the previous internal boundary.
-    """
-    lines = text.split("\n")
-    fence_parity = 0
-    last_blank = None
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        if stripped.startswith("```") or stripped.startswith("~~~"):
-            fence_parity ^= 1
-            continue
-        if stripped == "" and fence_parity == 0:
-            last_blank = i
-    if last_blank is None:
-        return 0
-    # The boundary is only useful if real content follows it.
-    if not any(line.strip() for line in lines[last_blank + 1:]):
-        return 0
-    return sum(len(line) + 1 for line in lines[:last_blank + 1])
-
-
 class MarkdownComponent(Component):
     """Renders markdown text as styled segments with segment-aware wrapping.
 
     Parses on every `update()` call, making it suitable for live streaming
-    where the full text changes between calls. Append-only updates take an
-    incremental path: everything up to the last stable block boundary is
-    re-used, and only the pending tail is re-parsed/wrapped.
+    where the full text changes between calls. Append-only updates commit
+    complete lines atomically and re-parse/re-wrap only the open region, so an
+    append costs O(open region) rather than O(message length).
+
+    While streaming, the still-open final line is rendered with its inline
+    content plain (see :meth:`Markdown.parse`); :meth:`set_streaming` clears the
+    rule so a finalized message is styled in full.
     """
 
-    def __init__(self, text: str = "", fg=None, bg=None, id: Optional[str] = None, left_pad: int = 0):
+    def __init__(self, text: str = "", fg=None, bg=None, id: Optional[str] = None,
+                 left_pad: int = 0, streaming: bool = False):
         super().__init__(id)
         self.fg = fg
         self.bg = bg
@@ -727,12 +813,18 @@ class MarkdownComponent(Component):
         self._wrapped_lines: List[List[StyledSegment]] = []
         self._last_wrap_width = -1
         self.left_pad = left_pad
-        # Incremental state: rendered stable prefix and the first visual line
-        # that may have changed since the last render (None = full redraw).
-        self._prefix_src = ""
-        self._prefix_parsed: List[List[StyledSegment]] = []
-        self._prefix_wrapped: List[List[StyledSegment]] = []
-        self._prefix_width = -1
+        self._streaming = streaming
+        # Append-only caches: committed lines are parsed/wrapped once and only
+        # ever extended. The open region (the uncommitted tail) is re-parsed and
+        # re-wrapped on each append and concatenated after the caches.
+        self._committed_parsed: List[List[StyledSegment]] = []
+        self._committed_wrapped: List[List[StyledSegment]] = []
+        self._open_parsed: List[List[StyledSegment]] = []
+        self._open_wrapped: List[List[StyledSegment]] = []
+        self._commit_line = 0   # number of committed source lines
+        self._commit_char = 0   # char length of the committed prefix
+        # First visual line that may have changed since the last render
+        # (None = full redraw).
         self._dirty_from_line: Optional[int] = None
         self._do_parse_and_wrap(text)
 
@@ -745,22 +837,38 @@ class MarkdownComponent(Component):
         self._dirty_from_line = None
         return dirty
 
+    def set_streaming(self, streaming: bool):
+        """Declare whether the final line is still open (approach A).
+
+        Clearing it (on finalize) re-parses in full so the previously-open line
+        receives its inline styling.
+        """
+        if self._streaming == streaming:
+            return
+        self._streaming = streaming
+        self._do_parse_and_wrap(self._raw_text)
+        self._dirty_from_line = None
+        self.mark_changed()
+
     def update(self, text: str, append: bool = False):
         """Update with new markdown text.
 
         When ``append`` is true and ``text`` simply extends the previous raw
-        text, only the tail after the last stable boundary is re-parsed.
+        text, completed lines are committed and only the open region is
+        re-parsed/wrapped.
         """
         old_text = self._raw_text
         eff = self._effective_wrap_width()
 
+        if append and text == old_text:
+            return
+
         if append and eff > 0 and text.startswith(old_text) and old_text != text:
-            boundary = _last_stable_blank(old_text)
-            if boundary > 0 and boundary < len(text):
-                self._raw_text = text
-                self._update_incremental(text, boundary, eff)
-                self.mark_changed()
-                return
+            self._raw_text = text
+            self._streaming = True
+            self._update_incremental(text, eff)
+            self.mark_changed()
+            return
 
         self._raw_text = text
         self._last_wrap_width = -1  # Force re-wrap
@@ -768,72 +876,76 @@ class MarkdownComponent(Component):
         self._dirty_from_line = None
         self.mark_changed()
 
-    def _update_incremental(self, text: str, boundary: int, eff: int):
-        suffix = text[boundary:]
-        suffix_parsed = self._md.parse(suffix, strip_trailing=True)
-        # If the appended tail renders to nothing (e.g. it only opened a code
-        # fence), the stable prefix's trailing blank becomes document-trailing
-        # and a full parse would strip it. Rare: just fall back.
-        if not any(suffix_parsed):
-            self._do_parse_and_wrap(text)
-            self._dirty_from_line = None
-            return
+    def _update_incremental(self, text: str, eff: int):
+        lines = _split_lines(text)
+        prev_open_start = len(self._committed_wrapped)
 
-        prefix = text[:boundary]
-        if prefix != self._prefix_src or eff != self._prefix_width:
-            self._prefix_parsed = self._md.parse(prefix, strip_trailing=False)
-            self._prefix_wrapped = self._wrap_all(self._prefix_parsed, eff)
-            self._prefix_src = prefix
-            self._prefix_width = eff
+        new_c = self._md.find_commit_line(
+            lines, self._commit_line, last_open=not text.endswith("\n"))
+        if new_c > self._commit_line:
+            new_char = sum(len(line) + 1 for line in lines[:new_c])
+            extension = text[self._commit_char:new_char]
+            ext_parsed = self._md.parse(extension, strip_trailing=False)
+            self._committed_parsed.extend(ext_parsed)
+            self._committed_wrapped.extend(self._wrap_all(ext_parsed, eff))
+            self._commit_line = new_c
+            self._commit_char = new_char
 
-        combined = self._prefix_parsed + suffix_parsed
-        # Mirror the full-document trailing-blank strip.
-        while combined and not combined[-1]:
-            combined.pop()
-        if len(combined) < len(self._prefix_parsed):
-            # The strip reached into the cached prefix; reparse fully.
-            self._do_parse_and_wrap(text)
-            self._dirty_from_line = None
-            return
-
-        suffix_final = combined[len(self._prefix_parsed):]
-        self._parsed_lines = combined
-        self._wrapped_lines = self._prefix_wrapped + self._wrap_all(suffix_final, eff)
+        open_text = text[self._commit_char:]
+        self._open_parsed = self._md.parse(
+            open_text, strip_trailing=True, open_tail=not text.endswith("\n"))
+        self._open_wrapped = self._wrap_all(self._open_parsed, eff)
+        combined_parsed = self._committed_parsed + self._open_parsed
+        combined_wrapped = self._committed_wrapped + self._open_wrapped
+        # A table render can leave a trailing blank line. When the open region
+        # renders to nothing, that blank is document-trailing and must be
+        # stripped (the open region's own parse already strips its blanks).
+        if not self._open_parsed:
+            while combined_parsed and not combined_parsed[-1]:
+                combined_parsed.pop()
+            while combined_wrapped and not combined_wrapped[-1]:
+                combined_wrapped.pop()
+        self._parsed_lines = combined_parsed
+        self._wrapped_lines = combined_wrapped
         self._last_wrap_width = eff
 
-        dirty = len(self._prefix_wrapped)
-        if self._dirty_from_line is None:
+        dirty = prev_open_start
+        if self._dirty_from_line is None or dirty < self._dirty_from_line:
             self._dirty_from_line = dirty
-        else:
-            self._dirty_from_line = min(self._dirty_from_line, dirty)
 
     def _effective_wrap_width(self) -> int:
         """Width available for content after left padding."""
         return max(0, self.width - self.left_pad)
 
     def _do_parse_and_wrap(self, text: str):
-        self._parsed_lines = self._md.parse(text)
-        # Re-wrap if width is set
-        eff = self._effective_wrap_width()
-        if eff > 0:
-            self._wrapped_lines = self._wrap_all(self._parsed_lines, eff)
-            self._last_wrap_width = eff
-        else:
+        open_tail = self._streaming and bool(text) and not text.endswith("\n")
+        self._parsed_lines = self._md.parse(text, open_tail=open_tail)
+        self._committed_parsed = []
+        self._committed_wrapped = []
+        self._open_parsed = self._parsed_lines
+        self._open_wrapped = []
+        self._commit_line = 0
+        self._commit_char = 0
+        self._rebuild_wrapped(self._effective_wrap_width())
+
+    def _rebuild_wrapped(self, eff: int):
+        """Re-wrap committed and open segments for a new width (rare)."""
+        if eff <= 0:
+            self._committed_wrapped = self._committed_parsed
+            self._open_wrapped = list(self._open_parsed)
             self._wrapped_lines = self._parsed_lines
-        # A full parse invalidates any incremental prefix cache.
-        self._prefix_src = ""
-        self._prefix_parsed = []
-        self._prefix_wrapped = []
-        self._prefix_width = -1
+        else:
+            self._committed_wrapped = self._wrap_all(self._committed_parsed, eff)
+            self._open_wrapped = self._wrap_all(self._open_parsed, eff)
+            self._wrapped_lines = self._committed_wrapped + self._open_wrapped
+        self._last_wrap_width = eff
 
     def set_layout(self, x: int, y: int, width: int, height: int):
-        old_width = self.width
         super().set_layout(x, y, width, height)
         # Re-wrap on width change
         eff = self._effective_wrap_width()
         if eff > 0 and eff != self._last_wrap_width:
-            self._wrapped_lines = self._wrap_all(self._parsed_lines, eff)
-            self._last_wrap_width = eff
+            self._rebuild_wrapped(eff)
 
     def get_preferred_height(self, width: int) -> int:
         """Calculate height needed for wrapped content."""
@@ -841,8 +953,7 @@ class MarkdownComponent(Component):
         if eff <= 0:
             return 0
         if self._last_wrap_width != eff:
-            self._wrapped_lines = self._wrap_all(self._parsed_lines, eff)
-            self._last_wrap_width = eff
+            self._rebuild_wrapped(eff)
         return len(self._wrapped_lines)
 
     # --- Wrapping ---

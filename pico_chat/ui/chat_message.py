@@ -136,6 +136,10 @@ class Message:
     
     def finalize(self):
         self.finalized = True
+        # A finalized message is complete: re-render the previously-open last
+        # line with its inline styling (streaming renders it plain).
+        if self.render_markdown and hasattr(self.component, "set_streaming"):
+            self.component.set_streaming(False)
         # Tool messages bake their status symbol into the display text; rebuild
         # so the finalized ✓/✗/⏹ replaces any stale running-spinner glyph.
         if self.is_tool_message():

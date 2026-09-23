@@ -28,7 +28,7 @@ See [notes/ui.md](../notes/ui.md) for the component model overview.
 | `table_view.py` | `TableView` — sized/measured columns, scrolling, clipping, row selection |
 | `list_view.py` | `SelectionModel`, `ListView`, `Select` — generic list widgets (currently only referenced by tests) |
 | `list_modal.py` | `ListModal` + `ListModalScreen` — centered modal list (currently only referenced by tests) |
-| `markdown.py` | `Markdown` parser + `MarkdownComponent`; block/inline parsers; `StyledSegment`; table rendering via `AsciiTable` |
+| `markdown.py` | `Markdown` parser + `MarkdownComponent`; block/inline parsers; `StyledSegment`; table rendering via `AsciiTable`; append-only commit path (`find_commit_line`, `_committed_*`) and open-tail plain rendering for streaming |
 
 ---
 

@@ -493,7 +493,7 @@ Live markdown rendering for chat messages, added to support streaming output wit
 
 ### Modules
 
-- `tui/components/markdown.py` — parser + `MarkdownComponent` (re-parses on every `update()`, suitable for streaming)
+- `tui/components/markdown.py` — parser + `MarkdownComponent` (append-only commit path for streaming; `parse(open_tail=True)` renders the open line plain)
 - `tui/ascii_table.py` — `AsciiTable` renders markdown tables with squared-style borders
 - `tui/syntax_highlight.py` — `highlight_line(line, lang)` tokenises code blocks for coloring
 
@@ -504,6 +504,34 @@ Live markdown rendering for chat messages, added to support streaming output wit
 3. `Markdown.parse()` returns `List[List[StyledSegment]]` (display lines)
 4. `MarkdownComponent` wraps lines to the component width (word-wrap for prose, hard-break for code blocks/tables)
 5. `render()` writes styled segments to the buffer
+
+### Incremental (streaming) updates
+
+`MarkdownComponent.update(text, append=True)` commits *complete* lines atomically
+and re-parses/re-wraps only the open (uncommitted) tail, so an append costs
+O(open region) rather than O(message length):
+
+- `BlockParser.find_commit_line(lines, start, last_open)` returns the largest
+  line index that can be committed: a line the parser visits outside a
+  fence/table, never the still-growing last line, never a run of trailing blank
+  lines, and never a potential table header whose separator has not arrived.
+- Committed segments/wrapped rows are cached (`_committed_parsed` /
+  `_committed_wrapped`) and only ever appended to. The open region is re-parsed
+  and re-wrapped each append, then concatenated after the caches.
+- `take_dirty_from_line()` returns the open region's first wrapped row
+  (reduced across appends); `Box`/`MessageView` reuse that as the tail raster.
+- **Open-tail rendering (approach A):** while the final line is still growing it
+  is rendered *plain* (no `InlineParser`), so closed spans such as `**bold**` on
+  the open line stay literal until its newline arrives. `set_streaming(False)`
+  (called by `Message.finalize()`) re-parses in full so the line is styled.
+  `Markdown.parse(..., open_tail=True)` carries the same rule; tests use it for
+  a streaming-aware reference.
+- An open code fence or table is held whole until it closes (bounded by its own
+  size); a single never-ending line is still re-wrapped per append (O(line)).
+
+`notes/bench_render.py` has a `stream` scenario (append+render per frame) and a
+`stream_micro` table (µs/append vs length for prose/code/table); baseline in
+`notes/bench_stream_baseline.json`.
 
 ### Styling
 
