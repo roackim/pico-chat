@@ -33,32 +33,38 @@ pico
 
 ## Getting Started
 
-On first launch, pico starts with no server configured. Add one using the `/server` command:
+On first launch, pico starts with no server configured. Servers live in
+`~/.config/pico-chat/servers.toml`; open it with `/config servers` and add a table:
 
 **Local llama.cpp server:**
-```
-/server add llamacpp http://localhost:8080 my-local
-/model
-/model <model>
+```toml
+[servers.local]
+type = "llamacpp"
+base_url = "http://localhost:8080/v1"
 ```
 
 **Ollama (local models):**
-```
-/server add ollama http://localhost:11434 my-ollama
-/model
-/model llama3.1:8b
+```toml
+[servers.ollama]
+type = "ollama"
+base_url = "http://localhost:11434/v1"
 ```
 
 **OpenRouter (cloud models):**
 ```bash
 export OPENROUTER_API_KEY=sk-or-...
 ```
-```
-/server add openrouter anthropic/claude-3.5-sonnet my-claude
-/model anthropic/claude-3.5-sonnet
+```toml
+[servers.openrouter]
+type = "openrouter"
+api_key_env = "OPENROUTER_API_KEY"
+enabled_models = ["anthropic/claude-3.5-sonnet"]
 ```
 
-Server definitions are saved to `~/.config/pico-chat/servers.toml` and persist between sessions. Selecting a model with `/model` automatically switches to the server that serves it.
+Save the file, and `/config` reloads it automatically. Then open the model
+picker with `/model` (type to filter) or select directly with
+`/model <id>` / `/model <server>:<id>`. Models are discovered live from the
+configured servers; selecting one switches to the server that serves it.
 
 ---
 
@@ -67,41 +73,24 @@ Server definitions are saved to `~/.config/pico-chat/servers.toml` and persist b
 | Command | Description |
 |---------|-------------|
 | `/help` | List all available commands |
-| `/config [section]` | Edit a config section (`ui`, `context`, `subagents`, `debug`, `styles`, `servers`) and reload |
+| `/config [section]` | Edit a config section (`ui`, `context`, `subagents`, `debug`, `styles`, `servers`, `theme`) and reload |
 | `/edit <file>` | Open a file in `$EDITOR` |
-| `/reload` | Reload config files and `roles/` from disk |
-| `/status` | Show server, model, context usage, and memory |
-| `/server` | Manage servers (list/use/edit/info/remove/diagnose) |
-| `/model` | Open the searchable model picker (type to filter), or select directly with `/model <id>` |
-| `/tools` | Show available agent tools and their permission levels |
-| `/roles` | Select and inspect roles (`roles/<name>.toml`) |
+| `/reload` | Reload config files and validate `roles/` from disk |
+| `/model` | Open the searchable model picker (type to filter), or select with `/model <id>` |
+| `/role` | List roles or switch the active one (`/role <name>`) |
+| `/theme` | Pick a color theme (opens a picker) |
 | `/compact` | Summarize conversation history to free context space |
 | `/import <file>` | Import conversation history from a JSON file |
 | `/export <file>` | Export conversation history to a JSON file |
 | `/clear` | Clear the conversation history |
 | `/stop` | Stop the current generation |
 | `/activity` | Toggle the activity overlay (shell/status output) |
-| `/set` | Set runtime parameters (e.g. `/set fps 60`) |
-| `/get` | Get current runtime parameters |
-| `/debug` | Debug utilities (toggle console, copy context, show system prompt) |
 | `/exit` | Quit the application |
 
 ### Server Management
 
-Servers are defined in `servers.toml`; edit them with `/config servers` (or
-`/server edit`) and the config is reloaded when the editor exits.
-
-```
-/server list
-/server use <name>
-/server edit          # opens servers.toml in $EDITOR
-/server info <name>
-/server remove <name>
-/server diagnose <name>
-/model
-/model <model>
-/model <server>:<model>
-```
+Servers are defined in `servers.toml`; edit them with `/config servers` and the
+config reloads when the editor exits. `/model` lists what each server offers.
 
 Examples (`servers.toml`):
 ```toml
@@ -116,7 +105,6 @@ enabled_models = ["deepseek/deepseek-v4-flash"]
 ```
 Then:
 ```
-/server use local
 /model
 /model llama3.1:8b
 ```
@@ -159,29 +147,31 @@ conversation itself.
 
 ## Tool Use & Permissions
 
-The agent has access to tools for reading/writing files, applying patches, and running shell commands. Each tool has a configurable permission level:
+The agent has access to tools for reading/writing files, applying patches, and
+running shell commands: `read`, `write`, `patch`, `run_command`, `subagent`,
+`wait_for_subagents`. Each tool is configured **per role** with one of three
+values:
 
-- **`allow`** — runs automatically without asking
+- **`yes`** — runs automatically without asking
 - **`ask`** — prompts you before executing
-- **`deny`** — never allowed
+- **`no`** — never allowed (hidden from the model entirely)
 
-When the agent requests a tool that requires your approval, a prompt appears:
+When the agent requests a tool set to `ask`, a prompt appears:
 
 ```
-> run
-cmd: pytest tests/
+> run_command
+command: pytest test/
 [allow] [deny]
 ```
 
 You can approve or deny with mouse click or keyboard.
 
-Use `/tools` to see the current permission level for each tool. The full policy — per-tool settings and per-command allow/ask/deny lists — lives in the active role file (`roles/<name>.toml`); edit it with `/roles edit <name>`.
-
----
-
-## Agent Memory
-
-The agent can remember things across conversation turns using `memorize` and `forget` tools. Memories are stored in-session and shown in `/status`. They are used to keep track of context that would otherwise fall out of the context window (e.g. project conventions, user preferences, task progress).
+The active role (`roles/<name>.toml`) is the whole policy. Built-in roles —
+`agent` (every tool `yes`) and `chat` (no tools) — are seeded on first run.
+Switch roles with `/role`, and edit one with `/config role <name>` (creates it
+if missing). Because the container/OS boundary belongs to the environment
+pico runs in, the convention is: run inside a sandbox → `yes` everywhere; run
+bare on the host → `ask` on the mutating tools.
 
 ---
 
@@ -190,8 +180,6 @@ The agent can remember things across conversation turns using `memorize` and `fo
 During generation, pico displays:
 - **Speed** (tokens/s)
 - **Context usage** (tokens used vs. context window size, color-coded by pressure)
-
-Use `/status` at any time to see the full picture.
 
 ---
 
@@ -206,16 +194,16 @@ single-concern files:
 - `debug.toml` — debug logging (flat keys).
 - `styles.toml` — `[markdown_styles.*]` / `[syntax_highlight.*]` overrides.
 - `servers.toml` — one `[servers.<name>]` table per server.
-- `roles/<name>.toml` — one file per conversation role (tools, permissions,
-  prompts). The file name is the role name; `_example.toml` is a commented
-  starting point.
-- `state.toml` — disposable runtime state (last server/model, discovery
-  catalog). Safe to delete.
+- `themes.toml` — `[themes.<name>]` palette overrides (built-ins always exist).
+- `roles/<name>.toml` — one file per conversation role (prompt + per-tool
+  settings). The file name is the role name.
+- `state.toml` — disposable runtime state (last server/model, active theme,
+  discovery catalog). Safe to delete.
 
 Missing files are created from fully commented templates (the `servers.toml`
 template includes example `llamacpp`, `ollama`, `openrouter` and `openai`
 blocks). Edit them with `/config <section>` or `/edit <path>`, and roles with
-`/roles edit <name>`. Configuration is read at startup and only re-applied when
+`/config role <name>`. Configuration is read at startup and only re-applied when
 you run `/reload` or restart. The loader validates each file and reports unknown
 keys, wrong types, and unparsable TOML (`<file>: ...`); invalid entries fall
 back to defaults while the rest of the file still applies.
@@ -238,15 +226,14 @@ base_url = "http://localhost:8080/v1"
 ```
 
 ```toml
-# roles/architect.toml
-description = "Design and review with minimal edits"
-prompt = "Focus on architecture; prefer small, reversible changes."
+# roles/reviewer.toml
+description = "Read-only code review"
+prompt = "Review code carefully. Do not modify files."
 
-[tools.read]
-enabled = true
-permission = "allow"
-
-[tools.write]
-enabled = true
-permission = "ask"
+read = "yes"
+write = "no"
+patch = "no"
+run_command = "no"
+subagent = "yes"
+wait_for_subagents = "yes"
 ```

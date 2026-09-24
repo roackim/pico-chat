@@ -1,7 +1,19 @@
+> **Superseded (2026-09-24).** The "pico ships nothing container-related"
+> decision below is reversed for the **execution path**: pico will start a
+> container itself and run only the tool **worker** inside it, keeping the UI,
+> agent loop, conversation, config, secrets, and LLM calls on the host. See
+> [`plans/sandbox_worker.md`](./sandbox_worker.md).
+>
+> The reasoning here is kept as the historical record. The parts that carry
+> over: **the boundary belongs to the environment**, **explicit over implicit**
+> (the user names the backend; no detection), the per-tool `no`/`ask`/`yes`
+> model, and **the user builds the image** (pico does not ship one).
+
 # Containerization — Decision Record
 
-**Status:** decided (no code, by design) · **Owner:** Joackim · **Created:** 2026-09-22
-**Companion docs:** `.wiki/notes/principles.md`, `plans/roles_rework.md`,
+**Status:** superseded by `plans/sandbox_worker.md` (2026-09-24) · **Owner:** Joackim · **Created:** 2026-09-22
+**Companion docs:** `.wiki/notes/principles.md`, `plans/sandbox_worker.md`
+(successor), `plans/roles_rework.md`,
 `plans/proper_container_integration.md` (older sketch — historical).
 
 This is not an implementation plan. It records the design exploration, the
