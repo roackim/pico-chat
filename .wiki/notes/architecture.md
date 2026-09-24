@@ -59,7 +59,7 @@ User types → InputComponent
 ## Config
 
 `~/.config/pico-chat/` — single-concern files (`ui.toml`, `context.toml`,
-`subagents.toml`, `debug.toml`, `styles.toml`, `servers.toml`), one role per
+`debug.toml`, `styles.toml`, `servers.toml`), one role per
 file at `roles/<name>.toml`, and a disposable `state.toml`; loaded by
 `pico_cfg.py`. See [notes/config.md](./config.md).
 
@@ -83,7 +83,7 @@ pico_chat/
     roles.py             ← Role (prompt + per-tool no/ask/yes; single source of truth)
     thinking_parser.py   ← Thinking-tag state machine + metrics emission
     endpoint.py          ← Endpoint config + transport; endpoint_* modules split the families
-    tools.py             ← Tool implementations + @tool registry (read/write/patch/run/subagent)
+    tools.py             ← Tool implementations + @tool registry (read/write/edit/bash)
     ...
 
   ui/

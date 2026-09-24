@@ -19,19 +19,15 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from pico_chat.harness.roles import Role
 
 
-#: The LLM-facing tool name may differ from the registry key (``run``).
-_TOOL_ALIASES = {"run": "run_command"}
-
-
 def build_prompt(tool_name: str, args: dict) -> str:
     """Build a human-readable permission prompt for a tool call."""
     if tool_name == "read":
         return f"Allow reading file: {args.get('path', 'unknown')}?"
     elif tool_name == "write":
         return f"Allow writing to file: {args.get('path', 'unknown')}?"
-    elif tool_name == "patch":
-        return f"Allow patching file: {args.get('path', 'unknown')}?"
-    elif tool_name in ("run", "run_command"):
+    elif tool_name == "edit":
+        return f"Allow editing file: {args.get('path', 'unknown')}?"
+    elif tool_name == "bash":
         command = args.get("command", "unknown")
         return f"Allow running command: {command}?"
     return f"Allow {tool_name}?"
@@ -70,8 +66,7 @@ class PermissionGate:
 
     def check(self, tool_name: str, args: dict) -> str:
         """Return ``"allow"``, ``"ask"`` or ``"deny"`` for a tool call."""
-        name = _TOOL_ALIASES.get(tool_name, tool_name)
-        value = self._role.permission_for(name) if self._role else "no"
+        value = self._role.permission_for(tool_name) if self._role else "no"
         if value == "yes":
             return "allow"
         if value == "ask":

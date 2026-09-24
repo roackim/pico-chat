@@ -76,7 +76,7 @@ user declares which via tool config:
 | Situation | Boundary | Tool settings |
 |---|---|---|
 | pico run inside the user's container | the container | `yes` (auto-approve; the mount is the wall) |
-| pico run bare on the host | none | `ask` (confirm `write` / `patch` / `run_command`) |
+| pico run bare on the host | none | `ask` (confirm `write` / `edit` / `bash`) |
 
 This is the whole safety story. No profiles, no command allowlists, no
 inside/outside repo logic, no chain policy — see `plans/roles_rework.md`.
@@ -87,17 +87,17 @@ inside/outside repo logic, no chain policy — see `plans/roles_rework.md`.
 
 ### 1. Scope of the sandbox — chose (C)
 
-- **(A) Harness on host, sandbox only `run_command`.** Simplest to bolt on, but
-  the file boundary becomes *our* code: `write`/`patch` run on the host and are
+- **(A) Harness on host, sandbox only `bash`.** Simplest to bolt on, but
+  the file boundary becomes *our* code: `write`/`edit` run on the host and are
   guarded only by Python path logic (`_validate_path` at `tools.py:67`). A
   symlink/TOCTOU bug is a host escape. Also drags in a runtime, a lifecycle, and
   confinement work.
 - **(B) All tool operations executed inside the container.** Closes (A)'s file
   soft spot (absolute paths resolve to the container's filesystem), but needs a
-  read/write/patch RPC/helper into the container — more machinery for the same
+  read/write/edit RPC/helper into the container — more machinery for the same
   files (the workspace is a bind mount either way).
 - **(C) The user sandboxes pico itself. (Chosen.)** The container isolates the
-  harness, files, commands, and subagents at once. pico implements nothing. The
+  harness, files, and commands at once. pico implements nothing. The
   real boundary is the mount, not our code.
 
 Note the network trade-off: under (C) the LLM traffic originates inside the
@@ -171,11 +171,11 @@ explicit per-tool `no`/`ask`/`yes`.
 
 ### 8. Command allow/deny lists and chain policy — deleted
 
-Earlier we kept `run_command` allow/ask/deny patterns (glob/regex). Deleted:
+Earlier we kept `bash` allow/ask/deny patterns (glob/regex). Deleted:
 chained-command splitting cannot be done reliably (command substitution,
 `bash -c`, `xargs`, interpreters, obfuscation), so allowlists are a security
 illusion and deny-lists fail open to obfuscation. The container is the boundary;
-`run_command` is just `no`/`ask`/`yes`.
+`bash` is just `no`/`ask`/`yes`.
 
 ---
 

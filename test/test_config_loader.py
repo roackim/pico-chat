@@ -15,7 +15,6 @@ def test_section_files_apply(tmp_path):
     _write(tmp_path / "ui.toml",
            {"theme": "pastel", "msg_h_padding": 2, "status_bar_fields": ["role"]})
     _write(tmp_path / "context.toml", {"format": "flat", "max_files": 50})
-    _write(tmp_path / "subagents.toml", {"max_depth": 3, "server": "local", "timeout": 30})
     _write(tmp_path / "debug.toml", {"log_enabled": True})
     _write(tmp_path / "servers.toml", {
         "servers": {
@@ -31,8 +30,6 @@ def test_section_files_apply(tmp_path):
     assert config.ui_status_bar_fields == ["role"]
     assert config.context_format == "flat"
     assert config.context_max_files == 50
-    assert config.subagent_max_depth == 3
-    assert config.subagent_server == "local"
     assert config.debug_log_enabled is True
     assert config.servers["local"]["base_url"] == "http://localhost:8080/v1"
 

@@ -4,13 +4,12 @@ Minimal tool implementations for LLM harness.
 Provides 4 core tools:
 - read: Read file content
 - write: Write file content
-- patch: Apply replace-block patch
-- run: Execute shell command in the workspace
+- edit: Replace an exact text block in a file
+- bash: Execute shell command in the workspace
 """
-import asyncio
 import inspect
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -23,7 +22,7 @@ class ToolError(Exception):
 
 
 class FileTools:
-    """File operation tools (read, write, patch)"""
+    """File operation tools (read, write, edit)"""
 
     MAX_PATCH_REPLACEMENT_CHARS = 100_000
     MAX_PATCH_LINE_DELTA = 500
@@ -106,7 +105,7 @@ class FileTools:
             raise ToolError(f"Error reading file: {e}")
 
         # Keep line endings while slicing so a selected block can be copied
-        # directly into the patch tool.
+        # directly into the edit tool.
         lines = content.splitlines(keepends=True)
         first = offset
         last = offset + limit if limit is not None else len(lines)
@@ -150,56 +149,32 @@ class FileTools:
         except Exception as e:
             raise ToolError(f"Error writing file: {e}")
     
-    def patch(
-        self,
-        patch_content: str | None = None,
-        path: str | None = None,
-        search: str | None = None,
-        replace: str | None = None,
-    ) -> str:
+    def edit(self, path: str, search: str, replace: str) -> str:
         """
-        Apply patch to file.
-        
+        Replace one exact text block in a file.
+
         Args:
-            patch_content: Legacy patch in replace-block format
-            path: Target file path (preferred API)
-            search: Exact text to replace (preferred API)
-            replace: Replacement text (preferred API)
-            
+            path: File path relative to workspace or absolute
+            search: Exact existing text block to replace (include enough
+                context to be unique)
+            replace: Replacement text block
+
         Returns:
             Success or error message
-            
+
         Raises:
-            ToolError: If permission denied or patch cannot be applied
-            
+            ToolError: If the block cannot be applied
+
         Example:
-            >>> tools.patch('''app.py
-            ... <<<<<<< SEARCH
-            ... old code
-            ... =======
-            ... new code
-            ... >>>>>>> REPLACE
-            ... ''')
+            >>> tools.edit("app.py", "old code", "new code")
             '[OK] Applied patch to app.py (1 replacement)'
         """
-        # Parse patch (legacy string format or structured fields)
-        if patch_content:
-            try:
-                patch = parse_patch(patch_content)
-            except PatchParseError as e:
-                raise ToolError(f"Invalid patch format: {e}")
+        if search is None:
+            raise ToolError("Invalid edit arguments: missing 'search'")
+        if replace is None:
+            raise ToolError("Invalid edit arguments: missing 'replace'")
 
-            if path and path != patch.filename:
-                raise ToolError(
-                    f"Invalid patch arguments: path '{path}' does not match patch target '{patch.filename}'"
-                )
-        else:
-            if not path:
-                raise ToolError("Invalid patch arguments: missing 'path'")
-            if search is None:
-                raise ToolError("Invalid patch arguments: missing 'search'")
-            if replace is None:
-                raise ToolError("Invalid patch arguments: missing 'replace'")
+        try:
             patch = parse_patch(
                 f"{path}\n"
                 "<<<<<<< SEARCH\n"
@@ -208,12 +183,14 @@ class FileTools:
                 f"{replace}\n"
                 ">>>>>>> REPLACE"
             )
+        except PatchParseError as e:
+            raise ToolError(f"Invalid edit: {e}")
 
         # Guardrails: replacement size and line delta constraints
         replacement_chars = len(patch.replace_text)
         if replacement_chars > self.MAX_PATCH_REPLACEMENT_CHARS:
             raise ToolError(
-                f"Patch rejected: replacement too large ({replacement_chars} chars > {self.MAX_PATCH_REPLACEMENT_CHARS})"
+                f"Edit rejected: replacement too large ({replacement_chars} chars > {self.MAX_PATCH_REPLACEMENT_CHARS})"
             )
 
         search_line_count = patch.search_text.count('\n') + 1 if patch.search_text else 0
@@ -221,14 +198,14 @@ class FileTools:
         line_delta = abs(replace_line_count - search_line_count)
         if line_delta > self.MAX_PATCH_LINE_DELTA:
             raise ToolError(
-                f"Patch rejected: line delta too large ({line_delta} lines > {self.MAX_PATCH_LINE_DELTA})"
+                f"Edit rejected: line delta too large ({line_delta} lines > {self.MAX_PATCH_LINE_DELTA})"
             )
         
         # Read current file
         try:
             current_content = self.read(patch.filename)
         except ToolError as e:
-            raise ToolError(f"Cannot read file for patching: {e}")
+            raise ToolError(f"Cannot read file for editing: {e}")
 
         # Apply patch
         new_content, message = apply_patch(current_content, patch)
@@ -378,7 +355,7 @@ class MinimalToolset:
     """
     Complete minimal toolset for LLM agents.
     
-    Provides read, write, patch, and run tools with configurable permissions.
+    Provides read, write, edit, and bash tools.
     """
     
     def __init__(self, workspace_path: str | Path):
@@ -412,20 +389,9 @@ class MinimalToolset:
         """Write file content"""
         return self.file_tools.write(path, content)
     
-    def patch(
-        self,
-        patch_content: str | None = None,
-        path: str | None = None,
-        search: str | None = None,
-        replace: str | None = None,
-    ) -> str:
-        """Apply patch (preferred: path/search/replace, legacy: patch_content)."""
-        return self.file_tools.patch(
-            patch_content=patch_content,
-            path=path,
-            search=search,
-            replace=replace,
-        )
+    def edit(self, path: str, search: str, replace: str) -> str:
+        """Replace an exact text block in a file."""
+        return self.file_tools.edit(path, search, replace)
     
     def run(self, command: str, timeout: int = 30) -> str:
         """Execute shell command"""
@@ -445,61 +411,36 @@ class MinimalToolset:
 #
 # Each tool is declared once with the ``@tool`` decorator, which carries its
 # name, LLM-facing schema and handler.  ``create_toolset`` binds those
-# definitions to a :class:`ToolContext` and returns the harness-facing objects.
+# definitions to a :class:`MinimalToolset` and returns the harness-facing
+# objects.
 # ---------------------------------------------------------------------------
 
 @dataclass
 class ToolDefinition:
-    """A registered tool: schema and handler(s)."""
+    """A registered tool: its LLM-facing schema and handler(s)."""
 
     name: str
     description: str
     parameters: dict
-    handler: Callable[["ToolContext", Any], Any]
-    async_handler: Optional[Callable[["ToolContext", Any], Any]] = None
-    is_blocking: bool = False
-    include: Optional[Callable[["ToolContext"], bool]] = None
-
-
-@dataclass
-class ToolContext:
-    """Shared resources and per-build state for tool instances."""
-
-    toolset: Optional[MinimalToolset] = None
-    workspace: Optional[Path] = None
-    depth: int = 0
-    pending_subagents: list = field(default_factory=list)
+    handler: Callable[["MinimalToolset", Any], Any]
+    async_handler: Optional[Callable[["MinimalToolset", Any], Any]] = None
 
 
 _REGISTRY: dict[str, ToolDefinition] = {}
 
 
-def tool(
-    *,
-    name: str,
-    description: str,
-    parameters: dict,
-    async_handler: Optional[Callable] = None,
-    is_blocking: bool = False,
-    include: Optional[Callable[[ToolContext], bool]] = None,
-    key: Optional[str] = None,
-):
+def tool(*, name: str, description: str, parameters: dict,
+         async_handler: Optional[Callable] = None):
     """Register a tool definition.  One decorator per tool — the single
-    definition site for its name and schema.
-
-    ``key`` lets the registry key differ from the LLM-facing ``name`` (e.g.
-    the ``run`` tool is registered as ``run_command``).
-    """
+    definition site for its name and schema."""
 
     def decorator(handler):
-        _REGISTRY[key or name] = ToolDefinition(
+        _REGISTRY[name] = ToolDefinition(
             name=name,
             description=description,
             parameters=parameters,
             handler=handler,
             async_handler=async_handler,
-            is_blocking=is_blocking,
-            include=include,
         )
         return handler
 
@@ -507,21 +448,14 @@ def tool(
 
 
 class RegisteredTool:
-    """A registry tool bound to a :class:`ToolContext`."""
+    """A registry tool bound to a :class:`MinimalToolset`."""
 
-    def __init__(self, definition: ToolDefinition, context: ToolContext):
+    def __init__(self, definition: ToolDefinition, toolset: MinimalToolset):
         self._definition = definition
-        self._context = context
+        self.toolset = toolset
         self.name = definition.name
         self.description = definition.description
         self.parameters = definition.parameters
-        self.is_blocking = definition.is_blocking
-        self.toolset = context.toolset
-
-    @property
-    def context(self) -> ToolContext:
-        """The resources and configuration this tool was bound to."""
-        return self._context
 
     def get_schema(self) -> dict:
         """Return the OpenAI function-calling schema."""
@@ -539,37 +473,39 @@ class RegisteredTool:
         cancel = getattr(self.toolset, "cancel_active_run", None)
         return cancel() if callable(cancel) else False
 
+    async def execute(self, **kwargs):
+        """Run the tool. Prefers the async handler so shell commands stay
+        cancellable; awaits the result if the chosen handler is a coroutine."""
+        handler = self._definition.async_handler or self._definition.handler
+        result = handler(self.toolset, **kwargs)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<RegisteredTool {self.name}>"
-
-
-class _SyncTool(RegisteredTool):
-    def execute(self, **kwargs):
-        return self._definition.handler(self._context, **kwargs)
-
-
-class _AsyncTool(RegisteredTool):
-    async def execute(self, **kwargs):
-        return await self._definition.handler(self._context, **kwargs)
-
-
-class _AsyncCapableTool(_SyncTool):
-    async def execute_async(self, **kwargs):
-        return await self._definition.async_handler(self._context, **kwargs)
-
-
-def _build_tool(name: str, context: ToolContext) -> RegisteredTool:
-    definition = _REGISTRY[name]
-    if inspect.iscoroutinefunction(definition.handler):
-        return _AsyncTool(definition, context)
-    if definition.async_handler is not None:
-        return _AsyncCapableTool(definition, context)
-    return _SyncTool(definition, context)
 
 
 def registered_tool_names() -> list[str]:
     """Return every registered tool name (the key the role file uses)."""
     return list(_REGISTRY.keys())
+
+
+def create_toolset(workspace_path: str | Path) -> dict[str, RegisteredTool]:
+    """
+    Create the registered toolset.
+
+    Args:
+        workspace_path: Root directory for all operations
+
+    Returns:
+        Dict of tool name to registered tool
+    """
+    toolset = MinimalToolset(workspace_path)
+    return {
+        name: RegisteredTool(definition, toolset)
+        for name, definition in _REGISTRY.items()
+    }
 
 
 # --- Tool handlers ---------------------------------------------------------
@@ -580,7 +516,7 @@ def registered_tool_names() -> list[str]:
         "Read all or part of a UTF-8 text file from the workspace. "
         "Use offset/limit for large files or targeted inspection. Offset "
         "is zero-based and limit is the number of lines. Use "
-        "include_line_numbers when you need stable references for a patch."
+        "include_line_numbers when you need stable references for an edit."
     ),
     parameters={
         "type": "object",
@@ -613,7 +549,7 @@ def registered_tool_names() -> list[str]:
     },
 )
 def _read_tool(
-    ctx: ToolContext,
+    toolset: MinimalToolset,
     path: str,
     offset: int = 0,
     limit: int | None = None,
@@ -621,7 +557,7 @@ def _read_tool(
     include_line_numbers: bool = False,
 ) -> str:
     try:
-        return ctx.toolset.read(
+        return toolset.read(
             path,
             offset=offset,
             limit=limit,
@@ -644,19 +580,19 @@ def _read_tool(
         "required": ["path", "content"],
     },
 )
-def _write_tool(ctx: ToolContext, path: str, content: str) -> str:
+def _write_tool(toolset: MinimalToolset, path: str, content: str) -> str:
     try:
-        return ctx.toolset.write(path, content)
+        return toolset.write(path, content)
     except ToolError as e:
         return str(e)
 
 
 @tool(
-    name="patch",
+    name="edit",
     description=(
-        "Modify an existing file by replacing one exact code block. "
-        "Preferred format: provide path + search + replace. "
-        "Use write only for creating new files or full rewrites."
+        "Modify an existing file by replacing one exact text block. "
+        "Provide path + search + replace; use write only for creating new "
+        "files or full rewrites. Fails if search does not match exactly."
     ),
     parameters={
         "type": "object",
@@ -667,36 +603,26 @@ def _write_tool(ctx: ToolContext, path: str, content: str) -> str:
                 "description": "Exact existing text block to replace (include enough context to be unique)",
             },
             "replace": {"type": "string", "description": "Replacement text block"},
-            "patch_content": {
-                "type": "string",
-                "description": "Legacy replace-block format (backward compatible)",
-            },
         },
         "required": ["path", "search", "replace"],
     },
 )
-def _patch_tool(
-    ctx: ToolContext,
-    path: str = None,
-    search: str = None,
-    replace: str = None,
-    patch_content: str = None,
-) -> str:
+def _edit_tool(toolset: MinimalToolset, path: str, search: str, replace: str) -> str:
     try:
-        return ctx.toolset.patch(path=path, search=search, replace=replace, patch_content=patch_content)
+        return toolset.edit(path, search, replace)
     except ToolError as e:
         return str(e)
 
 
-async def _run_tool_async(ctx: ToolContext, command: str) -> str:
+async def _bash_tool_async(toolset: MinimalToolset, command: str) -> str:
     try:
-        return await ctx.toolset.run_async(command)
+        return await toolset.run_async(command)
     except ToolError as e:
         return str(e)
 
 
 @tool(
-    name="run",
+    name="bash",
     description=(
         "Execute a shell command in the workspace. "
         "Supports pipes (|), command chaining (&&, ||, ;)."
@@ -711,188 +637,13 @@ async def _run_tool_async(ctx: ToolContext, command: str) -> str:
         },
         "required": ["command"],
     },
-    async_handler=_run_tool_async,
-    key="run_command",
+    async_handler=_bash_tool_async,
 )
-def _run_tool(ctx: ToolContext, command: str) -> str:
+def _bash_tool(toolset: MinimalToolset, command: str) -> str:
     try:
-        return ctx.toolset.run(command)
+        return toolset.run(command)
     except ToolError as e:
         return str(e)
-
-
-class _SubagentContextError(Exception):
-    def __init__(self, tokens: int):
-        self.tokens = tokens
-
-
-async def _run_subagent(ctx: ToolContext, task: str) -> str:
-    from pico_chat import pico_cfg
-    from pico_chat.harness.harness import Harness
-    from pico_chat.harness import events
-
-    timeout = pico_cfg.config.subagent_timeout
-    max_context = pico_cfg.config.subagent_max_context
-
-    sub = Harness(workspace_path=str(ctx.workspace), depth=ctx.depth + 1)
-
-    result_parts = []
-    cumulative_tokens = 0
-    last_call_tokens = 0
-    in_assistant_turn = False
-
-    async def _collect():
-        nonlocal cumulative_tokens, last_call_tokens, in_assistant_turn
-        async for event in sub.chat(task):
-            if isinstance(event, events.Start):
-                if event.role == "assistant":
-                    if in_assistant_turn:
-                        cumulative_tokens += last_call_tokens
-                        last_call_tokens = 0
-                    in_assistant_turn = True
-            elif isinstance(event, events.Token):
-                result_parts.append(event.text)
-            elif isinstance(event, events.Usage):
-                last_call_tokens = event.tokens
-                if max_context and (cumulative_tokens + last_call_tokens) > max_context:
-                    raise _SubagentContextError(cumulative_tokens + last_call_tokens)
-
-    try:
-        await asyncio.wait_for(_collect(), timeout=timeout)
-    except asyncio.TimeoutError:
-        return f"[subagent timed out after {timeout}s]"
-    except _SubagentContextError as e:
-        return f"[subagent aborted: context limit exceeded ({e.tokens} > {max_context} tokens)]"
-
-    return "".join(result_parts) or "[subagent returned no response]"
-
-
-def _subagent_available(ctx: ToolContext) -> bool:
-    from pico_chat import pico_cfg
-
-    return ctx.depth < pico_cfg.config.subagent_max_depth
-
-
-@tool(
-    name="subagent",
-    description=(
-        "Spawn a read-only scaffolding subagent to explore the codebase and return findings. "
-        "The subagent can only read files — it cannot write, patch, or run commands. "
-        "Set background=true to queue multiple subagents in parallel; "
-        "collect their results with wait_for_subagents. "
-        "Returns the subagent's complete text response (foreground) or a queue confirmation (background)."
-    ),
-    parameters={
-        "type": "object",
-        "properties": {
-            "task": {
-                "type": "string",
-                "description": "The task for the subagent. Be explicit — it has no conversation history.",
-            },
-            "background": {
-                "type": "boolean",
-                "description": "If true, run in background and return immediately. Collect results with wait_for_subagents.",
-            },
-        },
-        "required": ["task"],
-    },
-    include=_subagent_available,
-)
-async def _subagent_tool(ctx: ToolContext, task: str, background: bool = False) -> str:
-    from pico_chat import pico_cfg
-
-    if ctx.depth >= pico_cfg.config.subagent_max_depth:
-        return f"[subagent] Depth limit reached ({pico_cfg.config.subagent_max_depth})."
-
-    if not background:
-        return await _run_subagent(ctx, task)
-
-    index = len(ctx.pending_subagents)
-    future = asyncio.create_task(_run_subagent(ctx, task))
-    ctx.pending_subagents.append({"index": index, "task": task, "future": future})
-    return f"[subagent:{index}] Queued in background."
-
-
-@tool(
-    name="wait_for_subagents",
-    description=(
-        "Wait for all background subagents to finish and return their results. "
-        "Call this after launching subagents with background=true."
-    ),
-    parameters={"type": "object", "properties": {}, "required": []},
-)
-async def _wait_for_subagents_tool(ctx: ToolContext) -> str:
-    if not ctx.pending_subagents:
-        return "[wait_for_subagents] No pending subagents."
-
-    pending = list(ctx.pending_subagents)
-    futures = [p["future"] for p in pending]
-    results = await asyncio.gather(*futures, return_exceptions=True)
-    ctx.pending_subagents.clear()
-
-    parts = []
-    for p, result in zip(pending, results):
-        if isinstance(result, Exception):
-            parts.append(f"[subagent:{p['index']}] Error: {result}")
-        else:
-            parts.append(f"[subagent:{p['index']}] Task: {p['task']}\n{result}")
-
-    return "\n\n".join(parts)
-
-
-# --- Public factories (kept for direct construction/tests) -----------------
-
-def RunTool(toolset: MinimalToolset) -> RegisteredTool:
-    """Build the run tool bound to a toolset."""
-    return _build_tool("run_command", ToolContext(toolset=toolset))
-
-
-def SubagentTool(workspace_path, depth: int, pending_subagents: list) -> RegisteredTool:
-    """Build the subagent tool."""
-    return _build_tool("subagent", ToolContext(
-        workspace=Path(workspace_path).resolve() if workspace_path else None,
-        depth=depth,
-        pending_subagents=pending_subagents,
-    ))
-
-
-def WaitForSubagentsTool(pending_subagents: Optional[list] = None) -> RegisteredTool:
-    """Build the wait_for_subagents tool."""
-    return _build_tool("wait_for_subagents", ToolContext(
-        pending_subagents=pending_subagents if pending_subagents is not None else [],
-    ))
-
-
-def create_toolset(
-    workspace_path: str | Path,
-    depth: int = 0,
-    pending_subagents: Optional[list] = None,
-) -> dict[str, RegisteredTool]:
-    """
-    Create the registered toolset.
-
-    Args:
-        workspace_path: Root directory for all operations
-        depth: Current subagent depth (0 = top-level harness)
-        pending_subagents: Shared list for background subagent tracking
-
-    Returns:
-        Dict of tool name to registered tool
-    """
-    toolset = MinimalToolset(workspace_path)
-
-    context = ToolContext(
-        toolset=toolset,
-        workspace=Path(workspace_path).resolve(),
-        depth=depth,
-        pending_subagents=pending_subagents if pending_subagents is not None else [],
-    )
-
-    return {
-        name: _build_tool(name, context)
-        for name, definition in _REGISTRY.items()
-        if definition.include is None or definition.include(context)
-    }
 
 
 __all__ = [
@@ -900,12 +651,9 @@ __all__ = [
     "FileTools",
     "ShellTool",
     "MinimalToolset",
-    "ToolContext",
+    "ToolDefinition",
     "RegisteredTool",
     "tool",
     "registered_tool_names",
     "create_toolset",
-    "RunTool",
-    "SubagentTool",
-    "WaitForSubagentsTool",
 ]

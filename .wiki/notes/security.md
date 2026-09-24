@@ -26,7 +26,7 @@ is `no` / `ask` / `yes`, and the user picks it explicitly — nothing is inferre
 | Situation | Boundary | Tool settings |
 |---|---|---|
 | pico run inside the user's container | the container | `yes` (the mount is the wall) |
-| pico run bare on the host | none | `ask` on `write` / `patch` / `run_command` |
+| pico run bare on the host | none | `ask` on `write` / `edit` / `bash` |
 
 See `plans/containerization.md` for the full decision record and the
 recommended (not shipped) `podman run` posture.
@@ -56,4 +56,3 @@ Running in a container, the mount is the boundary.
 |------|----------|
 | `test_permissions.py` | Gate decisions, prompt text, ask/deny/allow harness flow |
 | `test_roles.py` | Role model, files, seeding, validation |
-| `test_subagents.py` | Scaffolder role, depth/timeout/context limits |

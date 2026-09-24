@@ -20,7 +20,7 @@ from conftest import NoopDebugStream, StubReadTool, run_harness_tool_call
 def test_run_permission_prompt_preserves_full_command():
     command = "printf " + "x" * 120
 
-    prompt = PermissionGate.build_prompt("run", {"command": command})
+    prompt = PermissionGate.build_prompt("bash", {"command": command})
 
     assert command in prompt
 
@@ -30,15 +30,14 @@ def test_gate_denies_disabled_and_unknown_tools():
 
     assert gate.check("read", {}) == "allow"
     assert gate.check("write", {}) == "deny"
-    assert gate.check("run", {"command": "ls"}) == "deny"
+    assert gate.check("bash", {"command": "ls"}) == "deny"
 
 
 def test_gate_returns_ask_for_ask_tools():
-    gate = PermissionGate(role=Role(name="r", tools={
-        "subagent": "ask", "wait_for_subagents": "ask"}))
+    gate = PermissionGate(role=Role(name="r", tools={"edit": "ask", "bash": "ask"}))
 
-    assert gate.check("subagent", {}) == "ask"
-    assert gate.check("wait_for_subagents", {}) == "ask"
+    assert gate.check("edit", {}) == "ask"
+    assert gate.check("bash", {}) == "ask"
 
 
 def test_system_message_is_the_role_prompt():

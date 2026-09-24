@@ -574,7 +574,7 @@ class Message:
             try:
                 args_dict = json.loads(self.tool_args)
                 # Extract key info for compact display
-                if self.tool_name == "patch" and isinstance(args_dict, dict):
+                if self.tool_name == "edit" and isinstance(args_dict, dict):
                     path = args_dict.get("path")
                     if path:
                         args_summary = f" {theme.MUTED}{path}{theme.reset()}"
@@ -615,21 +615,16 @@ class Message:
             try:
                 args_dict = json.loads(self.tool_args)
                 
-                if self.tool_name == "patch" and isinstance(args_dict, dict):
-                    patch_lines = 0
+                if self.tool_name == "edit" and isinstance(args_dict, dict):
+                    edit_lines = 0
                     path = args_dict.get("path")
-                    if "patch_content" in args_dict:
-                        patch_content = args_dict.get("patch_content")
-                        if isinstance(patch_content, str) and patch_content:
-                            patch_lines = len(patch_content.splitlines())
-                    elif "replace" in args_dict:
-                        replace_content = args_dict.get("replace")
-                        if isinstance(replace_content, str) and replace_content:
-                            patch_lines = len(replace_content.splitlines())
+                    replace_content = args_dict.get("replace")
+                    if isinstance(replace_content, str) and replace_content:
+                        edit_lines = len(replace_content.splitlines())
                     if path:
-                        lines.append(f"{theme.MUTED}cmd:{theme.reset()} {path} ({patch_lines} lines)")
+                        lines.append(f"{theme.MUTED}cmd:{theme.reset()} {path} ({edit_lines} lines)")
                     else:
-                        lines.append(f"{theme.MUTED}cmd:{theme.reset()} {patch_lines} lines")
+                        lines.append(f"{theme.MUTED}cmd:{theme.reset()} {edit_lines} lines")
                 elif len(args_dict) == 1:
                     # Single arg - show the value with cmd: prefix
                     key, value = list(args_dict.items())[0]

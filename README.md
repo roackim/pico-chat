@@ -73,7 +73,7 @@ configured servers; selecting one switches to the server that serves it.
 | Command | Description |
 |---------|-------------|
 | `/help` | List all available commands |
-| `/config [section]` | Edit a config section (`ui`, `context`, `subagents`, `debug`, `styles`, `servers`, `theme`) and reload |
+| `/config [section]` | Edit a config section (`ui`, `context`, `debug`, `styles`, `servers`, `theme`) and reload |
 | `/edit <file>` | Open a file in `$EDITOR` |
 | `/reload` | Reload config files and validate `roles/` from disk |
 | `/model` | Open the searchable model picker (type to filter), or select with `/model <id>` |
@@ -147,10 +147,9 @@ conversation itself.
 
 ## Tool Use & Permissions
 
-The agent has access to tools for reading/writing files, applying patches, and
-running shell commands: `read`, `write`, `patch`, `run_command`, `subagent`,
-`wait_for_subagents`. Each tool is configured **per role** with one of three
-values:
+The agent has access to four tools: `read`, `write`, `edit` (replace an exact
+text block), and `bash` (run a shell command). Each tool is configured **per
+role** with one of three values:
 
 - **`yes`** — runs automatically without asking
 - **`ask`** — prompts you before executing
@@ -159,7 +158,7 @@ values:
 When the agent requests a tool set to `ask`, a prompt appears:
 
 ```
-> run_command
+> bash
 command: pytest test/
 [allow] [deny]
 ```
@@ -190,7 +189,6 @@ single-concern files:
 
 - `ui.toml` — theme, padding, metrics, fps (flat keys).
 - `context.toml` — context building (flat keys).
-- `subagents.toml` — subagent limits (flat keys).
 - `debug.toml` — debug logging (flat keys).
 - `styles.toml` — `[markdown_styles.*]` / `[syntax_highlight.*]` overrides.
 - `servers.toml` — one `[servers.<name>]` table per server.
@@ -216,9 +214,6 @@ theme = "terminal"
 format = "tree"
 max_files = 500
 
-# subagents.toml
-max_depth = 1
-
 # servers.toml
 [servers.local]
 type = "llamacpp"
@@ -232,8 +227,6 @@ prompt = "Review code carefully. Do not modify files."
 
 read = "yes"
 write = "no"
-patch = "no"
-run_command = "no"
-subagent = "yes"
-wait_for_subagents = "yes"
+edit = "no"
+bash = "no"
 ```

@@ -4,7 +4,7 @@ The assembler must handle two real streaming patterns:
 1. One call whose id appears only on the first delta (DeepSeek) — args-only
    deltas afterwards must attach to that same call (not split).
 2. Multiple distinct calls that share the same index (e.g. index 0) but have
-   distinct ids — they must NOT merge into e.g. "runrun".
+   distinct ids — they must NOT merge into e.g. "bashbash".
 """
 
 from types import SimpleNamespace
@@ -58,44 +58,44 @@ def _assemble(deltas_list):
 def test_id_on_first_delta_keeps_args():
     """DeepSeek pattern: id on first delta, id-less args after — one call."""
     calls, _ = _assemble([
-        [_tc(0, "call_abc", name="run", arguments="")],
+        [_tc(0, "call_abc", name="bash", arguments="")],
         [_tc(0, None, arguments='{"command": "echo hi"}')],
     ])
     assert len(calls) == 1
-    assert calls[0]["function"]["name"] == "run"
+    assert calls[0]["function"]["name"] == "bash"
     assert calls[0]["function"]["arguments"] == '{"command": "echo hi"}'
 
 
 def test_two_calls_same_index_distinct_ids_do_not_merge():
-    """Two calls both at index 0 but distinct ids stay separate (no runrun)."""
+    """Two calls both at index 0 but distinct ids stay separate (no bashbash)."""
     calls, _ = _assemble([
-        [_tc(0, "call_a", name="run", arguments='{"command": "a"}')],
-        [_tc(0, "call_b", name="run", arguments='{"command": "b"}')],
+        [_tc(0, "call_a", name="bash", arguments='{"command": "a"}')],
+        [_tc(0, "call_b", name="bash", arguments='{"command": "b"}')],
         [_tc(0, "call_a", arguments='}')],
     ])
     assert len(calls) == 2
     names = {c["function"]["name"] for c in calls}
-    assert names == {"run"}
+    assert names == {"bash"}
     args_text = " ".join(c["function"]["arguments"] for c in calls)
     assert "a" in args_text and "b" in args_text
     for c in calls:
-        assert c["function"]["name"] == "run"
+        assert c["function"]["name"] == "bash"
 
 
 def test_id_less_first_delta_falls_back_to_index():
     """If no id ever arrives, index keying still works (single call)."""
     calls, _ = _assemble([
-        [_tc(0, None, name="run")],
+        [_tc(0, None, name="bash")],
         [_tc(0, None, arguments='{"command": "ls"}')],
     ])
     assert len(calls) == 1
-    assert calls[0]["function"]["name"] == "run"
+    assert calls[0]["function"]["name"] == "bash"
     assert calls[0]["function"]["arguments"] == '{"command": "ls"}'
 
 
 def test_no_mixed_int_str_keys_when_only_ids():
     """When ids are present, all keys are strings; reconstruction is stable."""
     calls, keys = _assemble([
-        [_tc(0, "call_x", name="run", arguments='{}')],
+        [_tc(0, "call_x", name="bash", arguments='{}')],
     ])
     assert len(calls) == 1

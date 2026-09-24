@@ -60,7 +60,7 @@ Registered commands: `help`, `clear`, `reload`, `config`, `edit`, `export`,
 `import`, `compact`, `exit`, `stop`, `activity`, `model`, `role`, `theme`.
 
 - `/config <section>` opens a section file in `$EDITOR` and reloads (sections:
-  `ui`, `context`, `subagents`, `debug`, `styles`, `servers`, `theme`).
+  `ui`, `context`, `debug`, `styles`, `servers`, `theme`).
   `/config role <name>` creates/opens `roles/<name>.toml`;
   `/config role delete <name> confirm` removes it (`_config_role` in `core.py`);
   `/config theme <id>` materializes a `[themes.<id>]` section then opens

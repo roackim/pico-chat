@@ -1,4 +1,3 @@
-import asyncio
 import inspect
 import json
 import logging
@@ -11,7 +10,7 @@ from pico_chat.harness.llm_status import AgentState
 from pico_chat.harness.debug import get_debug_stream
 from pico_chat.harness.context_builder import build_harness_context
 from pico_chat.harness import events
-from pico_chat.harness.endpoint import Endpoint, get_active_endpoint, get_endpoint
+from pico_chat.harness.endpoint import Endpoint, get_active_endpoint
 from pico_chat.harness.permissions import PermissionGate
 from pico_chat.harness.thinking_parser import ThinkingTagParser, MetricsState, THINKING_TAGS
 from pico_chat.harness.usage import TokenUsage, usage_from_response
@@ -27,34 +26,22 @@ logger = logging.getLogger(__name__)
 COMPACTION_MARKER_PREFIX = "[COMPACTION_SUMMARY]"
 
 class Harness:
-    def __init__(self, workspace_path: str | None = None, depth: int = 0, role=None):
+    def __init__(self, workspace_path: str | None = None):
         self.debug_stream = get_debug_stream()
         self.state = AgentState.IDLE
         self.history = []
-        self.depth = depth
-
-        # Background subagent tracking
-        self._pending_subagents: list = []      # [{index, task, future}, ...]
-        self._abort_subagents_event = asyncio.Event()
         
         # Tools initialization with minimal toolset
         import os
         self.workspace = workspace_path or os.getcwd()
 
-        # Subagents use a read-only scaffolder role
-        from pico_chat.harness.roles import agent_role, scaffolder_role
-        if depth > 0:
-            role = scaffolder_role()
-        self.role = role or agent_role()
+        from pico_chat.harness.roles import agent_role
+        self.role = agent_role()
 
         # Permission gate turns the role's per-tool setting into a decision.
         self._permission_gate = PermissionGate(role=self.role)
 
-        self.tools_map = create_toolset(
-            workspace_path=self.workspace,
-            depth=depth,
-            pending_subagents=self._pending_subagents,
-        )
+        self.tools_map = create_toolset(workspace_path=self.workspace)
         
         # Build initial project context
         self.startup_warnings: list[str] = []
@@ -72,19 +59,11 @@ class Harness:
         self.tool_schemas = [tool.get_schema() for tool in self.tools_map.values()] if self.tools_map else None
         self.debug_stream.log("TOOL_SCHEMAS", self.tool_schemas)
 
-        # Select LLM endpoint: subagents use subagent_server if configured
-        from pico_chat import pico_cfg
-        # Resolve the endpoint at construction time. A module-level config
-        # snapshot would make newly opened tabs use stale server settings.
-        chosen_endpoint = get_active_endpoint()
-        if depth > 0 and pico_cfg.config.subagent_server:
-            sub_endpoint = get_endpoint(pico_cfg.config.subagent_server)
-            if sub_endpoint:
-                chosen_endpoint = sub_endpoint
-
-        self.endpoint: Endpoint = chosen_endpoint
+        # Select LLM endpoint at construction time. Resolving here (rather than
+        # from a module-level snapshot) avoids stale server settings.
+        self.endpoint: Endpoint = get_active_endpoint()
         self._last_usage: Optional[TokenUsage] = None
-        self.debug_stream.log("INIT", f"Server initialized: {chosen_endpoint.name} ({chosen_endpoint.type}) at {chosen_endpoint.base_url}")
+        self.debug_stream.log("INIT", f"Server initialized: {self.endpoint.name} ({self.endpoint.type}) at {self.endpoint.base_url}")
 
         # Steering / pause state
         # Updated live on every Thinking chunk so the UI can snapshot it.
@@ -103,11 +82,7 @@ class Harness:
         previous_name = getattr(self, "role", role).name
         self.role = role
         self._permission_gate.set_role(role)
-        self.tools_map = create_toolset(
-            workspace_path=self.workspace,
-            depth=self.depth,
-            pending_subagents=self._pending_subagents,
-        )
+        self.tools_map = create_toolset(workspace_path=self.workspace)
         self.tools_map = {
             name: tool for name, tool in self.tools_map.items()
             if name in role.enabled_tool_names()
@@ -221,15 +196,15 @@ class Harness:
         Get a previous tool output by reference.
         
         Args:
-            ref: Reference string (currently only "@" for last run() output)
+            ref: Reference string (currently only "@" for last bash output)
             
         Returns:
             Tool output or None if not found
         """
         if ref == "@":
-            # Get last run() output
+            # Get last bash output
             for name, result in reversed(self.tool_output_history):
-                if name in ("run", "run_command"):
+                if name == "bash":
                     return result
             return None
         
@@ -270,26 +245,16 @@ class Harness:
         """Return the reasoning accumulated so far in the active generation."""
         return self._current_reasoning
 
-    def abort_subagents(self):
-        """Called by the UI when the user wants to abort waiting background subagents."""
-        self._abort_subagents_event.set()
-
     def stop_tool(self) -> bool:
-        """Terminate the currently-running shell command (run tool), if any.
+        """Terminate the currently-running shell command (bash tool), if any.
 
         Returns True if a running command was stopped.
         """
-        run_tool = self.tools_map.get("run_command") or self.tools_map.get("run")
-        if run_tool is not None:
-            cancel = getattr(run_tool, "cancel_active_run", None)
+        bash_tool = self.tools_map.get("bash")
+        if bash_tool is not None:
+            cancel = getattr(bash_tool, "cancel_active_run", None)
             if callable(cancel):
                 return cancel()
-            # Fallback for RunTool instances exposing execute_async's toolset.
-            toolset = getattr(run_tool, "toolset", None)
-            if toolset is not None:
-                cancel = getattr(toolset, "cancel_active_run", None)
-                if callable(cancel):
-                    return cancel()
         return False
 
     async def _wait_for_user_input(self, prompt: str) -> str:
@@ -825,24 +790,15 @@ class Harness:
             
             try:
                 # Execute the tool
-                lookup_name = "run_command" if tool_name == "run" else tool_name
-                if lookup_name not in self.tools_map and tool_name == "run":
-                    lookup_name = "run"
-                if lookup_name not in self.tools_map:
+                func = self.tools_map.get(tool_name)
+                if func is None:
                     raise Exception(f"Tool '{tool_name}' not found")
-                
-                func = self.tools_map[lookup_name]
-                
-                # Execute normally (sync or async). Prefer an async entry point
-                # so shell commands remain cancellable (stop button).
-                if inspect.iscoroutinefunction(func.execute):
-                    result = await func.execute(**args)
-                else:
-                    execute_async = getattr(func, "execute_async", None)
-                    if execute_async is not None and inspect.iscoroutinefunction(execute_async):
-                        result = await execute_async(**args)
-                    else:
-                        result = func.execute(**args)
+
+                # RegisteredTool.execute is async and prefers the async handler
+                # so shell commands stay cancellable (stop button).
+                result = func.execute(**args)
+                if inspect.isawaitable(result):
+                    result = await result
                 
                 if not isinstance(result, str):
                     result = str(result)
@@ -942,34 +898,6 @@ class Harness:
                 logger.warning(f"Failed to read context usage: {e}")
         
         return status
-
-    async def _auto_wait_subagents(self) -> None:
-        """Wait for any background subagents still running after the LLM loop ends."""
-        if not self._pending_subagents:
-            return
-
-        pending = list(self._pending_subagents)
-        remaining = {p["future"] for p in pending}
-
-        abort_task = asyncio.create_task(self._abort_subagents_event.wait())
-        try:
-            while remaining:
-                done, _ = await asyncio.wait(
-                    remaining | {abort_task},
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-
-                if abort_task in done:
-                    for f in remaining:
-                        f.cancel()
-                    remaining.clear()
-                    break
-
-                remaining -= done - {abort_task}
-        finally:
-            abort_task.cancel()
-            self._abort_subagents_event.clear()
-            self._pending_subagents.clear()
 
     async def chat(self, user_input: str) -> AsyncGenerator[events.Event, None]:
         """
@@ -1082,9 +1010,6 @@ class Harness:
                 return
             
         self.state = AgentState.IDLE
-
-        # Auto-wait for any background subagents still running
-        await self._auto_wait_subagents()
 
         yield events.Done()
 

@@ -14,7 +14,7 @@ via `get_harness()`, applies the configured theme, and runs `chatTUI`.
 
 ### `pico_cfg.py`
 `Config` — plain class instantiating the split, user-level config under
-`~/.config/pico-chat/` (`ui.toml`, `context.toml`, `subagents.toml`,
+`~/.config/pico-chat/` (`ui.toml`, `context.toml`,
 `debug.toml`, `styles.toml`, `servers.toml`, `roles/<name>.toml`, disposable
 `state.toml`). Loaded at import as the module-level singleton `pico_cfg.config`.
 `/reload` mutates it in place. See [notes/config.md](../notes/config.md).

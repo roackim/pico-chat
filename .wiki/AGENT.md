@@ -15,7 +15,6 @@ This document tells AI agents and humans how to operate and maintain this wiki.
     config.md               ← Configuration reference (split files under ~/.config/pico-chat/)
     reasoning-traces.md     ← Reasoning trace handling (thinking tags, reasoning_content)
     security.md             ← Approval model, trust boundary (no sandbox in pico)
-    subagents.md            ← Subagent lifecycle, scaffolder role, depth/timeout/context limits
     testing.md              ← Test suite overview and how to run tests
     tools-and-permissions.md← Tool system and the no/ask/yes role model
     ui.md                   ← TUI architecture, component model, markdown rendering

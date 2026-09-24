@@ -6,7 +6,6 @@ Configuration is split into small, single-concern files under
 
 - ``ui.toml`` — theme, padding, metrics, fps (flat keys)
 - ``context.toml`` — context building (flat keys)
-- ``subagents.toml`` — subagent limits (flat keys)
 - ``debug.toml`` — debug logging (flat keys)
 - ``styles.toml`` — ``[markdown_styles.*]`` / ``[syntax_highlight.*]``
 - ``servers.toml`` — one ``[servers.<name>]`` table per server
@@ -66,7 +65,6 @@ STATE_FILENAME = "state.toml"
 CONFIG_FILES = {
     "ui": "ui.toml",
     "context": "context.toml",
-    "subagents": "subagents.toml",
     "debug": "debug.toml",
     "styles": "styles.toml",
     "servers": "servers.toml",
@@ -141,15 +139,6 @@ DEFAULT_CONTEXT_TOML = """\
 # max_depth = 4
 # ignore_gitignore = false
 # preserve_reasoning_traces = false  # re-send prior reasoning to the model (always stored)
-"""
-
-DEFAULT_SUBAGENTS_TOML = """\
-# Subagents (flat keys). Apply with /reload, or /config subagents.
-
-# max_depth = 1
-# server = "local"                    # server subagents run on (default: active)
-# timeout = 120
-# max_context = 32000                 # omit for unlimited
 """
 
 DEFAULT_DEBUG_TOML = """\
@@ -244,7 +233,6 @@ DEFAULT_THEMES_TOML = """\
 DEFAULT_CONFIG_TEMPLATES = {
     "ui": DEFAULT_UI_TOML,
     "context": DEFAULT_CONTEXT_TOML,
-    "subagents": DEFAULT_SUBAGENTS_TOML,
     "debug": DEFAULT_DEBUG_TOML,
     "styles": DEFAULT_STYLES_TOML,
     "servers": DEFAULT_SERVERS_TOML,
@@ -291,13 +279,6 @@ _CONTEXT_SPEC: Dict[str, tuple[str, str]] = {
     "preserve_reasoning_traces": ("preserve_reasoning_traces", "bool"),
 }
 
-_SUBAGENT_SPEC: Dict[str, tuple[str, str]] = {
-    "max_depth": ("subagent_max_depth", "int"),
-    "server": ("subagent_server", "str_or_none"),
-    "timeout": ("subagent_timeout", "int_or_float"),
-    "max_context": ("subagent_max_context", "int_or_none"),
-}
-
 _DEBUG_SPEC: Dict[str, tuple[str, str]] = {
     "log_enabled": ("debug_log_enabled", "bool"),
 }
@@ -307,7 +288,6 @@ _DEBUG_SPEC: Dict[str, tuple[str, str]] = {
 # and ``DEFAULT_*_TOML`` (see "Adding or deprecating a config key" in AGENTS.md).
 _RETIRED_UI: set[str] = set()
 _RETIRED_CONTEXT: set[str] = set()
-_RETIRED_SUBAGENTS: set[str] = set()
 _RETIRED_DEBUG: set[str] = set()
 
 # Flat sections that can be synced line-by-line against their template. Each
@@ -316,7 +296,6 @@ _RETIRED_DEBUG: set[str] = set()
 _FLAT_SECTION_SYNC: Dict[str, tuple[str, set[str]]] = {
     "ui": (DEFAULT_UI_TOML, _RETIRED_UI),
     "context": (DEFAULT_CONTEXT_TOML, _RETIRED_CONTEXT),
-    "subagents": (DEFAULT_SUBAGENTS_TOML, _RETIRED_SUBAGENTS),
     "debug": (DEFAULT_DEBUG_TOML, _RETIRED_DEBUG),
 }
 
@@ -540,12 +519,6 @@ class Config:
         self.context_max_depth: int = 4
         self.context_ignore_gitignore: bool = False
 
-        # Subagents.
-        self.subagent_max_depth: int = 1
-        self.subagent_server: Optional[str] = None
-        self.subagent_timeout: int = 120
-        self.subagent_max_context: Optional[int] = None
-
         # Style tables.
         self.markdown_styles: Dict[str, Dict[str, Any]] = {
             k: dict(v) for k, v in DEFAULT_MARKDOWN_STYLES.items()
@@ -576,7 +549,6 @@ class Config:
         self.load_errors = []
         _load_flat_file(self.section_file("ui"), _UI_SPEC, self, self.load_errors)
         _load_flat_file(self.section_file("context"), _CONTEXT_SPEC, self, self.load_errors)
-        _load_flat_file(self.section_file("subagents"), _SUBAGENT_SPEC, self, self.load_errors)
         _load_flat_file(self.section_file("debug"), _DEBUG_SPEC, self, self.load_errors)
         _load_styles_file(self.section_file("styles"), self, self.load_errors)
         _load_servers_file(self.section_file("servers"), self, self.load_errors)
@@ -740,7 +712,7 @@ def _read_toml(path: Path, errors: list[str]) -> Optional[dict]:
 
 def _load_flat_file(path: Path, spec: Dict[str, tuple[str, str]],
                     config: Config, errors: list[str]) -> None:
-    """Load a whole-file flat key/value section (ui/context/subagents/debug)."""
+    """Load a whole-file flat key/value section (ui/context/debug)."""
     data = _read_toml(path, errors)
     if data is None:
         return

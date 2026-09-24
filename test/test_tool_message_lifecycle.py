@@ -9,8 +9,8 @@ from pico_chat.ui.tui.msg_types import ToolCallMsg
 from pico_chat.ui.tui.colors import theme
 
 
-class _StubRunTool:
-    """Minimal RunTool-like wrapper exposing cancel_active_run()."""
+class _StubBashTool:
+    """Minimal bash-tool wrapper exposing cancel_active_run()."""
     def __init__(self, toolset):
         self.toolset = toolset
 
@@ -20,7 +20,7 @@ class _StubRunTool:
 
 def _tool(msg_type=None, status=None, finalized=False):
     msg = Message("", msg_type=msg_type or ToolCallMsg(), max_width=40)
-    msg.tool_name = "run"
+    msg.tool_name = "bash"
     msg.tool_args = '{"command": "ls"}'
     if status is not None:
         msg.tool_status = status
@@ -111,7 +111,7 @@ def test_tool_message_exposes_only_non_destructive_actions():
     assert all(a in (MsgAction.OUTPUT, MsgAction.COPY) for a in actions)
 
 
-def test_harness_stop_tool_kills_run(tmp_path):
+def test_harness_stop_tool_kills_bash(tmp_path):
     """Harness.stop_tool() terminates the active command."""
     import asyncio
     from pico_chat.harness.harness import Harness
@@ -119,8 +119,8 @@ def test_harness_stop_tool_kills_run(tmp_path):
 
     h = Harness.__new__(Harness)
     ts = MinimalToolset(tmp_path)
-    run_tool = _StubRunTool(ts)
-    h.tools_map = {"run_command": run_tool, "run": run_tool}
+    bash_tool = _StubBashTool(ts)
+    h.tools_map = {"bash": bash_tool}
 
     async def scenario():
         task = asyncio.create_task(ts.run_async("sleep 30"))
@@ -134,15 +134,14 @@ def test_harness_stop_tool_kills_run(tmp_path):
     asyncio.run(scenario())
 
 
-def test_run_tool_schema_name_is_run():
-    """The LLM-facing tool name is 'run' (not 'run_command')."""
-    from pico_chat.harness.tools import RunTool
-    from pico_chat.harness.tools import MinimalToolset
-    import tempfile, os
+def test_bash_tool_schema_name_is_bash():
+    """The LLM-facing tool name is 'bash'."""
+    from pico_chat.harness.tools import create_toolset
+    import tempfile
 
     tmp = tempfile.mkdtemp()
-    tool = RunTool(MinimalToolset(tmp))
-    assert tool.get_schema()["function"]["name"] == "run"
+    tool = create_toolset(tmp)["bash"]
+    assert tool.get_schema()["function"]["name"] == "bash"
 
 
 def test_dynamic_gutter_contextual():
@@ -150,7 +149,7 @@ def test_dynamic_gutter_contextual():
     from pico_chat.ui.tui.msg_types import AskPermissionMsg, ToolCallMsg
 
     ask = Message("", msg_type=AskPermissionMsg(), max_width=40)
-    ask.tool_name = "run"
+    ask.tool_name = "bash"
     assert ask.dynamic_gutter()[0] == "?"
 
     running = _tool(status="approved | executing", finalized=False)

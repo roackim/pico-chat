@@ -11,7 +11,6 @@ project-local config** and no trust model.
 |------|----------|-------|
 | `ui.toml` | theme, padding, metrics, fps | flat keys |
 | `context.toml` | context building | flat keys |
-| `subagents.toml` | subagent limits | flat keys |
 | `debug.toml` | debug logging | flat keys |
 | `styles.toml` | `[markdown_styles.*]` / `[syntax_highlight.*]` | tables |
 | `servers.toml` | one `[servers.<name>]` table per server | tables |
@@ -28,7 +27,7 @@ Missing files are created from fully commented templates
 `ensure_config_files()`. The built-in role files (`agent.toml`, `chat.toml`)
 are seeded by `roles.ensure_roles_dir()` on startup.
 
-Existing **flat** files (`ui`, `context`, `subagents`, `debug`) are kept in sync
+Existing **flat** files (`ui`, `context`, `debug`) are kept in sync
 with their templates: on startup (`pico_cfg.sync_config_files()` in `main()`) and
 when `/config <section>` opens one, `_sync_flat_file()` inserts the commented
 line for any spec key missing from the file (at its template-relative position)
@@ -44,7 +43,7 @@ tables and are never synced. See "Adding or deprecating a config key" in
 `Config` is a plain class with a flat attribute surface (`pico_cfg.config.<attr>`),
 instantiated once at module load as `config`. The split files map onto flat
 attributes via per-section specs (`_UI_SPEC`, `_CONTEXT_SPEC`,
-`_SUBAGENT_SPEC`, `_DEBUG_SPEC`); `styles.toml` and `servers.toml` are merged
+`_DEBUG_SPEC`); `styles.toml` and `servers.toml` are merged
 into the `markdown_styles` / `syntax_highlight_styles` / `servers` tables, and
 `themes.toml` into `config.themes`.
 
@@ -71,7 +70,7 @@ into the `markdown_styles` / `syntax_highlight_styles` / `servers` tables, and
 
 - `/config <section>` opens the section file in `$VISUAL`/`$EDITOR` and reloads
   on exit; no argument lists the sections. `section` is one of `ui`, `context`,
-  `subagents`, `debug`, `styles`, `servers`, `theme`.
+  `debug`, `styles`, `servers`, `theme`.
 - `/edit <path>` opens any file.
 - `/config role <name>` opens (creating if needed) `roles/<name>.toml`;
   `/config role delete <name> confirm` removes it.
@@ -117,10 +116,9 @@ stored one file per role under `roles/<name>.toml`. `PermissionGate`
 (catalog), `config.get_model_for_server(server)`,
 `config.get_active_server_config()`.
 
-**Context / subagents / ui:** `context_format`, `context_max_files`,
+**Context / ui:** `context_format`, `context_max_files`,
 `context_max_depth`, `context_ignore_gitignore`, `preserve_reasoning_traces`;
-`subagent_max_depth`, `subagent_server`, `subagent_timeout`,
-`subagent_max_context`; `ui_theme`, `ui_box_style`, `ui_show_metrics`,
+`ui_theme`, `ui_box_style`, `ui_show_metrics`,
 `ui_status_bar_fields`, `ui_max_input_height` (input box caps + scrolls past
 this many wrapped lines), `ui_stream_smoothing` / `ui_smooth_target_fps`
 (streamed-text reveal smoothing), `ui_spinner_fps` (braille spinner cadence,

@@ -9,7 +9,6 @@ from pico_chat.pico_cfg import Config
 SPEC_TEMPLATES = {
     "ui": (pico_cfg._UI_SPEC, pico_cfg.DEFAULT_UI_TOML),
     "context": (pico_cfg._CONTEXT_SPEC, pico_cfg.DEFAULT_CONTEXT_TOML),
-    "subagents": (pico_cfg._SUBAGENT_SPEC, pico_cfg.DEFAULT_SUBAGENTS_TOML),
     "debug": (pico_cfg._DEBUG_SPEC, pico_cfg.DEFAULT_DEBUG_TOML),
 }
 

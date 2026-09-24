@@ -33,7 +33,7 @@ def test_chat_stores_reasoning_verbatim_in_history(tmp_path, monkeypatch):
         "pico_chat.harness.harness.get_active_endpoint",
         return_value=Endpoint(name="test", type="llamacpp"),
     ):
-        harness = Harness(workspace_path=str(tmp_path), depth=0)
+        harness = Harness(workspace_path=str(tmp_path))
 
     async def fake_completion(messages, tools=None, stream=True):
         yield _chunk(reasoning="let me think")
@@ -77,7 +77,7 @@ def test_openrouter_streamed_reasoning_reaches_history(tmp_path, monkeypatch):
         "pico_chat.harness.harness.get_active_endpoint",
         return_value=Endpoint(name="test", type="openrouter"),
     ):
-        harness = Harness(workspace_path=str(tmp_path), depth=0)
+        harness = Harness(workspace_path=str(tmp_path))
 
     raw = [
         {"choices": [{"index": 0, "delta": {"reasoning": "OR THOUGHT"}, "finish_reason": None}]},

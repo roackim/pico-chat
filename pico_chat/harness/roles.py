@@ -50,12 +50,6 @@ def _all_tools_no() -> dict[str, str]:
     return {name: "no" for name in registered_tool_names()}
 
 
-def _with_tools(**values: str) -> dict[str, str]:
-    tools = _all_tools_no()
-    tools.update(values)
-    return tools
-
-
 def agent_role() -> Role:
     """The permissive built-in role: every tool auto-approved."""
     return Role(
@@ -73,20 +67,6 @@ def chat_role() -> Role:
         description="Pure chat (no tools)",
         prompt="",
         tools=_all_tools_no(),
-    )
-
-
-def scaffolder_role() -> Role:
-    """Read-only role used by subagents to explore without side effects."""
-    return Role(
-        name="scaffolder",
-        description="Read-only scaffolding subagent",
-        prompt="",
-        tools=_with_tools(
-            read="yes",
-            subagent="yes",
-            wait_for_subagents="yes",
-        ),
     )
 
 

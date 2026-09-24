@@ -1,6 +1,6 @@
 # Pico-Chat — Handoff
 
-**Branch:** `cleanup` · **Suite:** 457 passing · **Last updated:** 2026-09-23
+**Branch:** `cleanup` · **Suite:** 540 passing · **Last updated:** 2026-09-24
 **HEAD:** `caaa359 UI tweaks`
 **Recent commits (newest first):**
 `caaa359 UI tweaks` · `cc9fbf2 pruning` · `43d0ca7 Input completion unification`
@@ -9,7 +9,9 @@
 **Tree:** the command-interface / model-picker / menu work is in `caaa359`; a
 further polish batch (green `active` footer, picker anchored above the input,
 query-in-title, 1-space bar padding, input-field rules, message-prefix color) is
-**uncommitted** (partly staged, partly unstaged). Untracked scratch:
+**uncommitted** (partly staged, partly unstaged). The tool-definition rework
+(`read`/`write`/`edit`/`bash`; subagents removed — see §3) is also
+**uncommitted**. Untracked scratch:
 `old_HANDOFF.md`, `plans/cleanup_round2.md`, `test.json`. The user commits
 manually; **the assistant never stages or commits.**
 
@@ -56,7 +58,7 @@ No lint/typecheck beyond these. Keep the suite green and both guards passing.
 
 ### Config
 User-level only, split per concern under `~/.config/pico-chat/`: `ui.toml`,
-`context.toml`, `subagents.toml`, `debug.toml`, `styles.toml`, `servers.toml`,
+`context.toml`, `debug.toml`, `styles.toml`, `servers.toml`,
 `roles/<name>.toml`, disposable `state.toml`. `/config <section>` edits a file
 and reloads. `pico.toml` is gone. `pico_cfg.config` is a global loaded at import;
 `/reload` mutates it in place (no watchers).
@@ -158,6 +160,20 @@ forwarding, `xclip`) or an OSC 52-capable terminal.
 
 ## 3. Done recently
 
+- **Tool-definition rework (uncommitted):** the tool surface is now exactly
+  `read` / `write` / `edit` / `bash`. `patch`→`edit`, `run`+`run_command`→`bash`;
+  the registry `key=` aliasing and `permissions._TOOL_ALIASES` are gone (LLM name
+  == registry key). The legacy `patch_content` argument was deleted. `tools.py`
+  collapsed `_SyncTool`/`_AsyncTool`/`_AsyncCapableTool` into one `RegisteredTool`
+  whose async `execute()` prefers the async handler; `ToolContext` and the
+  `RunTool`/`SubagentTool`/`WaitForSubagentsTool` factories are gone, and
+  `create_toolset(workspace_path)` is the only factory.
+- **Subagents removed (uncommitted):** the `subagent` / `wait_for_subagents`
+  tools, `scaffolder_role()`, the child-`Harness` plumbing (`depth`/`role`
+  params, `_pending_subagents`, `_abort_subagents_event`, `abort_subagents()`,
+  `_auto_wait_subagents()`), and the whole `subagents` config section
+  (`subagents.toml`, `_SUBAGENT_SPEC`, defaults) are gone. `test_subagents.py`
+  deleted.
 - **Roles rework (W1–W4 of `plans/roles_rework.md`):** the permission engine is
   gone. A `Role` is now `description` + `prompt` + `tools: dict[str, str]`
   (`no`/`ask`/`yes`); `PermissionGate` maps the value to `deny`/`ask`/`allow`
@@ -165,8 +181,8 @@ forwarding, `xclip`) or an OSC 52-capable terminal.
   ~760 to ~100 lines (no `SecurityChecker`, no command lists, no profiles, no
   path confinement). `tools.py`/`harness.py` lost all policy plumbing.
   Built-ins `agent` (all `yes`) and `chat` (all `no`) are seeded as files by
-  `roles.ensure_roles_dir()`; `create_role` writes all tools `no`; `scaffolder`
-  stays code-only for subagents. Commands: `/role` (list/switch),
+  `roles.ensure_roles_dir()`; `create_role` writes all tools `no`. Commands:
+  `/role` (list/switch),
   `/config role <id>` and `/config role delete <id> confirm`; `/tools` deleted.
   Role files are validated by `roles.validate_roles()` (surfaced by `/reload`).
 - **System prompt is role-owned:** `harness/system_prompt.py` is deleted. The
@@ -264,6 +280,11 @@ Open improvements not yet requested but worth considering:
   Role files are top-level `<tool> = "…"` keys beside `description`/`prompt`.
   Built-in files are seeded on startup; `roles.validate_roles()` reports
   unknown tools / bad values. `/reload` runs it.
+- **Tool names are the registry keys** (`read`/`write`/`edit`/`bash`); the LLM
+  name always equals the key (no alias). Role files that still name `patch`,
+  `run_command`, `subagent` or `wait_for_subagents` fail validation — delete and
+  re-seed the built-ins (or hand-edit custom roles). `create_toolset(workspace)`
+  builds the map; `RegisteredTool.execute()` is async.
 - **Themes resolve at construction, not render.** After `set_theme()` you must
   call `chatTUI.refresh_theme()` (chrome + long-lived overlays `Popup`/
   `DebugPopup` + cached completion menus + `ChatHistoryPanel.refresh_theme()` /

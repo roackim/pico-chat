@@ -43,10 +43,10 @@ def test_disabled_tool_is_denied_before_permission_prompt():
 
 
 def test_gate_maps_ask_and_unknown_tools():
-    role = Role(name="mixed", tools={"run_command": "ask"})
+    role = Role(name="mixed", tools={"bash": "ask"})
     gate = PermissionGate(role=role)
 
-    assert gate.check("run", {"command": "ls"}) == "ask"
+    assert gate.check("bash", {"command": "ls"}) == "ask"
     assert gate.check("write", {}) == "deny"
 
 

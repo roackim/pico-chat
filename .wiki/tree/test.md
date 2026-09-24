@@ -22,7 +22,6 @@ All tests use pytest. Run with the project virtualenv (see HANDOFF §1):
 | `test_roles.py` | `roles.py` | Role model, files, seeding, validation |
 | `test_themes.py` | `commands/themes.py`, `colors.py` | Theme selection, picker, persistence |
 | `test_argument_completion.py` | `input/completion.py` | Selector style + descriptions for argument menus |
-| `test_subagents.py` | `tools.py`, `harness.py` | Depth limit, timeout, scaffolder role, abort |
 | `test_tool_cancel.py` | `tools.py` | `ShellTool`/`MinimalToolset` run/cancel/timeout |
 | `test_tool_message_lifecycle.py` | `tools.py`, `ui/chat_message.py` | Tool message states, `Harness.stop_tool` |
 | `test_tool_call_assembly.py` | `harness.py` | Streaming tool-call buffer assembly |

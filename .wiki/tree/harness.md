@@ -15,10 +15,7 @@ See [notes/architecture.md](../notes/architecture.md), [notes/tools-and-permissi
 - `chat(user_input)` — async generator; full agent turn (stream → handle tool calls)
 - `_stream_llm_response()` — delegates thinking-tag parsing to `ThinkingTagParser`
 - `_execute_tool_calls()` — delegates permission checking to `PermissionGate`
-- `_auto_wait_subagents()` — awaits pending background subagents after the main loop ends (no events)
-Key state: `AgentState` enum, message history list, active endpoint, active role, `_pending_subagents` list, `_abort_subagents_event`, and thinking steering state (`_current_reasoning`, `_pending_thinking_prefill`, `_last_detected_thinking_tag`).
-Subagents: instantiated with `depth > 0`; use the `scaffolder` built-in role automatically.
-See [notes/subagents.md](../notes/subagents.md) for the full subagent lifecycle.
+Key state: `AgentState` enum, message history list, active endpoint, active role, and thinking steering state (`_current_reasoning`, `_pending_thinking_prefill`, `_last_detected_thinking_tag`).
 
 ### `permissions.py`
 The single "may I run this?" decision point, and nothing more.
@@ -82,8 +79,8 @@ usage counters into provider-neutral prompt/completion/total token data.
 
 ### `tools.py`
 Low-level tool implementations plus the tool registry.
-- `MinimalToolset` — binds `FileTools` + `ShellTool` (`read`/`write`/`patch`/`run`).
-- `FileTools` (+ write/patch), `ShellTool` (`run_command`, cancellable async path).
+- `MinimalToolset` — binds `FileTools` + `ShellTool` (`read`/`write`/`edit`/`bash`).
+- `FileTools` (read/write/edit), `ShellTool` (`bash`, cancellable async path).
 - `ToolError` — raised by tool functions on failure.
 
 `FileTools.read()` supports optional 0-based offset + line limit, character
@@ -92,21 +89,13 @@ limits with an explicit truncation marker, and source line-number prefixes.
 **Tool registry** — each tool is declared once with the `@tool` decorator,
 which carries its name, LLM-facing schema and handler. There is no separate
 `tool_wrappers.py`.
-- `ToolDefinition` / `ToolContext` / `RegisteredTool` — registry records and
-	bound instances. `get_schema()` returns the OpenAI function schema;
-	`execute()` / `execute_async()` dispatch to the handler.
+- `ToolDefinition` / `RegisteredTool` — registry record and bound instance.
+	`get_schema()` returns the OpenAI function schema; `RegisteredTool.execute()`
+	is async and prefers the tool's async handler when present.
 - `registered_tool_names()` — the list of registry keys, used to generate role
 	files.
-- `create_toolset(workspace_path, depth, pending_subagents)` — factory that
-	binds registered tools to a context. Registers: `read`, `write`, `patch`,
-	`run_command` (LLM name `run`), `subagent` (depth-permitting),
-	`wait_for_subagents`.
-- Public factories `RunTool`, `SubagentTool`, `WaitForSubagentsTool` remain
-	for direct construction/tests.
-
-The `subagent` tool spawns a read-only child `Harness` (foreground or
-background) and enforces depth/timeout/context limits; `wait_for_subagents`
-gathers and clears the pending queue.
+- `create_toolset(workspace_path)` — factory that binds the registered tools to
+	one `MinimalToolset`. Registers: `read`, `write`, `edit`, `bash`.
 
 See [notes/tools-and-permissions.md](../notes/tools-and-permissions.md).
 
@@ -116,7 +105,6 @@ See [notes/tools-and-permissions.md](../notes/tools-and-permissions.md).
 tool to exactly one of `no` / `ask` / `yes`. There is no permission engine.
 - Built-in roles `agent` (all tools `yes`) and `chat` (all tools `no`) are
 	seeded as files by `ensure_roles_dir()`; a code fallback exists for both.
-	The read-only `scaffolder` role is used by subagents and is not selectable.
 - `create_role(name)` writes a template listing every registered tool with
 	value `no` (all disabled); `delete_role(name)` unlinks, refusing to remove
 	the last role. `load_role` / `list_roles` read one file per role at

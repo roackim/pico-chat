@@ -91,7 +91,7 @@ class TestPendingPermissionPromptClearing:
 
         denied = events.ToolResult(
             id="call_1",
-            name="run",
+            name="bash",
             outcome="denied",
             output="Auto-denied by security policy",
         )
@@ -131,7 +131,7 @@ class TestPendingPermissionPromptClearing:
 
         denied = events.ToolResult(
             id="call_3",
-            name="run",
+            name="bash",
             outcome="denied",
             output="Auto-denied by security policy",
         )

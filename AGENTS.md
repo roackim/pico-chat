@@ -14,7 +14,7 @@ Never commit or `git add` unless asked.
 
 ## Adding or deprecating a config key
 
-Flat section files (`ui`, `context`, `subagents`, `debug`) are kept in sync with
+Flat section files (`ui`, `context`, `debug`) are kept in sync with
 their templates on startup (and when `/config <section>` opens them):
 
 - `pico_cfg.sync_config_files()` runs in `main()`; it inserts the commented
